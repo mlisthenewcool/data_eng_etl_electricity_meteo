@@ -1,0 +1,72 @@
+[project]
+name = "data-eng-etl-electricity-meteo"
+version = "2026.02.10"
+description = "Projet personnel d'ingénierie des données (data engineering)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "duckdb>=1.4.4",
+    "httpx[http2]>=0.28.1",
+    "loguru>=0.7.3",
+    "polars>=1.38.1",
+    "prek>=0.3.2",
+    "py7zr>=1.1.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyyaml>=6.0.3",
+    "tqdm>=4.67.3",
+]
+
+[dependency-groups]
+dev = [
+    "apache-airflow-task-sdk>=1.1.7",
+    "marimo>=0.19.9",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.0",
+    "ty>=0.0.16",
+]
+
+
+[tool.ruff]
+line-length = 100
+include = [
+    "src/**/*.py",
+    "tests/**/*.py"
+]
+#src = ["src", "test"]
+#extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = [
+    "I", "E", "W", "F", "PL", "D", "NPY"
+]
+ignore = ["D100","D101","D103", "D107"]
+#fixable = ["ALL"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ty.src]
+include = ["src", "tests"]
+#exclude = ["notebooks"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing --cov-report=html:tests/htmlcov"
+pythonpath = ["src"]
+#testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true # check if all branches of if/else statement are used
+data_file = "tests/.coverage"
+#source = ["data_eng_etl_electricity_meteo"]
+
+[tool.coverage.report]
+#fail_under = 90
+show_missing = true
+exclude_also = [
+    'if __name__ == .__main__.:'
+]
+
+[tool.marimo.runtime]
+pythonpath = ["src"] # required to use absolute imports inside notebooks
