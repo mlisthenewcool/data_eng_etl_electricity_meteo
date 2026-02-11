@@ -1,0 +1,96 @@
+# --- Notes
+# PostgreSQL 17 is the latest supported version by Airflow.
+
+services:
+  postgres_service:
+    container_name: postgres_container
+    image: postgres:17
+    restart: always
+    shm_size: 256mb # Shared memory increase for heavy PostgreSQL operations
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro # init scripts are executed only on empty volume
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_root_password
+      POSTGRES_USER_FILE: /run/secrets/postgres_root_username
+      POSTGRES_DB: "${AIRFLOW_DB_NAME}"
+      PROJECT_DB_NAME: "${PROJECT_DB_NAME}" # used by custom init script (postgres/init/...)
+    healthcheck:
+      # Check both databases are ready
+      test: [ "CMD-SHELL", "USER=$$(cat /run/secrets/postgres_root_username); pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} && pg_isready -U $$USER -d ${PROJECT_DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    secrets:
+      - postgres_root_password
+      - postgres_root_username
+
+  airflow_service:
+    container_name: airflow_container
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+      args:
+        # https://airflow.apache.org/docs/docker-stack/build-arg-ref.html
+        AIRFLOW_USE_UV: True
+        INSTALL_MYSQL_CLIENT: False
+        INSTALL_MSSQL_CLIENT: False
+    restart: always
+    depends_on:
+      postgres_service:
+        condition: service_healthy
+    environment:
+      # Config contextuelle qui peut varier selon l'environnement (logging, connexions, secrets, feature flags dev/prod)
+
+      # Airflow root logger level (scheduler, webserver, executor internals)
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "${LOGGING_LEVEL}"
+      AIRFLOW__LOGGING__LOG_FORMAT: "[ %(asctime)s UTC ] %(levelname)-8s - %(message)s"
+
+      # TODO: comment les configurer ? à quoi servent-elles ?
+      AIRFLOW__LOGGING__TASK_LOG_PREFIX_TEMPLATE: "--- TASK_LOG_PREFIX_TEMPLATE ---"
+      AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "[ %(asctime)s UTC ] %(levelname)-8s - [simple] %(message)s"
+
+      # AIRFLOW__LOGGING__TASK_LOG_READER: "??"
+      # AIRFLOW__LOGGING__LOG_FORMATTER_CLASS: "??"
+      # AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS: "??"
+
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}/${AIRFLOW_DB_NAME}'"
+      AIRFLOW__API__SECRET_KEY_CMD: "bash -c 'cat /run/secrets/airflow_api_secret_key'"
+      AIRFLOW__API_AUTH__JWT_ISSUER: "http://airflow-standalone"
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # TODO: modifier les bind volumes pour la mise en production
+    volumes:
+      - ./src/data_eng_etl_electricity_meteo/airflow/dags:/opt/airflow/dags # TODO: AIRFLOW__CORE__DAGS_FOLDER
+      - ./src:/opt/airflow/src:ro
+      - ./data:/opt/airflow/data # TODO: remplacer par airflow_data:/opt/airflow/data en prod + dans volumes en bas
+      - ./postgres:/opt/airflow/postgres # we need this to execute Postgres' ingestion queries through Airflow
+    healthcheck:
+      # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8080/api/v2/monitor/health || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: standalone
+    secrets:
+      - postgres_root_password
+      - postgres_root_username
+      - airflow_api_secret_key
+
+secrets:
+  postgres_root_password:
+    file: secrets/postgres_root_password.txt
+  postgres_root_username:
+    file: secrets/postgres_root_username.txt
+  airflow_api_secret_key:
+    file: secrets/airflow_api_secret_key.txt
+
+volumes:
+  postgres_data:
+  # airflow_data: # TODO: ajouter en prod
