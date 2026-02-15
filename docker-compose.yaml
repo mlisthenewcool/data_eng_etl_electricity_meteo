@@ -45,17 +45,31 @@ services:
     environment:
       # Config contextuelle qui peut varier selon l'environnement (logging, connexions, secrets, feature flags dev/prod)
 
+      # Variables applicatives (lues par pydantic-settings dans le container)
+      LOGGING_LEVEL: "${LOGGING_LEVEL}"
+      LOGGER_NAME: "${LOGGER_NAME}"
+
       # Airflow root logger level (scheduler, webserver, executor internals)
       AIRFLOW__LOGGING__LOGGING_LEVEL: "${LOGGING_LEVEL}"
-      AIRFLOW__LOGGING__LOG_FORMAT: "[ %(asctime)s UTC ] %(levelname)-8s - %(message)s"
 
-      # TODO: comment les configurer ? à quoi servent-elles ?
-      AIRFLOW__LOGGING__TASK_LOG_PREFIX_TEMPLATE: "--- TASK_LOG_PREFIX_TEMPLATE ---"
-      AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "[ %(asctime)s UTC ] %(levelname)-8s - [simple] %(message)s"
+      # Format de chaque ligne de log. Le timestamp (ISO 8601) et le level sont
+      # fournis par Airflow via structlog ; les loggers applicatifs ne doivent
+      # émettre que le message brut pour éviter les doublons.
+      # Note Airflow 3 : le format de date est hardcodé en ISO 8601 dans le
+      # ProcessorFormatter de structlog (MaybeTimeStamper(fmt="iso")).
+      AIRFLOW__LOGGING__LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
 
-      # AIRFLOW__LOGGING__TASK_LOG_READER: "??"
-      # AIRFLOW__LOGGING__LOG_FORMATTER_CLASS: "??"
-      # AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS: "??"
+      # Format simplifié utilisé par le CLI Airflow et certains scripts utilitaires.
+      AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
+
+      # --- Variables de logging documentées (non utilisées) ---
+      # LOG_FORMATTER_CLASS     : dead config dans Airflow 3 — remplacé par structlog ProcessorFormatter.
+      # TASK_LOG_PREFIX_TEMPLATE : template Jinja en préfixe de chaque tentative de task dans le webserver.
+      #   Le défaut Airflow suffit.
+      # TASK_LOG_READER         : classe qui lit les logs dans le webserver (défaut: "task").
+      #   À changer uniquement pour du remote logging (S3, GCS…).
+      # LOGGING_CONFIG_CLASS    : dict Python remplaçant DEFAULT_LOGGING_CONFIG.
+      #   Dans Airflow 3, les formatters/handlers sont écrasés par structlog — utilité limitée.
 
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}/${AIRFLOW_DB_NAME}'"
       AIRFLOW__API__SECRET_KEY_CMD: "bash -c 'cat /run/secrets/airflow_api_secret_key'"

@@ -1,17 +1,8 @@
 from airflow import XComArg
 from airflow.sdk import DAG, Asset, dag, task
-from pydantic import BaseModel
 
 from data_eng_etl_electricity_meteo.airflow.assets import ASSETS
-from data_eng_etl_electricity_meteo.main_structlog import multi_loggers, test_output
-
-
-class X(BaseModel):
-    x: float
-    y: float
-
-
-_x = X(x=1, y=2)
+from data_eng_etl_electricity_meteo.core.logger import logger
 
 
 def _create_dag(asset: Asset) -> DAG:
@@ -20,21 +11,30 @@ def _create_dag(asset: Asset) -> DAG:
     )
     def _dag() -> None:
         @task(outlets=[asset])
-        def console_logger_task() -> XComArg:
-            console_loger, _ = multi_loggers()
-            test_output(console_loger)
+        def airflow_logger_task() -> XComArg:
+            from pydantic import BaseModel  # noqa: PLC0415
+
+            class X(BaseModel):
+                x: float
+                y: float
+
+            _x = X(x=1, y=2)
+
+            logger.debug("debug text", extra_data={"k": 3}, x=_x)
+            logger.info("info text", extra_data={"k": 3}, x=_x)
+            logger.warning("warning text", extra_data={"k": 3}, x=_x)
+            logger.error("error text", extra_data={"k": 3}, x=_x)
+            logger.critical("critical text", extra_data={"k": 3}, x=_x)
+
+            logger.exception("exception text (without)", extra_data={"k": 3}, x=_x)
+            try:
+                _ = 1 / 0
+            except ZeroDivisionError:
+                logger.exception("exception text (with)", extra_data={"k": 3}, x=_x)
 
             return _x.model_dump(mode="json")
 
-        @task
-        def json_logger_task() -> XComArg:
-            _, json_logger = multi_loggers()
-            test_output(json_logger)
-
-            return _x.model_dump(mode="json")
-
-        console_logger_task()
-        json_logger_task()
+        airflow_logger_task()
 
     return _dag()
 

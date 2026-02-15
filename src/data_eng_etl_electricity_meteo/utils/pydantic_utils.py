@@ -1,10 +1,4 @@
-"""Validation error formatting utilities for Pydantic models.
-
-This module provides helpers to translate complex Pydantic validation
-tracebacks into flattened, human-readable formats suitable for logging.
-
-Base Pydantic model with strict schema enforcement.
-"""
+"""Base configuration for strict data models and error reporting utilities."""
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -21,10 +15,14 @@ def format_pydantic_errors(pydantic_errors: ValidationError) -> dict[str, str]:
     This utility function transforms Pydantic's error format into a simpler
     dict for logging and error messages.
 
-    Args:
-        pydantic_errors: The exception raised by a Pydantic model during failed validation.
+    Parameters
+    ----------
+    pydantic_errors:
+        The exception raised by a Pydantic model during failed validation.
 
-    Returns:
+    Returns
+    -------
+    dict[str, str]
         Dictionary mapping error location (dot-separated path) to error message.
     """
     return {

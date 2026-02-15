@@ -1,10 +1,21 @@
 """Centralized application settings (Pydantic). Override via environment variables."""
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import DirectoryPath, Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class LogLevel(StrEnum):
+    """Standard logging levels."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
 
 
 class Settings(BaseSettings):
@@ -13,9 +24,7 @@ class Settings(BaseSettings):
     # =========================================================================
     # General config
     # =========================================================================
-    logging_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO", description="The logger verbosity level"
-    )
+    logging_level: LogLevel = Field(default=LogLevel.INFO, description="The logger verbosity level")
 
     logger_name: str = Field(default="DEFAULT_LOGGER", description="The logger name displayed")
 
@@ -46,26 +55,28 @@ class Settings(BaseSettings):
         #   remplacer par les env vars AIRFLOW_CONFIG ou AIRFLOW_HOME par exemple
         return (self.airflow_home / "airflow.cfg").exists()
 
-    @computed_field
-    @property
-    def is_running_in_notebook(self) -> bool:
-        """Detect if running inside an active Marimo notebook.
-
-        This property is evaluated at each call (not cached) to ensure it correctly
-        detects the runtime state after kernel initialization.
-
-        Returns:
-            True if running in Marimo (edit/run mode).
-            False otherwise (terminal, script, tests).
-        """
-        try:
-            import marimo as mo  # noqa: PLC0415
-
-            if mo.running_in_notebook():
-                return True
-        except ImportError:
-            return False
-        return False
+    # @computed_field
+    # @property
+    # def is_running_in_notebook(self) -> bool:
+    #     """Detect if running inside an active Marimo notebook.
+    #
+    #     This property is evaluated at each call (not cached) to ensure it correctly
+    #     detects the runtime state after kernel initialization.
+    #
+    #     Returns
+    #     -------
+    #     bool
+    #         True if running in Marimo (edit/run mode).
+    #         False otherwise (terminal, script, tests).
+    #     """
+    #     try:
+    #         import marimo as mo  # noqa: PLC0415
+    #
+    #         if mo.running_in_notebook():
+    #             return True
+    #     except ImportError:
+    #         return False
+    #     return False
 
     # =========================================================================
     # Paths (computed from root_dir, not configurable via env)
@@ -175,4 +186,4 @@ class Settings(BaseSettings):
 # Singleton instance
 settings = Settings()
 
-__all__ = ["settings"]
+__all__ = ["settings", "LogLevel"]

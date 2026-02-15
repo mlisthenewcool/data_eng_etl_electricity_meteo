@@ -1,24 +1,15 @@
-"""Data catalog configuration for managing dataset sources and ingestion policies.
+"""Declarative YAML-based configuration for dataset sources and ingestion.
 
-This module provides a declarative, YAML-based catalog system for defining:
-- Where to fetch data (source URLs, formats, providers)
-- When to fetch data (ingestion frequency, mode)
-- How data is versioned (frequency-based: daily, hourly, etc.)
+Architecture
+------------
 
-The catalog is validated using Pydantic models, ensuring type safety and catching
-configuration errors at load time rather than runtime.
+DataCatalog
+    └── datasets: dict[str, DatasetConfig]
+        ├── name (auto-injected from YAML key)
+        ├── source: SourceConfig (remote HTTP or derived Gold)
+        └── ingestion: IngestionPolicy (frequency, mode)
 
-Architecture:
-    DataCatalog
-        └── datasets: dict[str, Dataset]
-            ├── name: str (auto-injected from YAML key)
-            ├── description: str
-            ├── source: Source (provider, URL, format, inner_file)
-            └── ingestion: IngestionPolicy (frequency, mode)
-
-Note:
-    Path resolution is handled by PathResolver, not Dataset directly.
-    See path_resolver.py for medallion architecture path management.
+Path resolution is handled by ``PathResolver``, see ``path_resolver.py``.
 """
 
 from datetime import datetime
@@ -42,13 +33,7 @@ from data_eng_etl_electricity_meteo.utils.pydantic_utils import StrictModel, for
 
 
 class SourceFormat(StrEnum):
-    """Supported source file formats for dataset ingestion.
-
-    Attributes:
-        SEVEN_Z: 7-Zip compressed archive format
-        PARQUET: Apache Parquet columnar storage format
-        JSON: JSON data interchange format
-    """
+    """Supported source file formats (``7z``, ``parquet``, ``json``)."""
 
     SEVEN_Z = "7z"
     PARQUET = "parquet"
@@ -61,40 +46,18 @@ class SourceFormat(StrEnum):
 
 
 class IngestionFrequency(StrEnum):
-    """Expected data update frequency from the source provider.
+    """Data update frequency, coupled with its Airflow schedule expression.
 
-    This enum defines how often the data source is expected to publish
-    new data, which influences the Airflow scheduling strategy.
+    Each member stores ``(value, airflow_schedule)`` so that adding a new
+    frequency always requires defining its schedule.
 
-    Each enum member combines two pieces of information:
-    - The frequency value (e.g., "hourly", "daily") used in YAML configs
-    - The corresponding Airflow schedule expression (e.g., "@hourly", "@daily")
-
-    This design ensures that adding a new frequency automatically includes
-    its Airflow schedule, preventing inconsistencies between the two.
-
-    Attributes:
-        HOURLY: Data updated every hour (Airflow: @hourly)
-        DAILY: Data updated daily (Airflow: @daily)
-        WEEKLY: Data updated weekly (Airflow: @weekly)
-        MONTHLY: Data updated monthly (Airflow: @monthly)
-        YEARLY: Data updated yearly (Airflow: @yearly)
-        NEVER: Never automatically update (Airflow: None)
-
-    Implementation Note:
-        This enum uses a custom __new__ method to store both the string value
-        and the Airflow schedule as instance attributes. This pattern ensures
-        strong coupling between frequencies and their schedules, making it
-        impossible to forget to define a schedule when adding a new frequency.
-
-    Example:
-        >>> freq = IngestionFrequency.DAILY
-        >>> print(freq)  # String value
-        'daily'
-        >>> print(freq.airflow_schedule)  # Airflow schedule
-        '@daily'
-        >>> print(freq.value)  # Also accessible via .value
-        'daily'
+    Examples
+    --------
+    >>> freq = IngestionFrequency.DAILY
+    >>> freq.value
+    'daily'
+    >>> freq.airflow_schedule
+    '@daily'
     """
 
     # Each member is defined as (value, airflow_schedule)
@@ -107,24 +70,7 @@ class IngestionFrequency(StrEnum):
     NEVER = ("never", None)
 
     def __new__(cls, value: str, airflow_schedule: str | None):
-        """Create enum member with both value and Airflow schedule.
-
-        This custom __new__ method allows each enum member to store two
-        pieces of information: the string value (used in configs) and the
-        corresponding Airflow schedule expression.
-
-        Args:
-            value: Frequency string value (e.g., "hourly", "daily")
-            airflow_schedule: Airflow cron preset (e.g., "@hourly") or None
-
-        Returns:
-            Enum member with both value and schedule attributes.
-
-        Note:
-            This pattern is the recommended way to add extra data to enum
-            members in Python. The str.__new__ call ensures StrEnum behavior
-            is preserved (enum members behave like strings).
-        """
+        """Create enum member storing *value* and *airflow_schedule*."""
         obj = str.__new__(cls, value)
         obj._value_ = value
         # Store schedule in private attribute (dynamic attribute on enum)
@@ -133,47 +79,30 @@ class IngestionFrequency(StrEnum):
 
     @property
     def airflow_schedule(self) -> str | None:
-        """Get the Airflow schedule expression for this frequency.
-
-        Returns:
-            Airflow cron preset string (e.g., "@daily") or None if frequency
-            is 'never'. This value is stored at enum member creation time.
-
-        Example:
-            >>> IngestionFrequency.DAILY.airflow_schedule
-            '@daily'
-            >>> IngestionFrequency.NEVER.airflow_schedule
-            None
-        """
+        """Airflow cron preset (e.g. ``@daily``) or ``None`` for ``NEVER``."""
         # Use getattr to satisfy type checkers (attribute set dynamically in __new__)
         return getattr(self, "_airflow_schedule", None)
 
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
-        """Get Airflow template variable based on ingestion frequency.
+        """Return the Airflow Jinja template for versioning.
 
-        Returns {{ ts_nodash }} for hourly datasets, {{ ds_nodash }} otherwise.
-        This is used to pass the correct template to tasks.
+        Hourly -> ``{{ ts }}`` / ``{{ ts_nodash }}``,
+        otherwise -> ``{{ ds }}`` / ``{{ ds_nodash }}``.
 
-        Args:
-            no_dash: If True, return nodash version ({{ ds_nodash }} or {{ ts_nodash }}).
-                     If False, return version with separators ({{ ds }} or {{ ts }}).
-                     Default: False.
+        Parameters
+        ----------
+        no_dash : bool
+            If ``True``, return the ``_nodash`` variant.
 
-        Returns:
-            Airflow template string that will be replaced at runtime.
-            - Hourly: "{{ ts_nodash }}" (20260121T143022) or "{{ ts }}" (2026-01-21T14:30:22)
-            - Others: "{{ ds_nodash }}" (20260121) or "{{ ds }}" (2026-01-21)
+        Returns
+        -------
+        str
+            Airflow template string resolved at runtime.
 
-        Raises:
-            Exception: If not running on Airflow (check settings.is_running_on_airflow)
-
-        Example:
-            >>> freq = IngestionFrequency.DAILY
-            >>> freq.get_airflow_version_template(no_dash=True)
-            '{{ ds_nodash }}'  # For daily/weekly/monthly datasets
-            >>> freq = IngestionFrequency.HOURLY
-            >>> freq.get_airflow_version_template(no_dash=True)
-            '{{ ts_nodash }}'  # For hourly datasets
+        Raises
+        ------
+        Exception
+            If not running inside Airflow.
         """
         if not settings.is_running_on_airflow:
             # raise AirflowContextError(
@@ -182,7 +111,7 @@ class IngestionFrequency(StrEnum):
             #     actual_context="not airflow",
             #     suggestion="use `format_datetime_as_version` instead",
             # )
-            pass
+            raise Exception("Not running on Airflow (check settings.is_running_on_airflow)")
 
         if self == IngestionFrequency.HOURLY:
             # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}" ou "{{ ts_nodash[:11] }}"
@@ -191,36 +120,20 @@ class IngestionFrequency(StrEnum):
         return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
 
     def format_datetime_as_version(self, dt: datetime, no_dash: bool = False) -> str:
-        """Format datetime as version string matching Airflow template format.
+        """Format *dt* as a version string (non-Airflow contexts).
 
-        This method generates a version string from a datetime object that matches
-        the format Airflow would produce from its template variables.
-        Use this in non-Airflow contexts (scripts, notebooks, tests).
+        Parameters
+        ----------
+        dt : datetime
+            Datetime to format.
+        no_dash : bool
+            If ``True``, return compact format without separators.
 
-        Args:
-            dt: Datetime to format as version string
-            no_dash: If True, return compact format without separators.
-                     If False, return format with dashes/colons.
-                     Default: False.
-
-        Returns:
-            Version string formatted according to frequency:
-            - Hourly (no_dash=True): "20260121T143022" (YYYYMMDDTHHmmss)
-            - Hourly (no_dash=False): "2026-01-21-T-14-30-22"
-            - Daily/Weekly/Monthly/Yearly/Never (no_dash=True): "20260121" (YYYYMMDD)
-            - Daily/Weekly/Monthly/Yearly/Never (no_dash=False): "2026-01-21" (YYYY-MM-DD)
-
-        Raises:
-            Exception: If running on Airflow (should use get_airflow_version_template instead)
-
-        Example:
-            >>> from datetime import datetime
-            >>> freq = IngestionFrequency.DAILY
-            >>> freq.format_datetime_as_version(datetime(2026, 1, 21), no_dash=True)
-            '20260121'
-            >>> freq = IngestionFrequency.HOURLY
-            >>> freq.format_datetime_as_version(datetime(2026, 1, 21, 14, 30, 22), no_dash=True)
-            '20260121T143022'
+        Returns
+        -------
+        str
+            Hourly: ``%Y%m%dT%H%M%S`` / ``%Y-%m-%d-T-%H-%M-%S``.
+            Others: ``%Y%m%d`` / ``%Y-%m-%d``.
         """
         if settings.is_running_on_airflow:
             # raise AirflowContextError(
@@ -239,52 +152,23 @@ class IngestionFrequency(StrEnum):
 
 
 class SourceConfig(StrictModel):
-    """Configuration for dataset sources - either remote (HTTP) or derived (Gold layer).
+    """Dataset source configuration -- remote (HTTP) **or** derived (Gold).
 
-    This model handles both remote and derived sources with mutual exclusivity validation.
-    A source is either:
-    - Remote: fetched via HTTP (requires provider, url, format)
-    - Derived: built from Silver datasets (requires depends_on)
+    Mutually exclusive: must have either ``(url, provider, format)``
+    or ``depends_on``, never both.
 
-    Attributes:
-        provider: Data provider name (e.g., "IGN", "ODRE") - for remote sources only
-        url: HTTP(S) URL to download the source file - for remote sources only
-        format: Source file format (7z, parquet, JSON) - for remote sources only
-        inner_file: For archive formats only - target file to extract - for remote sources only
-        depends_on: List of Silver dataset names - for derived sources only
-
-    Validation Rules:
-        - Must have EITHER (url + provider + format) OR depends_on, not both
-        - Archive formats (7z) MUST specify inner_file
-        - Non-archive formats MUST NOT specify inner_file
-        - depends_on must not be empty if specified
-
-    Example:
-        Remote source (archive):
-
-        >>> data = {
-        ...     "provider": "IGN",
-        ...     "url": "https://data.ign.fr/contours.7z",
-        ...     "format": "7z",
-        ...     "inner_file": "iris.gpkg"
-        ... }
-        >>> source = SourceConfig.model_validate(data)
-
-        Remote source (direct):
-
-        >>> data = {
-        ...     "provider": "ODRE",
-        ...     "url": "https://data.odre.fr/installations.parquet",
-        ...     "format": "parquet"
-        ... }
-        >>> source = SourceConfig.model_validate(data)
-
-        Derived source:
-
-        >>> data = {
-        ...     "depends_on": ["odre_installations", "ign_contours_iris"]
-        ... }
-        >>> source = SourceConfig.model_validate(data)
+    Attributes
+    ----------
+    provider : str | None
+        Data provider name (remote only, e.g. ``"IGN"``).
+    url : HttpUrl | None
+        Download URL (remote only).
+    format : SourceFormat | None
+        File format (remote only).
+    inner_file : str | None
+        File to extract from archive (required iff ``format.is_archive``).
+    depends_on : list[str] | None
+        Silver dataset names (derived only).
     """
 
     # Remote source fields
@@ -298,15 +182,7 @@ class SourceConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_source_consistency(self) -> Self:
-        """Validate that fields are consistent with source type (remote vs derived).
-
-        Returns:
-            Self instance if validation passes.
-
-        Raises:
-            ValueError: If fields don't match remote or derived patterns,
-                       or if both patterns are present.
-        """
+        """Ensure remote / derived fields are mutually exclusive and complete."""
         has_remote = self.url is not None
         has_derived = self.depends_on is not None
 
@@ -347,27 +223,22 @@ class SourceConfig(StrictModel):
 
     @property
     def is_remote(self) -> bool:
-        """Check if this is a remote source (HTTP download)."""
+        """``True`` if remote source (has ``url``)."""
         return self.url is not None
 
     @property
     def is_derived(self) -> bool:
-        """Check if this is a derived source (Gold layer)."""
+        """``True`` if derived source (has ``depends_on``)."""
         return self.depends_on is not None
 
     @property
     def url_as_str(self) -> str:
-        """Convert HttpUrl to string for compatibility with download functions.
+        """Return ``url`` as ``str``.
 
-        Returns:
-            String representation of the URL.
-
-        Raises:
-            ValueError: If called on a derived source (url is None).
-
-        Example:
-            >>> source.url_as_str # noqa
-            'https://data.ign.fr/file.7z'
+        Raises
+        ------
+        ValueError
+            If called on a derived source.
         """
         if self.url is None:
             raise ValueError("url_as_str called on derived source (url is None)")
@@ -375,49 +246,21 @@ class SourceConfig(StrictModel):
 
 
 class IngestionMode(StrEnum):
-    """Data ingestion mode defining how updates are processed.
-
-    Attributes:
-        SNAPSHOT: Full dataset replacement on each ingestion
-        INCREMENTAL: Only new/changed records are ingested (requires incremental_key)
-
-    Note:
-        Incremental mode is not yet fully implemented. The incremental_key
-        field will be added in a future version.
-    """
+    """Ingestion mode (``snapshot`` or ``incremental``)."""
 
     SNAPSHOT = "snapshot"
     INCREMENTAL = "incremental"
 
 
 class IngestionPolicy(StrictModel):
-    """Data ingestion configuration defining frequency and mode.
+    """Ingestion frequency and mode for a dataset.
 
-    This model controls when and how data should be fetched from the source.
-    Versioning is handled dynamically based on frequency (daily, hourly, etc.)
-    via IngestionFrequency.format_datetime_as_version() or Airflow templates.
-
-    Attributes:
-        frequency: Expected update frequency from the source (e.g., daily, hourly).
-                   Determines version format: daily → "YYYYMMDD", hourly → "YYYYMMDDTHHMMSS"
-        mode: IngestionPolicy mode (snapshot or incremental)
-
-    Example:
-        >>> ingestion = IngestionPolicy(
-        ...     frequency=IngestionFrequency.MONTHLY,
-        ...     mode=IngestionMode.SNAPSHOT
-        ... )
-        >>>
-        >>> # Version generation (outside Airflow)
-        >>> from datetime import datetime
-        >>> version = ingestion.frequency.format_datetime_as_version(
-        ...     datetime.now(), no_dash=True
-        ... )
-        >>> print(version)  # "20260121" for monthly/daily
-
-    Note:
-        Future versions will add incremental_key field for incremental mode,
-        with validation requiring it when mode=INCREMENTAL.
+    Attributes
+    ----------
+    frequency : IngestionFrequency
+        Update frequency (also determines version format).
+    mode : IngestionMode
+        Snapshot or incremental.
     """
 
     frequency: IngestionFrequency
@@ -426,46 +269,18 @@ class IngestionPolicy(StrictModel):
 
 
 class DatasetConfig(StrictModel):
-    """Configuration for a dataset - either remote (HTTP) or derived (Gold layer).
+    """Single dataset entry -- remote (HTTP) or derived (Gold).
 
-    This model handles both remote and derived datasets with automatic type detection
-    based on source configuration. The dataset type is determined by the source fields:
-    - Remote: source has url/provider/format (and optional ingestion)
-    - Derived: source has depends_on (no ingestion)
-
-    Attributes:
-        name: Dataset identifier (e.g., "ign_contours_iris", "installations_meteo")
-        description: Human-readable dataset description
-        source: Source configuration (remote or derived)
-        ingestion: Ingestion policy (frequency, mode) - required for remote, forbidden for derived
-
-    Example:
-        Remote dataset:
-
-        >>> dataset = DatasetConfig(
-        ...     name="ign_contours_iris",
-        ...     description="IGN administrative boundaries",
-        ...     source=SourceConfig(
-        ...         provider="IGN",
-        ...         url="https://data.geopf.fr/...",
-        ...         format="7z",
-        ...         inner_file="iris.gpkg"
-        ...     ),
-        ...     ingestion=IngestionPolicy(
-        ...         frequency="daily",
-        ...         mode="snapshot"
-        ...     ),
-        ... )
-
-        Derived dataset:
-
-        >>> dataset = DatasetConfig(
-        ...     name="installations_meteo",
-        ...     description="Installations with nearest weather station",
-        ...     source=SourceConfig(
-        ...         depends_on=["odre_installations", "ign_contours_iris", "meteo_france_stations"]
-        ...     ),
-        ... )
+    Attributes
+    ----------
+    name : str
+        Dataset identifier (auto-injected from YAML key).
+    description : str
+        Human-readable description.
+    source : SourceConfig
+        Remote or derived source configuration.
+    ingestion : IngestionPolicy | None
+        Required for remote, forbidden for derived.
     """
 
     name: str
@@ -475,17 +290,7 @@ class DatasetConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_ingestion_consistency(self) -> Self:
-        """Validate that ingestion field is consistent with source type.
-
-        Remote datasets MUST have ingestion policy.
-        Derived datasets MUST NOT have ingestion policy.
-
-        Returns:
-            Self instance if validation passes.
-
-        Raises:
-            ValueError: If ingestion is missing for remote or present for derived.
-        """
+        """Ensure remote datasets have ingestion and derived ones do not."""
         if self.source.is_remote and self.ingestion is None:
             raise ValueError(
                 f"Dataset '{self.name}': ingestion is required for remote datasets "
@@ -502,31 +307,22 @@ class DatasetConfig(StrictModel):
 
     @property
     def is_remote(self) -> bool:
-        """Check if this is a remote dataset (HTTP download)."""
+        """``True`` if remote dataset."""
         return self.source.is_remote
 
     @property
     def is_derived(self) -> bool:
-        """Check if this is a derived dataset (Gold layer)."""
+        """``True`` if derived dataset."""
         return self.source.is_derived
 
 
 class DataCatalog(StrictModel):
-    """Root catalog model containing all dataset configurations.
+    """Root catalog loaded from ``data_catalog.yaml``.
 
-    This is the top-level model loaded from data_catalog.yaml. It provides
-    access to all registered datasets with validation and type safety.
-
-    Attributes:
-        datasets: Dictionary mapping dataset names to Dataset configurations
-
-    Example:
-        Load and access catalog:
-
-        >>> catalog = DataCatalog.load(Path("data/catalog.yaml"))
-        >>> print(catalog.datasets.keys())
-        dict_keys(['ign_contours_iris', 'odre_installations'])
-        >>> dataset = catalog.get_dataset("ign_contours_iris")
+    Attributes
+    ----------
+    datasets : dict[str, DatasetConfig]
+        Mapping of dataset name to its configuration.
     """
 
     datasets: dict[str, DatasetConfig]
@@ -543,20 +339,22 @@ class DataCatalog(StrictModel):
 
     @classmethod
     def load(cls, path: Path) -> Self:
-        """Load and validate the data catalog from YAML file.
+        """Load and validate the catalog from a YAML file.
 
-        Reads the YAML catalog file, validates it against the schema using
-        Pydantic, and returns a fully validated DataCatalog instance.
+        Parameters
+        ----------
+        path : Path
+            Path to the YAML catalog file.
 
-        Args:
-            path: Path to the YAML catalog file.
+        Returns
+        -------
+        DataCatalog
+            Validated catalog instance.
 
-        Returns:
-            Validated DataCatalog instance with all datasets loaded.
-
-        Raises:
-            InvalidCatalogError: If the catalog file doesn't exist, contains
-                                 invalid YAML, or fails Pydantic validation.
+        Raises
+        ------
+        InvalidCatalogError
+            File missing, invalid YAML, or Pydantic validation failure.
         """
         if not path.exists():
             raise InvalidCatalogError(path=path, reason="file doesn't exist")
@@ -584,26 +382,21 @@ class DataCatalog(StrictModel):
             ) from None
 
     def get_dataset(self, name: str) -> DatasetConfig:
-        """Retrieve a dataset configuration by name.
+        """Retrieve a dataset by name.
 
-        Args:
-            name: Dataset identifier (e.g., "ign_contours_iris").
+        Parameters
+        ----------
+        name : str
+            Dataset identifier.
 
-        Returns:
-            DatasetConfig (either DatasetRemote or DatasetDerived) for the requested dataset.
+        Returns
+        -------
+        DatasetConfig
 
-        Raises:
-            DatasetNotFoundError: If the dataset doesn't exist in the catalog.
-                The error includes a list of available datasets.
-
-        Example:
-            >>> dataset = catalog.get_dataset("ign_contours_iris") # noqa
-            >>> dataset.description
-            'IGN administrative boundaries and IRIS zones'
-
-            >>> catalog.get_dataset("unknown_dataset") # noqa
-            DatasetNotFoundError: Dataset 'unknown_dataset' not found.
-            Available: ['ign_contours_iris', 'odre_installations']
+        Raises
+        ------
+        DatasetNotFoundError
+            If *name* is not in the catalog.
         """
         dataset = self.datasets.get(name)
 
@@ -613,36 +406,16 @@ class DataCatalog(StrictModel):
         return dataset
 
     def get_remote_datasets(self) -> list[DatasetConfig]:
-        """Return all datasets fetched from remote sources.
-
-        Returns:
-            List of datasets with remote source configuration (url/provider/format).
-        """
+        """Return all remote (HTTP) datasets."""
         return [d for d in self.datasets.values() if d.is_remote]
 
     def get_derived_datasets(self) -> list[DatasetConfig]:
-        """Return all datasets derived from Silver sources.
-
-        Returns:
-            List of datasets with derived source configuration (depends_on) - Gold layer.
-        """
+        """Return all derived (Gold) datasets."""
         return [d for d in self.datasets.values() if d.is_derived]
 
     @model_validator(mode="after")
     def validate_derived_dependencies_exist(self) -> Self:
-        """Ensure all derived dataset dependencies reference existing datasets.
-
-        Validates that:
-        1. All dependencies exist in the catalog
-        2. All dependencies are remote datasets (have Silver output)
-        3. No circular dependencies (Gold cannot depend on Gold)
-
-        Returns:
-            Self instance if validation passes.
-
-        Raises:
-            ValueError: If dependency validation fails.
-        """
+        """Ensure all ``depends_on`` entries exist and are remote (Silver) datasets."""
         for dataset in self.get_derived_datasets():
             source = dataset.source
             # Type narrowing: derived datasets always have depends_on (validated in SourceConfig)
@@ -671,14 +444,15 @@ class DataCatalog(StrictModel):
 if __name__ == "__main__":
     import sys
 
+    from data_eng_etl_electricity_meteo.core.logger import logger
+
     try:
-        _catalog = DataCatalog.load(settings.data_catalog_file_path)
-    except InvalidCatalogError:
-        # logger.error(str(e), extra=e.validation_errors)
-        sys.exit(1)
+        catalog = DataCatalog.load(settings.data_catalog_file_path)
+    except InvalidCatalogError as error:
+        error.log(log_method=logger.critical)
+        sys.exit(-1)
 
-    # logger.info(f"Catalog loaded: found {len(_catalog.datasets)} dataset(s)")
+    logger.info(f"--- Catalog loaded: found {len(catalog.datasets)} dataset(s) ---")
 
-    for _name, _dataset in _catalog.datasets.items():
-        # logger.info(f"dataset: {_name}", extra=_dataset.model_dump(exclude={"name"}))
-        print(_name)
+    for _name, _dataset in catalog.datasets.items():
+        logger.info(_name, **_dataset.model_dump(exclude={"name"}))
