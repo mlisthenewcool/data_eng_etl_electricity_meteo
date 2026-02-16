@@ -114,7 +114,8 @@ class IngestionFrequency(StrEnum):
             raise Exception("Not running on Airflow (check settings.is_running_on_airflow)")
 
         if self == IngestionFrequency.HOURLY:
-            # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}" ou "{{ ts_nodash[:11] }}"
+            # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
+            #  ou "{{ ts_nodash[:11] }}"
             return "{{ ts_nodash }}" if no_dash else "{{ ts }}"
 
         return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
@@ -418,7 +419,8 @@ class DataCatalog(StrictModel):
         """Ensure all ``depends_on`` entries exist and are remote (Silver) datasets."""
         for dataset in self.get_derived_datasets():
             source = dataset.source
-            # Type narrowing: derived datasets always have depends_on (validated in SourceConfig)
+            # Type narrowing: derived datasets always have depends_on
+            # (validated in SourceConfig)
             assert source.depends_on is not None, (
                 f"Derived dataset '{dataset.name}' has no depends_on"
             )

@@ -22,7 +22,9 @@ json:
 
 import logging
 import sys
+from enum import Enum
 from functools import cache
+from pathlib import Path
 from typing import Literal
 
 import orjson
@@ -33,6 +35,70 @@ from structlog.typing import EventDict, WrappedLogger
 from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
 
 OutputMode = Literal["airflow", "tty", "plain", "json"]
+
+
+# ---------------------------------------------------------------------------
+# Normalize and flatten log values
+# ---------------------------------------------------------------------------
+_STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
+
+
+def _normalize_value(value: object) -> str | int | float | bool | None:
+    """Convert a value to a log-friendly primitive.
+
+    Returns ``None`` to signal the key should be dropped.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Enum):
+        return _normalize_value(value.value)
+    return repr(value)
+
+
+def _normalize_and_flatten(
+    _logger: WrappedLogger,
+    _method: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Normalize values and flatten nested dicts into dotted keys.
+
+    *source={'provider': 'IGN', 'format': '7z'}*
+    becomes *source.provider=IGN  source.format=7z*.
+
+    Drops ``None`` values and converts Path/Enum to strings.
+    """
+    flat: EventDict = {}
+    for key, value in event_dict.items():
+        if key in _STRUCTLOG_INTERNAL_KEYS:
+            flat[key] = value
+        elif isinstance(value, dict):
+            flat |= _flatten_dict(key, value)
+        else:
+            normalized = _normalize_value(value)
+            if normalized is not None:
+                flat[key] = normalized
+    return flat
+
+
+def _flatten_dict(
+    prefix: str,
+    mapping: EventDict,
+) -> EventDict:
+    """Recursively flatten *mapping* into dotted keys."""
+    result: EventDict = {}
+    for key, value in mapping.items():
+        dotted = f"{prefix}.{key}"
+        if isinstance(value, dict):
+            result |= _flatten_dict(dotted, value)
+        else:
+            normalized = _normalize_value(value)
+            if normalized is not None:
+                result[dotted] = normalized
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +214,7 @@ def setup_logger(
 
     if output in ("tty", "plain"):
         use_colors = output == "tty"
-        console_chain: list[structlog.types.Processor] = []
+        console_chain: list[structlog.types.Processor] = [_normalize_and_flatten]
         if use_colors:
             console_chain.append(_colorize_event)
         console_chain.append(

@@ -25,7 +25,6 @@ def _(Path, logger):
 
     logger.info("Message without extras")
 
-    # Thanks to `_safe_str(...)`, objects with __str__ method implemented use it automatically
     path = Path(__file__).name
     logger.info(f"Message with path {path}", extra={"path": path})
 

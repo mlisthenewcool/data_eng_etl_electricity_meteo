@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def is_running_on_airflow(self) -> bool:
-        """Determine if running inside an Airflow environment by checking for airflow.cfg."""
+        """Check if running inside Airflow by detecting airflow.cfg in AIRFLOW_HOME."""
         # TODO: est-ce aussi valable en mode 'worker' ou 'scheduler' ?
         #   remplacer par les env vars AIRFLOW_CONFIG ou AIRFLOW_HOME par exemple
         return (self.airflow_home / "airflow.cfg").exists()

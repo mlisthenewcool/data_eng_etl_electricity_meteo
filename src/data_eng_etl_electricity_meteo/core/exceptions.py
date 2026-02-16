@@ -1,55 +1,28 @@
-"""Custom exceptions with automatic attribute extraction for structured logging."""
+"""Custom exceptions with attribute extraction for structured logging."""
 
 from pathlib import Path
-from typing import Protocol
-
-type _LogValue = str | int | float | bool | list | dict | tuple
+from typing import Any, Protocol
 
 
 class _LogMethod(Protocol):
-    """Signature of a structlog bound logger method (e.g. ``logger.error``)."""
+    """Signature of a structlog bound logger method."""
 
-    def __call__(self, event: str, /, **kw: _LogValue) -> None: ...
+    def __call__(self, event: str, /, **kw: Any) -> None: ...
 
 
 class BaseProjectException(Exception):
-    """Base exception with automatic attribute extraction for structured logging via to_dict()."""
+    """Base exception with attribute extraction for structured logging."""
 
-    def to_dict(self) -> dict[str, _LogValue]:
-        """Extract public attributes as dict for logging."""
-        result: dict[str, _LogValue] = {}
+    def to_dict(self) -> dict[str, Any]:
+        """Extract public attributes as a dict.
 
-        for key, value in self.__dict__.items():
-            # Skip private attributes
-            if key.startswith("_"):
-                continue
-
-            # Skip None values (avoid polluting structured logs)
-            if value is None:
-                continue
-            # Convert Path to string for better logging
-            elif isinstance(value, Path):
-                result[key] = str(value)
-            # Skip complex non-serializable objects (basic safety check)
-            elif isinstance(value, (str, int, float, bool)):
-                result[key] = value
-            # Assume collections contain simple types (or override to_dict if not)
-            elif isinstance(value, (list, dict, tuple)):
-                result[key] = value
-            # Other types (Pydantic models, enums, etc.): fall back to repr()
-            else:
-                result[key] = repr(value)
-
-        return result
+        Value normalization (None filtering, Path conversion, etc.) is handled by the
+        structlog processor chain.
+        """
+        return {key: value for key, value in self.__dict__.items() if not key.startswith("_")}
 
     def log(self, log_method: _LogMethod) -> None:
-        """Log this exception with its structured attributes.
-
-        Parameters
-        ----------
-        log_method : _LogMethod
-            A bound logger method (e.g. ``logger.error``, ``logger.critical``).
-        """
+        """Log this exception with its structured attributes."""
         log_method(str(self), **self.to_dict())
 
 

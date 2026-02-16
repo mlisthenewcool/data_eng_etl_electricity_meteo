@@ -39,6 +39,9 @@ include = [
 #src = ["src", "test"]
 #extend-exclude = ["notebooks"]
 
+#[tool.ruff.format]
+#docstring-code-line-length = 80
+
 [tool.ruff.lint]
 select = [
     "I", "E", "W", "F", "PL", "D", "NPY"
@@ -49,6 +52,9 @@ ignore = ["D100", "D101", "D103", "D107"]
 [tool.ruff.lint.pydocstyle]
 #convention = "google"
 convention = "numpy"
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 88
 
 [tool.ty.src]
 include = ["src", "tests"]
