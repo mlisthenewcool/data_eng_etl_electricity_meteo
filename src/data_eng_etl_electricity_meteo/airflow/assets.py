@@ -4,6 +4,8 @@ from typing import Literal
 
 from airflow.sdk import Asset
 
+__all__: list[str] = ["get_asset", "ASSETS"]
+
 
 def get_asset(dataset_name: str, layer: Literal["silver", "gold"]) -> Asset:
     """Build an Airflow Asset for a dataset at a given layer."""

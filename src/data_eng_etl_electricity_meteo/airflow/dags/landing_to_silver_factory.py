@@ -6,6 +6,8 @@ from airflow.sdk import DAG, Asset, dag, task
 from data_eng_etl_electricity_meteo.airflow.assets import ASSETS
 from data_eng_etl_electricity_meteo.core.logger import logger
 
+__all__: list[str] = []
+
 
 def _create_dag(asset: Asset) -> DAG:
     @dag(

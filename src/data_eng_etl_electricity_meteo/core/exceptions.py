@@ -13,6 +13,7 @@ __all__: list[str] = [
     "DataCatalogError",
     "InvalidCatalogError",
     "DatasetNotFoundError",
+    "AirflowContextError",
 ]
 
 
@@ -55,7 +56,8 @@ class ArchiveNotFoundError(ExtractionError):
     """Raised when the archive file does not exist."""
 
     def __init__(self, path: Path) -> None:
-        super().__init__(f"Archive not found: {path}")
+        self.path = path
+        super().__init__("Archive not found.")
 
 
 class FileNotFoundInArchiveError(ExtractionError):
@@ -99,5 +101,23 @@ class DatasetNotFoundError(DataCatalogError):
     """Raised when a requested dataset is missing from the catalog."""
 
     def __init__(self, name: str, available_datasets: list[str]) -> None:
+        self.name = name
         self.available_datasets = available_datasets
-        super().__init__(f"Dataset {name} does not exist in data catalog.")
+        super().__init__("Dataset does not exist in data catalog.")
+
+
+# ---------------------------------------------------------------------------
+# Airflow context errors
+# ---------------------------------------------------------------------------
+class AirflowContextError(BaseProjectException):
+    """Raised when an operation requires a specific Airflow context."""
+
+    def __init__(
+        self,
+        operation: str,
+        expected_context: str,
+        suggestion: str,
+    ) -> None:
+        self.operation = operation
+        self.expected_context = expected_context
+        super().__init__(f"Invalid Airflow context: {suggestion}.")

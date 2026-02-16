@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def secrets_dir_path(self) -> DirectoryPath:
+        """Path to secrets directory (Docker secrets on Airflow, local otherwise)."""
         if self.is_running_on_airflow:
             return Path("/run/secrets")
 
@@ -186,4 +187,4 @@ class Settings(BaseSettings):
 # Singleton instance
 settings = Settings()
 
-__all__ = ["settings", "LogLevel"]
+__all__: list[str] = ["settings", "LogLevel"]

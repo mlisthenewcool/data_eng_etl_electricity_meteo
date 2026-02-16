@@ -222,6 +222,7 @@ def setup_logger(
         console_chain.append(
             structlog.dev.ConsoleRenderer(
                 colors=use_colors,
+                sort_keys=False,
                 pad_event_to=0 if use_colors else _EVENT_PAD,
                 exception_formatter=_rich_traceback(
                     use_colors=use_colors,

@@ -101,7 +101,7 @@ def _validate_sqlite_header(path: Path) -> None:
             if header != b"SQLite format 3\x00":
                 raise FileIntegrityError(path, reason="Invalid SQLite/GeoPackage header")
     except OSError as error:
-        raise FileIntegrityError(path, reason=f"Could not read file header: {error}")
+        raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from None
 
 
 def extract_7z(
@@ -154,7 +154,7 @@ def extract_7z(
             try:
                 target_internal_path = next(f for f in all_files if f.endswith(target_filename))
             except StopIteration:
-                raise FileNotFoundInArchiveError(target_filename, archive_path)
+                raise FileNotFoundInArchiveError(target_filename, archive_path) from None
 
             logger.info(f"Found target in archive: {target_internal_path}")
 
@@ -201,7 +201,7 @@ def extract_7z(
                         dest_path.unlink()
                     raise
 
-            file_hash = FileHasher().hash_file(dest_path)
+            file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
             logger.info(

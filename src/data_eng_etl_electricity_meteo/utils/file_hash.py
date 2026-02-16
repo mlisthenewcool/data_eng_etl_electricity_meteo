@@ -24,13 +24,30 @@ class FileHasher:
         """Current hexadecimal digest."""
         return self._hasher.hexdigest()
 
+    @staticmethod
     def hash_file(
-        self,
         path: Path,
+        algorithm: str = settings.hash_algorithm,
         chunk_size: int = settings.hash_chunk_size,
     ) -> str:
-        """Read and hash a file in chunks. Returns hex digest."""
+        """Hash a file in chunks (standalone, no instance state).
+
+        Parameters
+        ----------
+        path : Path
+            File to hash.
+        algorithm : str
+            Hash algorithm (default from settings).
+        chunk_size : int
+            Read buffer size in bytes (default from settings).
+
+        Returns
+        -------
+        str
+            Hexadecimal digest of the file contents.
+        """
+        hasher = hashlib.new(algorithm)
         with path.open("rb") as f:
             for chunk in iter(lambda: f.read(chunk_size), b""):
-                self.update(chunk)
-        return self.hexdigest
+                hasher.update(chunk)
+        return hasher.hexdigest()

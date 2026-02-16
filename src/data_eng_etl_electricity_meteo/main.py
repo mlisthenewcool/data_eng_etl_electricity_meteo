@@ -14,7 +14,7 @@ if __name__ == "__main__":
     # ==================================================================================
     _DATASET_NAME = "ign_contours_iris"
 
-    _start_time = datetime.now()
+    _start_datetime = datetime.now()
 
     # ============================================================
     # 1) Load catalog and dataset configuration
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     logger.info(
         "Data catalog loaded",
         remote_datasets=[dataset.name for dataset in _catalog.get_remote_datasets()],
-        derivated_datasets=[dataset.name for dataset in _catalog.get_derived_datasets()],
+        derived_datasets=[dataset.name for dataset in _catalog.get_derived_datasets()],
     )
 
     try:
@@ -39,5 +39,6 @@ if __name__ == "__main__":
 
     logger.info(
         f"Dataset *{_DATASET_NAME}* config loaded",
+        dataset_type=type(_dataset_config).__name__,
         **_dataset_config.model_dump(mode="json", exclude={"name"}),
     )

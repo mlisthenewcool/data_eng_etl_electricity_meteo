@@ -5,31 +5,55 @@ Architecture
 
 DataCatalog
     └── datasets: dict[str, DatasetConfig]
-        ├── name (auto-injected from YAML key)
-        ├── source: SourceConfig (remote HTTP or derived Gold)
-        └── ingestion: IngestionPolicy (frequency, mode)
+            ├── RemoteDatasetConfig (HTTP source)
+            │   ├── name, description
+            │   ├── source: RemoteSourceConfig (url, provider, format)
+            │   └── ingestion: IngestionPolicy (frequency, mode)
+            └── DerivedDatasetConfig (Gold, built from Silver)
+                ├── name, description
+                └── source: DerivedSourceConfig (depends_on)
 
-Path resolution is handled by ``PathResolver``, see ``path_resolver.py``.
+Path resolution is handled by ``RemotePathResolver`` / ``DerivedPathResolver``,
+see ``path_resolver.py``.
 """
 
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Annotated, Any, Self
 
 import yaml
 from pydantic import (
+    Discriminator,
     HttpUrl,
+    Tag,
     ValidationError,
     model_validator,
 )
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
+    AirflowContextError,
     DatasetNotFoundError,
     InvalidCatalogError,
 )
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.utils.pydantic_utils import StrictModel, format_pydantic_errors
+from data_eng_etl_electricity_meteo.utils.pydantic_utils import (
+    StrictModel,
+    format_pydantic_errors,
+)
+
+__all__: list[str] = [
+    "SourceFormat",
+    "IngestionFrequency",
+    "IngestionMode",
+    "IngestionPolicy",
+    "RemoteSourceConfig",
+    "DerivedSourceConfig",
+    "RemoteDatasetConfig",
+    "DerivedDatasetConfig",
+    "DatasetConfig",
+    "DataCatalog",
+]
 
 
 class SourceFormat(StrEnum):
@@ -41,7 +65,7 @@ class SourceFormat(StrEnum):
 
     @property
     def is_archive(self) -> bool:
-        """Check if the format is a compressed archive requiring extraction."""
+        """Check if the format is a compressed archive."""
         return self == SourceFormat.SEVEN_Z
 
 
@@ -79,8 +103,8 @@ class IngestionFrequency(StrEnum):
 
     @property
     def airflow_schedule(self) -> str | None:
-        """Airflow cron preset (e.g. ``@daily``) or ``None`` for ``NEVER``."""
-        # Use getattr to satisfy type checkers (attribute set dynamically in __new__)
+        """Airflow cron preset (e.g. ``@daily``) or ``None``."""
+        # Use getattr to satisfy type checkers (set dynamically in __new__)
         return getattr(self, "_airflow_schedule", None)
 
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
@@ -101,17 +125,15 @@ class IngestionFrequency(StrEnum):
 
         Raises
         ------
-        Exception
+        AirflowContextError
             If not running inside Airflow.
         """
         if not settings.is_running_on_airflow:
-            # raise AirflowContextError(
-            #     operation="`get_airflow_version_template`",
-            #     expected_context="airflow",
-            #     actual_context="not airflow",
-            #     suggestion="use `format_datetime_as_version` instead",
-            # )
-            raise Exception("Not running on Airflow (check settings.is_running_on_airflow)")
+            raise AirflowContextError(
+                operation="get_airflow_version_template",
+                expected_context="Airflow runtime",
+                suggestion="use format_datetime_as_version instead",
+            )
 
         if self == IngestionFrequency.HOURLY:
             # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
@@ -136,15 +158,6 @@ class IngestionFrequency(StrEnum):
             Hourly: ``%Y%m%dT%H%M%S`` / ``%Y-%m-%d-T-%H-%M-%S``.
             Others: ``%Y%m%d`` / ``%Y-%m-%d``.
         """
-        if settings.is_running_on_airflow:
-            # raise AirflowContextError(
-            #     operation="`format_datetime_as_version`",
-            #     expected_context="not airflow",
-            #     actual_context="airflow",
-            #     suggestion="use `get_airflow_version_template` instead",
-            # )
-            pass
-
         if self == IngestionFrequency.HOURLY:
             return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
 
@@ -152,98 +165,68 @@ class IngestionFrequency(StrEnum):
         return dt.strftime("%Y%m%d" if no_dash else "%Y-%m-%d")
 
 
-class SourceConfig(StrictModel):
-    """Dataset source configuration -- remote (HTTP) **or** derived (Gold).
+# =============================================================================
+# Source configs (split by dataset type)
+# =============================================================================
 
-    Mutually exclusive: must have either ``(url, provider, format)``
-    or ``depends_on``, never both.
+
+class RemoteSourceConfig(StrictModel):
+    """Source configuration for remote (HTTP) datasets.
 
     Attributes
     ----------
-    provider : str | None
-        Data provider name (remote only, e.g. ``"IGN"``).
-    url : HttpUrl | None
-        Download URL (remote only).
-    format : SourceFormat | None
-        File format (remote only).
+    provider : str
+        Data provider name (e.g. ``"IGN"``).
+    url : HttpUrl
+        Download URL.
+    format : SourceFormat
+        File format.
     inner_file : str | None
         File to extract from archive (required iff ``format.is_archive``).
-    depends_on : list[str] | None
-        Silver dataset names (derived only).
     """
 
-    # Remote source fields
-    provider: str | None = None
-    url: HttpUrl | None = None
-    format: SourceFormat | None = None
+    provider: str
+    url: HttpUrl
+    format: SourceFormat
     inner_file: str | None = None
 
-    # Derived source field
-    depends_on: list[str] | None = None
-
     @model_validator(mode="after")
-    def validate_source_consistency(self) -> Self:
-        """Ensure remote / derived fields are mutually exclusive and complete."""
-        has_remote = self.url is not None
-        has_derived = self.depends_on is not None
-
-        # Mutual exclusivity
-        if has_remote and has_derived:
-            raise ValueError(
-                "source cannot have both remote fields (url) and derived fields (depends_on)"
-            )
-
-        if not has_remote and not has_derived:
-            raise ValueError("source must have either url (remote) or depends_on (derived)")
-
-        # Validate remote source completeness
-        if has_remote:
-            if self.provider is None:
-                raise ValueError("provider is required for remote sources")
-            if self.format is None:
-                raise ValueError("format is required for remote sources")
-
-            # Validate inner_file consistency with format
-            if self.format.is_archive and self.inner_file is None:
-                raise ValueError(f"inner_file is required for archive format: {self.format}")
-            if not self.format.is_archive and self.inner_file is not None:
-                raise ValueError(
-                    f"inner_file must not be set for non-archive format: {self.format}"
-                )
-
-        # Validate derived source
-        if has_derived:
-            if not self.depends_on:
-                raise ValueError("depends_on must contain at least one dataset name")
-            if self.provider is not None or self.format is not None:
-                raise ValueError(
-                    "provider and format must not be set for derived sources (only depends_on)"
-                )
-
+    def validate_inner_file_consistency(self) -> Self:
+        """Ensure ``inner_file`` is set iff format is an archive."""
+        if self.format.is_archive and self.inner_file is None:
+            raise ValueError(f"inner_file is required for archive format: {self.format}")
+        if not self.format.is_archive and self.inner_file is not None:
+            raise ValueError(f"inner_file must not be set for non-archive format: {self.format}")
         return self
 
     @property
-    def is_remote(self) -> bool:
-        """``True`` if remote source (has ``url``)."""
-        return self.url is not None
-
-    @property
-    def is_derived(self) -> bool:
-        """``True`` if derived source (has ``depends_on``)."""
-        return self.depends_on is not None
-
-    @property
     def url_as_str(self) -> str:
-        """Return ``url`` as ``str``.
-
-        Raises
-        ------
-        ValueError
-            If called on a derived source.
-        """
-        if self.url is None:
-            raise ValueError("url_as_str called on derived source (url is None)")
+        """Return ``url`` as ``str``."""
         return str(self.url)
+
+
+class DerivedSourceConfig(StrictModel):
+    """Source configuration for derived (Gold) datasets.
+
+    Attributes
+    ----------
+    depends_on : list[str]
+        Silver dataset names this Gold dataset is built from.
+    """
+
+    depends_on: list[str]
+
+    @model_validator(mode="after")
+    def validate_depends_on_not_empty(self) -> Self:
+        """Ensure ``depends_on`` has at least one entry."""
+        if not self.depends_on:
+            raise ValueError("depends_on must contain at least one dataset name")
+        return self
+
+
+# =============================================================================
+# Ingestion policy
+# =============================================================================
 
 
 class IngestionMode(StrEnum):
@@ -266,11 +249,16 @@ class IngestionPolicy(StrictModel):
 
     frequency: IngestionFrequency
     mode: IngestionMode
-    # incremental_key: str  # TODO: Add validation -> required if mode=INCREMENTAL
+    # incremental_key: str  # TODO: required if mode=INCREMENTAL
 
 
-class DatasetConfig(StrictModel):
-    """Single dataset entry -- remote (HTTP) or derived (Gold).
+# =============================================================================
+# Dataset configs (split by dataset type) + discriminated union
+# =============================================================================
+
+
+class RemoteDatasetConfig(StrictModel):
+    """Remote (HTTP) dataset entry.
 
     Attributes
     ----------
@@ -278,43 +266,61 @@ class DatasetConfig(StrictModel):
         Dataset identifier (auto-injected from YAML key).
     description : str
         Human-readable description.
-    source : SourceConfig
-        Remote or derived source configuration.
-    ingestion : IngestionPolicy | None
-        Required for remote, forbidden for derived.
+    source : RemoteSourceConfig
+        Remote source (url, provider, format).
+    ingestion : IngestionPolicy
+        Ingestion frequency and mode.
     """
 
     name: str
     description: str
-    source: SourceConfig
-    ingestion: IngestionPolicy | None = None
+    source: RemoteSourceConfig
+    ingestion: IngestionPolicy
 
-    @model_validator(mode="after")
-    def validate_ingestion_consistency(self) -> Self:
-        """Ensure remote datasets have ingestion and derived ones do not."""
-        if self.source.is_remote and self.ingestion is None:
-            raise ValueError(
-                f"Dataset '{self.name}': ingestion is required for remote datasets "
-                f"(source has url={self.source.url})"
-            )
 
-        if self.source.is_derived and self.ingestion is not None:
-            raise ValueError(
-                f"Dataset '{self.name}': ingestion must not be set for derived datasets "
-                f"(source has depends_on={self.source.depends_on})"
-            )
+class DerivedDatasetConfig(StrictModel):
+    """Derived (Gold) dataset entry built from Silver sources.
 
-        return self
+    Attributes
+    ----------
+    name : str
+        Dataset identifier (auto-injected from YAML key).
+    description : str
+        Human-readable description.
+    source : DerivedSourceConfig
+        Derived source (depends_on).
+    """
 
-    @property
-    def is_remote(self) -> bool:
-        """``True`` if remote dataset."""
-        return self.source.is_remote
+    name: str
+    description: str
+    source: DerivedSourceConfig
 
-    @property
-    def is_derived(self) -> bool:
-        """``True`` if derived dataset."""
-        return self.source.is_derived
+
+def _dataset_discriminator(v: Any) -> str:
+    """Discriminate between remote and derived datasets.
+
+    Handles both raw ``dict`` (deserialization) and model instances
+    (serialization), as required by Pydantic.
+    """
+    if isinstance(v, dict):
+        source = v.get("source", {})
+        if isinstance(source, dict) and "url" in source:
+            return "remote"
+        return "derived"
+    if isinstance(v, RemoteDatasetConfig):
+        return "remote"
+    return "derived"
+
+
+DatasetConfig = Annotated[
+    Annotated[RemoteDatasetConfig, Tag("remote")] | Annotated[DerivedDatasetConfig, Tag("derived")],
+    Discriminator(_dataset_discriminator),
+]
+
+
+# =============================================================================
+# Catalog
+# =============================================================================
 
 
 class DataCatalog(StrictModel):
@@ -331,7 +337,7 @@ class DataCatalog(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def inject_names_into_datasets(cls, data: dict) -> dict:
-        """Inject the YAML dictionary key into the 'name' field of each dataset."""
+        """Inject the YAML key into the 'name' field of each dataset."""
         if isinstance(data, dict) and "datasets" in data:
             for name, config in data["datasets"].items():
                 if isinstance(config, dict):
@@ -366,14 +372,16 @@ class DataCatalog(StrictModel):
 
             if data is None:
                 raise InvalidCatalogError(
-                    path=path, reason="catalog file is empty or contains only comments"
+                    path=path,
+                    reason="catalog file is empty or contains only comments",
                 )
 
             return cls.model_validate(data)
 
         except yaml.YAMLError as yaml_error:
             raise InvalidCatalogError(
-                path=path, reason=f"error parsing YAML: {yaml_error}"
+                path=path,
+                reason=f"error parsing YAML: {yaml_error}",
             ) from yaml_error
         except ValidationError as pydantic_errors:
             raise InvalidCatalogError(
@@ -382,7 +390,7 @@ class DataCatalog(StrictModel):
                 validation_errors=format_pydantic_errors(pydantic_errors),
             ) from None
 
-    def get_dataset(self, name: str) -> DatasetConfig:
+    def get_dataset(self, name: str) -> RemoteDatasetConfig | DerivedDatasetConfig:
         """Retrieve a dataset by name.
 
         Parameters
@@ -392,7 +400,7 @@ class DataCatalog(StrictModel):
 
         Returns
         -------
-        DatasetConfig
+        RemoteDatasetConfig | DerivedDatasetConfig
 
         Raises
         ------
@@ -402,42 +410,39 @@ class DataCatalog(StrictModel):
         dataset = self.datasets.get(name)
 
         if not dataset:
-            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+            raise DatasetNotFoundError(
+                name=name,
+                available_datasets=list(self.datasets.keys()),
+            )
 
         return dataset
 
-    def get_remote_datasets(self) -> list[DatasetConfig]:
+    def get_remote_datasets(self) -> list[RemoteDatasetConfig]:
         """Return all remote (HTTP) datasets."""
-        return [d for d in self.datasets.values() if d.is_remote]
+        return [d for d in self.datasets.values() if isinstance(d, RemoteDatasetConfig)]
 
-    def get_derived_datasets(self) -> list[DatasetConfig]:
+    def get_derived_datasets(self) -> list[DerivedDatasetConfig]:
         """Return all derived (Gold) datasets."""
-        return [d for d in self.datasets.values() if d.is_derived]
+        return [d for d in self.datasets.values() if isinstance(d, DerivedDatasetConfig)]
 
     @model_validator(mode="after")
     def validate_derived_dependencies_exist(self) -> Self:
-        """Ensure all ``depends_on`` entries exist and are remote (Silver) datasets."""
+        """Ensure ``depends_on`` entries exist and are remote datasets."""
         for dataset in self.get_derived_datasets():
-            source = dataset.source
-            # Type narrowing: derived datasets always have depends_on
-            # (validated in SourceConfig)
-            assert source.depends_on is not None, (
-                f"Derived dataset '{dataset.name}' has no depends_on"
-            )
-            for dep_name in source.depends_on:
-                # Check dependency exists
+            for dep_name in dataset.source.depends_on:
                 if dep_name not in self.datasets:
                     raise ValueError(
-                        f"Dataset '{dataset.name}' depends on '{dep_name}' "
-                        f"which is not defined in the catalog"
+                        f"Dataset '{dataset.name}' depends on "
+                        f"'{dep_name}' which is not defined "
+                        f"in the catalog"
                     )
 
-                # Check dependency is remote (has Silver output)
                 dep = self.datasets[dep_name]
-                if not dep.is_remote:
+                if not isinstance(dep, RemoteDatasetConfig):
                     raise ValueError(
-                        f"Dataset '{dataset.name}' depends on '{dep_name}' "
-                        f"which is itself derived. Gold datasets can only depend on "
+                        f"Dataset '{dataset.name}' depends on "
+                        f"'{dep_name}' which is itself derived. "
+                        f"Gold datasets can only depend on "
                         f"Silver datasets (from remote sources)."
                     )
         return self
@@ -454,7 +459,7 @@ if __name__ == "__main__":
         error.log(log_method=logger.critical)
         sys.exit(-1)
 
-    logger.info(f"--- Catalog loaded: found {len(catalog.datasets)} dataset(s) ---")
+    logger.info(f"--- Catalog loaded: {len(catalog.datasets)} dataset(s) ---")
 
     for _name, _dataset in catalog.datasets.items():
         logger.info(_name, **_dataset.model_dump(exclude={"name"}))

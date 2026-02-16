@@ -89,7 +89,7 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
     return None
 
 
-def download_to_file(url: str, dest_dir: Path, default_filename: str) -> HttpDownloadResult:
+def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDownloadResult:
     """Stream a file from *url* to *dest_dir* with progress and SHA256.
 
     Parameters
@@ -98,7 +98,7 @@ def download_to_file(url: str, dest_dir: Path, default_filename: str) -> HttpDow
         URL of the file to download.
     dest_dir:
         Destination directory (created if needed).
-    default_filename:
+    fallback_filename:
         Fallback filename if none could be extracted from the response.
 
     Raises
@@ -127,9 +127,9 @@ def download_to_file(url: str, dest_dir: Path, default_filename: str) -> HttpDow
             if filename is None:
                 logger.warning(
                     "Could not extract filename, fallback to default.",
-                    default_filename=default_filename,
+                    fallback_filename=fallback_filename,
                 )
-                filename = default_filename
+                filename = fallback_filename
             dest_path = dest_dir / filename
 
             if dest_path.exists():
