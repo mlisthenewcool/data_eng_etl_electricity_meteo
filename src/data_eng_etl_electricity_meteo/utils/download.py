@@ -1,10 +1,7 @@
-"""Download utilities.
+"""HTTP download utilities with streaming, progress bar and hash calculation.
 
-This module provides robust utilities for:
-- Downloading large files over HTTP/2 with streaming
-- Progress bars with tqdm and SHA256 integrity checks
-
-The download functions are designed for data pipelines where reliability is critical.
+Notes
+-----
 Airflow handles retries at the task level, so no retry logic is included here.
 """
 
@@ -21,53 +18,40 @@ from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
+__all__: list[str] = ["HttpDownloadResult", "download_to_file"]
+
 
 @dataclass(frozen=True)
 class HttpDownloadResult:
-    """Result from HTTP download operation.
-
-    Attributes
-    ----------
-    path:
-        Path to downloaded file (can be an archive or a final file)
-    file_hash:
-        Hash of downloaded content (uses sha256 by default)
-    size_mib:
-        File size in mebibyte
-    """
+    """Downloaded file metadata (path, hash, size)."""
 
     path: Path
     file_hash: str
     size_mib: float
 
-    def to_dict(self) -> dict[str, Path | str | float]:
-        """Convert to dict for serialization."""
+    def to_dict(self) -> dict[str, str | float]:
+        """Serialize to a JSON-compatible dict (for Airflow XCom)."""
         return {
-            "path": self.path,
+            "path": str(self.path),
             "file_hash": self.file_hash,
             "size_mib": self.size_mib,
         }
 
 
-def extract_filename_from_response(response: httpx.Response, url: str) -> str | None:
-    """Extract original filename from HTTP response or URL.
-
-    Priority order:
-
-    1. Content-Disposition header (most reliable - server specifies filename)
-    2. URL path basename (fallback - extract from URL path)
+def _extract_filename(response: httpx.Response, url: str) -> str | None:
+    """Extract filename from Content-Disposition header or URL path.
 
     Parameters
     ----------
     response:
-        HTTP response object from httpx
+        HTTP response with headers to inspect.
     url:
-        Original request URL
+        Original request URL (fallback source for filename).
 
     Returns
     -------
     str | None
-        Extracted filename (sanitized for filesystem use) if found, None otherwise.
+        Sanitized filename, or ``None`` if extraction failed.
     """
     # Try Content-Disposition header first
     content_disp = response.headers.get("content-disposition", "")
@@ -76,9 +60,7 @@ def extract_filename_from_response(response: httpx.Response, url: str) -> str | 
         # Examples: "attachment; filename=data.csv"
         #           "attachment; filename*=UTF-8''data%20file.csv"
 
-        # Try standard filename parameter
         regex = r'filename=["\']?([^"\';\n]+)["\']?'
-        # regex_simple = r'filename="?([^";\n]+)"?'
         match = re.search(regex, content_disp)
         if match:
             filename = match.group(1).strip()
@@ -107,29 +89,17 @@ def extract_filename_from_response(response: httpx.Response, url: str) -> str | 
     return None
 
 
-def download_to_file(url: str, dest_dir: Path, default_name: str) -> HttpDownloadResult:
-    """Download a file from URL with streaming, progress bar, and SHA256.
-
-    Performs memory-efficient download by streaming chunks to disk.
-    Automatically creates parent directories if needed.
-    Uses HTTP/2 when available for better performance.
-
-    The filename is extracted from the Content-Disposition header or URL path,
-    preserving the original server-provided filename.
+def download_to_file(url: str, dest_dir: Path, default_filename: str) -> HttpDownloadResult:
+    """Stream a file from *url* to *dest_dir* with progress and SHA256.
 
     Parameters
     ----------
     url:
         URL of the file to download.
     dest_dir:
-        Directory where the file will be saved (filename extracted from response).
-    default_name:
-        Default name to fallback if any filename could be extracted from server.
-
-    Returns
-    -------
-    HttpDownloadResult
-        The object containing with path, hash, size_mib, and original_filename.
+        Destination directory (created if needed).
+    default_filename:
+        Fallback filename if none could be extracted from the response.
 
     Raises
     ------
@@ -153,31 +123,30 @@ def download_to_file(url: str, dest_dir: Path, default_name: str) -> HttpDownloa
         with client.stream("GET", url) as response:
             response.raise_for_status()
 
-            # Extract original filename from response headers or URL
-            original_filename = extract_filename_from_response(response, url)
-            if original_filename is None:
+            filename = _extract_filename(response, url)
+            if filename is None:
                 logger.warning(
-                    "Could not extract original filename, fallback to default.",
-                    default_name=default_name,
+                    "Could not extract filename, fallback to default.",
+                    default_filename=default_filename,
                 )
-                original_filename = default_name
-            dest_path = dest_dir / original_filename
+                filename = default_filename
+            dest_path = dest_dir / filename
 
             if dest_path.exists():
                 logger.warning("File already exists. Overwriting.", url=url, dest_path=dest_path)
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
-            total_bytes = 0
-            total_size = int(response.headers.get("content-length", 0))
+            downloaded_bytes = 0
+            content_length = int(response.headers.get("content-length", 0))
 
             hasher = FileHasher()
 
             progress_bar = tqdm(
-                total=total_size,
+                total=content_length,
                 unit="iB",
                 unit_scale=True,
                 unit_divisor=1024,
-                desc=f"Downloading {original_filename} (total_size={total_size})",
+                desc=f"Downloading {filename} (content_length={content_length})",
                 # file=TqdmToLogger(logger.info)
                 # if settings.is_running_on_airflow else sys.stderr,
                 file=sys.stderr,
@@ -185,24 +154,24 @@ def download_to_file(url: str, dest_dir: Path, default_name: str) -> HttpDownloa
             )
 
             try:
-                with open(dest_path, mode="wb") as f:
+                with dest_path.open("wb") as f:
                     for chunk in response.iter_bytes(chunk_size=settings.download_chunk_size):
                         f.write(chunk)
                         hasher.update(chunk)
                         chunk_len = len(chunk)
-                        total_bytes += chunk_len
+                        downloaded_bytes += chunk_len
                         progress_bar.update(chunk_len)
             finally:
                 progress_bar.close()
 
             file_hash = hasher.hexdigest
 
-            size_mib = total_bytes / (1024 * 1024)
+            size_mib = downloaded_bytes / (1024 * 1024)
 
             logger.info(
                 "Download completed",
                 path=dest_path,
-                original_filename=original_filename,
+                filename=filename,
                 size_mib=size_mib,
                 file_hash=file_hash,
             )

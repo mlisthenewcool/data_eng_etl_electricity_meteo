@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+__all__: list[str] = ["StrictModel", "format_pydantic_errors"]
+
 
 class StrictModel(BaseModel):
     """Base model that forbids extra fields to prevent typos and configuration drift."""

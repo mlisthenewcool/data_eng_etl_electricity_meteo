@@ -34,6 +34,8 @@ from structlog.typing import EventDict, WrappedLogger
 
 from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
 
+__all__: list[str] = ["logger"]
+
 OutputMode = Literal["airflow", "tty", "plain", "json"]
 
 
@@ -279,9 +281,9 @@ def _setup_airflow_bypass_logger(
 
     Notes
     -----
-    * Not used by default: Kept here in case we need full control over
-    rendering (rich traceback width, colors, timestamp format, etc.) at the
-    cost of losing Airflow UI log integration and remote logging.
+    * Not used by default: Kept here in case we need full control over rendering
+    (rich traceback width, colors, timestamp format, etc.) at the cost of losing
+    Airflow UI log integration and remote logging.
 
     * (warning) Logs bypass Airflow's handlers → not visible in the task UI or
     remote storage (S3, GCS, etc.).  They only appear on stderr.

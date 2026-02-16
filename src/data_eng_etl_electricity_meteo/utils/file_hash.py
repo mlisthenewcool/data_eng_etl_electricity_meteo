@@ -5,6 +5,8 @@ from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.settings import settings
 
+__all__: list[str] = ["FileHasher"]
+
 
 class FileHasher:
     """Memory-efficient file and stream hasher."""

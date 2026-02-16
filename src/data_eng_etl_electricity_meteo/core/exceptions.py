@@ -3,6 +3,18 @@
 from pathlib import Path
 from typing import Any, Protocol
 
+__all__: list[str] = [
+    "BaseProjectException",
+    "DownloadError",
+    "ExtractionError",
+    "ArchiveNotFoundError",
+    "FileNotFoundInArchiveError",
+    "FileIntegrityError",
+    "DataCatalogError",
+    "InvalidCatalogError",
+    "DatasetNotFoundError",
+]
+
 
 class _LogMethod(Protocol):
     """Signature of a structlog bound logger method."""
