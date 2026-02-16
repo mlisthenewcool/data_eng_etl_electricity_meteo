@@ -27,16 +27,16 @@ class ExtractionResult:
     """Extraction result with archive context (for pipeline traceability)."""
 
     archive_path: Path
-    extracted_file_path: Path
-    extracted_file_hash: str
+    file_path: Path
+    file_hash: str
     size_mib: float
 
     def to_dict(self) -> dict[str, str | float]:
         """Serialize to a JSON-compatible dict (for Airflow XCom)."""
         return {
             "archive_path": str(self.archive_path),
-            "extracted_file_path": str(self.extracted_file_path),
-            "extracted_file_hash": self.extracted_file_hash,
+            "file_path": str(self.file_path),
+            "file_hash": self.file_hash,
             "size_mib": self.size_mib,
         }
 

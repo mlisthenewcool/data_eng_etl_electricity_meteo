@@ -1,3 +1,5 @@
+"""DAG factory for landing-to-silver ingestion pipelines."""
+
 from airflow import XComArg
 from airflow.sdk import DAG, Asset, dag, task
 

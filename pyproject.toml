@@ -37,7 +37,7 @@ include = [
     "tests/**/*.py"
 ]
 #src = ["src", "test"]
-#extend-exclude = ["notebooks"]
+extend-exclude = ["notebooks"]
 
 #[tool.ruff.format]
 #docstring-code-line-length = 80
@@ -46,8 +46,11 @@ include = [
 select = [
     "I", "E", "W", "F", "PL", "D", "NPY"
 ]
-ignore = ["D100", "D101", "D103", "D107"]
+ignore = ["D107"]
 #fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104"]
 
 [tool.ruff.lint.pydocstyle]
 #convention = "google"

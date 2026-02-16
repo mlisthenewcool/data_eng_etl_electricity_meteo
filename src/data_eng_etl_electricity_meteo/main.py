@@ -1,3 +1,5 @@
+"""CLI entrypoint for local pipeline execution."""
+
 import sys
 from datetime import datetime
 
