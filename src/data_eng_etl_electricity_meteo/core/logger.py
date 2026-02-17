@@ -1,334 +1,374 @@
-"""Loguru-based logger with extra={} support and automatic environment detection.
+"""Structured logging with environment-aware configuration.
 
-Adapts output to the execution environment:
-- Terminal: colored output to stderr with timestamps and structured extra fields
-- Airflow: colored output routed to Airflow's task logger
-- Notebook (Marimo): same as terminal
-- Otherwise: not colored
+Auto-detects the execution context (Airflow, TTY, or pipe) and applies
+the most appropriate rendering strategy.  Exposes a single public
+function — ``get_logger`` — that returns named structlog loggers.
+
+Output modes
+------------
+airflow
+    Extends Airflow 3's structlog processor chain with project-specific
+    processors (see ``_setup_airflow_logger``).
+tty
+    Colored console output with timestamp, log level and logger name.
+    Ideal for local interactive development.
+plain
+    Identical to *tty* but without colors — suitable when stderr is
+    redirected to a file or piped to another process.
+json
+    Machine-readable JSON lines (UTC timestamps), serialized with
+    *orjson* for speed.
 """
 
-import logging
-import re
 import sys
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Callable
+from enum import Enum
+from functools import cache
+from pathlib import Path
+from typing import Literal
 
-from loguru import logger as _loguru_logger
+import orjson
+import structlog
+from structlog.stdlib import BoundLogger
+from structlog.typing import EventDict, WrappedLogger
 
-from data_eng_etl_electricity_meteo.core.settings import settings
+from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
 
-if TYPE_CHECKING:
-    from loguru import Logger, Message, Record
+__all__: list[str] = ["get_logger"]
+
+OutputMode = Literal["airflow", "tty", "plain", "json"]
+
+
+# ---------------------------------------------------------------------------
+# Processors — normalize and flatten log values
+# ---------------------------------------------------------------------------
+_STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
+
+
+def _normalize_value(value: object) -> str | int | float | bool | None:
+    """Convert a value to a log-friendly primitive.
+
+    Returns ``None`` to signal the key should be dropped.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Enum):
+        return _normalize_value(value.value)
+    return repr(value)
+
+
+def _normalize_and_flatten(
+    _logger: WrappedLogger,
+    _method: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Normalize values and flatten nested dicts into dotted keys.
+
+    - Drops ``None`` values.
+    - Converts ``Path`` and ``Enum`` to strings.
+    - Flattens nested dicts: ``source={'provider': 'IGN'}``
+      becomes ``source.provider=IGN``.
+    """
+    flat: EventDict = {}
+    for key, value in event_dict.items():
+        if key in _STRUCTLOG_INTERNAL_KEYS:
+            flat[key] = value
+        elif isinstance(value, dict):
+            flat |= _flatten_dict(key, value)
+        else:
+            normalized = _normalize_value(value)
+            if normalized is not None:
+                flat[key] = normalized
+    return flat
+
+
+def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
+    """Recursively flatten *mapping* into dotted keys."""
+    result: EventDict = {}
+    for key, value in mapping.items():
+        dotted = f"{prefix}.{key}"
+        if isinstance(value, dict):
+            result |= _flatten_dict(dotted, value)
+        else:
+            normalized = _normalize_value(value)
+            if normalized is not None:
+                result[dotted] = normalized
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Processors — console styling (tty / plain)
+# ---------------------------------------------------------------------------
+_RESET = "\033[0m"
+_CYAN = "\033[36m"
+_EVENT_PAD = 30
+
+
+def _build_level_styles() -> dict[str, str]:
+    """Build level styles from structlog defaults with project overrides.
+
+    The returned dict is the single source of truth for level-based
+    coloring: it is shared between ``ConsoleRenderer`` (level badge)
+    and ``_colorize_event`` (event text).
+    """
+    styles = structlog.dev.ConsoleRenderer.get_default_level_styles(colors=True)
+    styles["debug"] = "\033[2m"  # dim
+    styles["info"] = ""  # default (white)
+    return styles
+
+
+def _colorize_event(
+    level_styles: dict[str, str],
+) -> structlog.types.Processor:
+    """Return a processor that pads and colorizes the event by level."""
+
+    def processor(
+        _logger: WrappedLogger,
+        _method: str,
+        event_dict: EventDict,
+    ) -> EventDict:
+        level: str = event_dict.get("level", "")
+        color = level_styles.get(level)
+        if color is not None and "event" in event_dict:
+            event = f"{event_dict['event']:<{_EVENT_PAD}}"
+            event_dict["event"] = f"{color}{event}{_RESET}" if color else event
+        return event_dict
+
+    return processor
+
+
+def _prepend_logger_name(
+    use_colors: bool = False,
+) -> structlog.types.Processor:
+    """Return a processor that prefixes the event with ``[logger_name]``.
+
+    Inserted **after** ``_colorize_event`` so the name stays
+    uncolored while the event text keeps its level color.
+    """
+
+    def processor(
+        _logger: WrappedLogger,
+        _method: str,
+        event_dict: EventDict,
+    ) -> EventDict:
+        name = event_dict.pop("logger_name", None)
+        if name:
+            prefix = f"[{_CYAN}{name}{_RESET}]" if use_colors else f"[{name}]"
+            event_dict["event"] = f"{prefix} {event_dict['event']}"
+        return event_dict
+
+    return processor
+
+
+# ---------------------------------------------------------------------------
+# Rich traceback helper
+# ---------------------------------------------------------------------------
+def _rich_traceback(
+    use_colors: bool = True,
+    width: int | None = None,
+    show_locals: bool = False,
+    word_wrap: bool = False,
+) -> structlog.dev.RichTracebackFormatter:
+    """Create a ``RichTracebackFormatter`` with customized rendering."""
+    return structlog.dev.RichTracebackFormatter(
+        width=width,
+        show_locals=show_locals,
+        word_wrap=word_wrap,
+        color_system="truecolor" if use_colors else "auto",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Environment detection
 # ---------------------------------------------------------------------------
-_ON_AIRFLOW = settings.is_running_on_airflow
-_ON_NOTEBOOK = settings.is_running_in_notebook
+@cache
+def _detect_output_mode() -> OutputMode:
+    """Choose the best output mode for the current environment."""
+    if settings.is_running_on_airflow:
+        return "airflow"
+    if sys.stderr.isatty():
+        return "tty"
+    return "plain"
 
 
 # ---------------------------------------------------------------------------
-# Color palettes (Loguru-native markup tags)
+# Airflow-specific configuration
 # ---------------------------------------------------------------------------
-class LoguruMarkup(StrEnum):
-    """Loguru color tags adapted to the detected terminal background."""
+def _setup_airflow_logger() -> None:
+    """Extend Airflow 3's structlog config with project processors.
 
-    # fmt:off
-    key_open  = "<magenta><bold>"
-    key_close = "</bold></magenta>"
-    dim_open  = "<dim>"
-    dim_close = "</dim>"
-    # fmt:on
+    Airflow 3 already calls ``structlog.configure()`` at startup with
+    its own processor chain.  Instead of replacing it, we read the
+    existing chain and insert our processors before the final renderer.
 
+    Currently injected processors:
 
-# ---------------------------------------------------------------------------
-# ANSI / Loguru-tag sanitization helpers
-# ---------------------------------------------------------------------------
-_ANSI_PATTERN = re.compile(r"\033\[[0-9;]*m")
+    - ``_normalize_and_flatten``
 
+    Notes
+    -----
+    Two levels of customization are possible:
 
-def _strip_ansi(text: str) -> str:
-    return _ANSI_PATTERN.sub(repl="", string=text)
+    1. **Add a processor** (current approach)::
 
+        processors = list(structlog.get_config()["processors"])
+        processors.insert(-1, my_processor)
+        structlog.configure(processors=processors)
 
-def _escape_loguru_tags(text: str) -> str:
-    r"""Escape ``<`` so user content is never parsed as a Loguru color tag.
+    2. **Replace a processor** (e.g. ``TimeStamper``)::
 
-    Loguru interprets ``\<`` as a literal ``<``, preventing tag parsing.
+        processors = [
+            p for p in config["processors"]
+            if not isinstance(p, structlog.processors.TimeStamper)
+        ]
+        processors.insert(-1, custom_timestamper)
+        structlog.configure(processors=processors)
+
+    Replacing Airflow processors may break the task log UI if the
+    replacement omits keys expected by Airflow's renderer (e.g.
+    ``'timestamp'`` for ``json_processor``).
     """
-    return text.replace("<", r"\<")
-
-
-def _escape_braces(text: str) -> str:
-    """Escape ``{`` and ``}`` so user content is safe inside a format template."""
-    return text.replace("{", "{{").replace("}", "}}")
-
-
-def _safe_str(value: Any) -> str:
-    """Convert *value* to a display-safe string (no ANSI, no Loguru tags, no braces)."""
-    try:
-        return _escape_braces(_escape_loguru_tags(_strip_ansi(str(value))))
-    except Exception:
-        return r"\<REPR_ERROR>"
+    config = structlog.get_config()
+    processors = list(config.get("processors", []))
+    # insert(-1) places our processor just before the final renderer
+    processors.insert(-1, _normalize_and_flatten)
+    structlog.configure(processors=processors)
 
 
 # ---------------------------------------------------------------------------
-# Extra-fields tree formatter (builds Loguru-tag template fragments)
+# Global configuration (called once at first import)
 # ---------------------------------------------------------------------------
-_INDENT = 22 if _ON_AIRFLOW else 35
-_INDENT_STEP = 4
+def _setup_logger(
+    output: OutputMode | None = None,
+    level: LogLevel = settings.logging_level,
+) -> None:
+    """Configure structlog globally.
 
-
-def _compute_prefix(level: int) -> str:
-    # ├─▶ ╰─▶
-    current_indent = " " * (_INDENT + (level * _INDENT_STEP))
-    return f"\n{current_indent}{LoguruMarkup.dim_open}╰─▶ {LoguruMarkup.dim_close}"
-
-
-def _format_value_recursive(extra: Any, level: int) -> str:
-    """Format extras recursively with tree-style indentation for nested dicts.
-
-    Returns a fragment of **Loguru format template** (with native color tags).
+    Parameters
+    ----------
+    output
+        Logging output mode. ``None`` triggers auto-detection.
+    level
+        Minimum severity level.
     """
-    # Terminal case: non-dict values are converted to safe strings
-    if not isinstance(extra, dict):
-        return _safe_str(extra)
+    if output is None:
+        output = _detect_output_mode()
 
-    # Empty dict
-    if not extra:
-        return ""
+    # --- Airflow delegates to its own config ---
+    if output == "airflow":
+        _setup_airflow_logger()
+        return
 
-    line_prefix = _compute_prefix(level=level)
+    # --- Shared processors (tty / plain / json) ---
+    shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=False),
+    ]
 
-    parts: list[str] = []
-    for key, val in extra.items():
-        key_fmt = f"{LoguruMarkup.key_open}{_safe_str(key)}{LoguruMarkup.key_close}"
+    # --- Console modes (tty / plain) ---
+    if output in ("tty", "plain"):
+        use_colors = output == "tty"
+        level_styles = _build_level_styles() if use_colors else None
 
-        if isinstance(val, dict) and val:
-            val_fmt = _format_value_recursive(val, level + 1)
-            parts.append(f"{key_fmt}{val_fmt}")
-        else:
-            val_fmt = _safe_str(val)  # no LoguruMarkup to adapt automatically to dark/light themes
-            parts.append(f"{key_fmt}={val_fmt}")
-
-    result = line_prefix.join(parts)
-    if level > 0:
-        return line_prefix + result
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Dynamic Loguru format function
-# ---------------------------------------------------------------------------
-# Plain strings (not f-strings): single braces are Loguru placeholders.
-_BASE_TERMINAL = (
-    "<dim>{time:YYYY-MM-DD HH:mm:ss zz} | </dim>"
-    "<level>{level: <8}</level> <dim>|</dim> "
-    "<level>{message}</level> "
-    "<dim>| [{file}:{function}:{line}]</dim>"
-)
-_BASE_AIRFLOW = "<level>{message}</level>"
-
-
-def _make_format_func(base_template: str) -> "Callable[[Record], str]":
-    r"""Return a Loguru-compatible callable format function.
-
-    The returned function inspects the record's *extra* dict at emit-time and
-    builds a format template string that includes native Loguru color tags for
-    the extras tree.  Loguru parses those tags, respects ``colorize``, and
-    handles ``{exception}`` correctly.
-
-    Note:
-       With a callable format, Loguru does **not** auto-append
-       ``\\n{exception}``; we must include it ourselves.
-    """
-
-    def _format(record: "Record") -> str:
-        extra = record.get("extra", {})
-        if extra:
-            prefix = _compute_prefix(level=0)
-            formatted = _format_value_recursive(extra, level=0)
-            extra_part = prefix + formatted
-        else:
-            extra_part = ""
-        return base_template + extra_part + "\n{exception}"
-
-    return _format
-
-
-# ---------------------------------------------------------------------------
-# Airflow log sink
-# ---------------------------------------------------------------------------
-def _airflow_sink(message: "Message") -> None:
-    """Route log messages to Airflow's task logger with correct severity level.
-
-    In Airflow 3.x, the task subprocess sends structured logs over a dedicated
-    JSON socket to the supervisor.  The root logger's ``"to_supervisor"``
-    handler (set up by Airflow/structlog) serializes each record **with the
-    originating logger name** — this is what populates the per-logger tabs
-    (e.g. ``MY_LOGGER``) in the task-log UI.
-
-    Airflow's ``extra_logger_names`` config also attaches a ``"console"``
-    handler **directly** to the named logger with ``propagate=True``.  This
-    causes every message to appear **twice**: once via the direct ``"console"``
-    handler (→ stdout → ``task.stdout`` tab) and once via propagation to the
-    root's ``"to_supervisor"`` handler (→ ``MY_LOGGER`` tab).
-
-    To prevent the duplicate we lazily clear any handlers that Airflow's
-    ``dictConfig`` may have added.  The clearing is repeated on every call
-    because ``dictConfig`` can run **after** our module-level ``_configure``
-    (e.g. when the task subprocess is forked).  We also force the level to
-    ``DEBUG`` so the stdlib logger never silently drops messages that Loguru
-    already filtered.
-    """
-    py_logger = logging.getLogger(name=settings.logger_name)
-
-    # Guard: Airflow's dictConfig may (re-)attach handlers after module import.
-    if py_logger.handlers:
-        py_logger.handlers.clear()
-    if py_logger.level != logging.DEBUG:
-        py_logger.setLevel(logging.DEBUG)
-
-    record = message.record
-    level_name = record["level"].name
-    level_no = logging.getLevelName(level=level_name)
-    py_logger.log(level=level_no, msg=message)
-
-
-# ---------------------------------------------------------------------------
-# Logger singleton
-# ---------------------------------------------------------------------------
-class LoguruLogger:
-    """Singleton Loguru wrapper bridging stdlib extra={} pattern with Loguru's bind()."""
-
-    _instance: "LoguruLogger | None" = None
-    _logger: "Logger"
-
-    def __new__(cls, level: str) -> "LoguruLogger":
-        """Return singleton instance, creating on first call."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._configure(level)
-        return cls._instance
-
-    def _configure(self, level: str) -> None:
-        _loguru_logger.remove()
-
-        if _ON_AIRFLOW:
-            sink = _airflow_sink
-            base = _BASE_AIRFLOW
-        else:
-            sink = sys.stderr
-            base = _BASE_TERMINAL
-
-        format_func = _make_format_func(base_template=base)
-        colorize = _ON_AIRFLOW or _ON_NOTEBOOK or sys.stderr.isatty()
-
-        _loguru_logger.add(
-            sink=sink,
-            level=level,
-            format=format_func,
-            colorize=colorize,
-            backtrace=True,
-            diagnose=True,
+        console_chain: list[structlog.types.Processor] = [_normalize_and_flatten]
+        if use_colors and level_styles:
+            console_chain.append(_colorize_event(level_styles))
+        console_chain.append(_prepend_logger_name(use_colors))
+        console_chain.append(
+            structlog.dev.ConsoleRenderer(
+                colors=use_colors,
+                sort_keys=False,
+                level_styles=level_styles,
+                pad_event_to=0 if use_colors else _EVENT_PAD,
+                exception_formatter=_rich_traceback(
+                    use_colors=use_colors,
+                    show_locals=use_colors,
+                    word_wrap=use_colors,
+                ),
+            ),
         )
+        processors = shared_processors + console_chain
+        logger_factory = structlog.PrintLoggerFactory(file=sys.stderr)
 
-        self._logger = _loguru_logger
+    # --- JSON mode ---
+    elif output == "json":
+        processors = shared_processors + [
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(serializer=orjson.dumps),
+        ]
+        logger_factory = structlog.BytesLoggerFactory()
 
-    def _log(
-        self, level: str, message: str, extra: dict[str, Any] | None = None, exc_info: bool = False
-    ) -> None:
-        log_extra = extra or {}
+    else:
+        msg = f"Unknown output mode: {output!r}"
+        raise ValueError(msg)
 
-        bound = self._logger.bind(**log_extra)
-        # depth=2 is required so Loguru correctly identifies the caller's
-        # filename and line number, skipping the _log() and info/debug() wrappers.
-        getattr(bound.opt(depth=2, exception=exc_info), level)(message)
-
-    def debug(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log a debug message."""
-        self._log("debug", message, extra)
-
-    def info(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log an info message."""
-        self._log("info", message, extra)
-
-    def warning(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log a warning message."""
-        self._log("warning", message, extra)
-
-    def error(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log an error message."""
-        self._log("error", message, extra)
-
-    def critical(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log a critical message."""
-        self._log("critical", message, extra)
-
-    def exception(self, message: str, /, extra: dict[str, Any] | None = None) -> None:
-        """Log error with traceback. Must be called inside an exception handler."""
-        if sys.exc_info()[0] is None:
-            extra = extra or {}
-            extra["warning"] = "You called logger.exception() with no active exception."
-            exc_info = False
-        else:
-            exc_info = True
-        self._log("error", message, extra, exc_info)
-
-    @classmethod
-    def _reset(cls) -> None:
-        cls._instance = None
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(min_level=level),
+        processors=processors,
+        logger_factory=logger_factory,
+        cache_logger_on_first_use=True,
+    )
 
 
-class TqdmToLoguru:
-    """File-like proxy redirecting tqdm progress output to Loguru."""
-
-    def __init__(self, logger_func: Callable):
-        self.logger_func = logger_func
-
-    def write(self, buf: str) -> None:
-        """Forward cleaned tqdm buffer to the logger."""
-        message = buf.strip("\r\n\t ")
-        if message:
-            self.logger_func(message)
+# ---------------------------------------------------------------------------
+# Module initialization
+# ---------------------------------------------------------------------------
+_setup_logger()
 
 
-logger = LoguruLogger(level=settings.app_logging_level)
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def get_logger(name: str | None = None) -> BoundLogger:
+    """Return a named structlog logger.
+
+    Parameters
+    ----------
+    name
+        Logger name.  Appears as ``[name]`` in console output.
+        ``None`` returns an unnamed default logger.
+
+    Returns
+    -------
+    BoundLogger
+        A bound logger instance.
+    """
+    if name is None:
+        return structlog.get_logger()
+
+    # TODO: auto-shorten dotted module paths
+    # short = name.rsplit(".", maxsplit=1)[-1]
+
+    return structlog.get_logger(logger_name=name)
 
 
+# ---------------------------------------------------------------------------
+# Manual smoke test
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    from pathlib import Path
+    from pydantic import BaseModel
 
-    extras = {"status": "working", "user_id": 42}
+    class X(BaseModel):
+        x: float
+        y: float
 
-    logger.debug("Debug message", extra=extras)
-    logger.info("Info message", extra=extras)
-    logger.warning("Warning message", extra=extras)
-    logger.error("Error message", extra=extras)
-    logger.critical("Critical message", extra=extras)
+    _x = X(x=1, y=2)
+    _logger = get_logger("demo")
 
-    logger.info("Message without extras")
+    _logger.debug("debug text", extra_data={"k": 3}, x=_x)
+    _logger.info("info text", extra_data={"k": 3}, x=_x)
+    _logger.warning("warning text", extra_data={"k": 3}, x=_x)
+    _logger.error("error text", extra_data={"k": 3}, x=_x)
+    _logger.critical("critical text", extra_data={"k": 3}, x=_x)
 
-    # Thanks to `_safe_str(...)`, objects with __str__ method implemented use it automatically
-    path = Path(__file__).name
-    logger.info(f"Message with path {path}", extra={"path": path})
-
-    # ANSI injection test — codes should be stripped
-    logger.info("ANSI test", extra={"\x1b[1;31mred as key": "\033[1;31mred as value"})
-
-    # Loguru tag injection test — tags should be escaped
-    logger.info("Tag test", extra={"<red>evil": "<bold>bad</bold>"})
-
-    # Nested extras
-    logger.info("Nested", extra={"outer": {"inner_key": "inner_val", "deep": {"a": 1}}})
-
-    logger.exception("No active exception")
-
+    _logger.exception("exception text (without)", extra_data={"k": 3}, x=_x)
     try:
         _ = 1 / 0
     except ZeroDivisionError:
-        logger.exception("Division error", extra={"context": "test"})
-
-    logger.info("After exception")
+        _logger.exception("exception text (with)", extra_data={"k": 3}, x=_x)

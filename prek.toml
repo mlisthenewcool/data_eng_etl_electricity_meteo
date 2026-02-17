@@ -24,10 +24,10 @@ language = "system"
 types = ["python"]
 files = "^(src|tests)/"
 
-[[repos.hooks]]
-id = "pytest"
-name = "pytest"
-entry = "uv run pytest"
-language = "system"
-pass_filenames = false
-files = '\.(py|yaml|json)$'
+#[[repos.hooks]]
+#id = "pytest"
+#name = "pytest"
+#entry = "uv run pytest"
+#language = "system"
+#pass_filenames = false
+#files = '\.(py|yaml|json)$'

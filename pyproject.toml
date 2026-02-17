@@ -7,24 +7,26 @@ requires-python = ">=3.13"
 dependencies = [
     "duckdb>=1.4.4",
     "httpx[http2]>=0.28.1",
-    "loguru>=0.7.3",
+    "orjson>=3.11.7",
     "polars>=1.38.1",
-    "prek>=0.3.2",
     "py7zr>=1.1.0",
+    "pyarrow>=23.0.1",
     "pydantic>=2.12.5",
-    "pydantic-settings>=2.12.0",
+    "pydantic-settings>=2.13.0",
     "pyyaml>=6.0.3",
+    "structlog>=25.5.0",
     "tqdm>=4.67.3",
 ]
 
 [dependency-groups]
 dev = [
     "apache-airflow-task-sdk>=1.1.7",
-    "marimo>=0.19.9",
+    "marimo>=0.19.11",
+    "prek>=0.3.3",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.0",
-    "ty>=0.0.16",
+    "ruff>=0.15.1",
+    "ty>=0.0.17",
 ]
 
 
@@ -35,17 +37,27 @@ include = [
     "tests/**/*.py"
 ]
 #src = ["src", "test"]
-#extend-exclude = ["notebooks"]
+extend-exclude = ["notebooks"]
+
+#[tool.ruff.format]
+#docstring-code-line-length = 80
 
 [tool.ruff.lint]
 select = [
     "I", "E", "W", "F", "PL", "D", "NPY"
 ]
-ignore = ["D100","D101","D103", "D107"]
+ignore = ["D107"]
 #fixable = ["ALL"]
 
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104"]
+
 [tool.ruff.lint.pydocstyle]
-convention = "google"
+#convention = "google"
+convention = "numpy"
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 88
 
 [tool.ty.src]
 include = ["src", "tests"]

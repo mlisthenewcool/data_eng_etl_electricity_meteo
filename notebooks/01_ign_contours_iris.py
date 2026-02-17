@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.9"
+__generated_with = "0.19.11"
 app = marimo.App(width="full")
 
 
@@ -25,7 +25,6 @@ def _(Path, logger):
 
     logger.info("Message without extras")
 
-    # Thanks to `_safe_str(...)`, objects with __str__ method implemented use it automatically
     path = Path(__file__).name
     logger.info(f"Message with path {path}", extra={"path": path})
 
@@ -35,6 +34,14 @@ def _(Path, logger):
     logger.exception("No active exception")
 
     logger.info("After exception")
+
+
+@app.cell
+def _(logger):
+    try:
+        _ = 1 / 0
+    except ZeroDivisionError:
+        logger.exception("oui oui", extra={"ok?": "non"})
 
 
 @app.cell

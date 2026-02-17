@@ -46,7 +46,7 @@ ENV PYTHONPATH="/opt/airflow/src" \
     AIRFLOW__DAG_PROCESSOR__BUNDLE_REFRESH_CHECK_INTERVAL="5"
 
 RUN uv pip install --no-cache \
-    duckdb "httpx[http2]" loguru polars "psycopg[c]" py7zr pydantic pydantic-settings pyaml tqdm
+    duckdb "httpx[http2]" loguru orjson polars "psycopg[c]" py7zr pydantic pydantic-settings pyaml structlog tqdm
 
 # Install DuckDB extensions once
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"
