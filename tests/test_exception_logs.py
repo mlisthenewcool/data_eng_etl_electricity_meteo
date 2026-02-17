@@ -1,5 +1,6 @@
 """Visual test: raise every low-level exception through ``PipelineStageError.log()``."""
 
+import sys
 from pathlib import Path
 
 import duckdb
@@ -15,14 +16,19 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     SilverStageError,
     TransformNotFoundError,
 )
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+logger = get_logger("test_exc")
 
 DATASET = "fake_dataset"
-SEP = "=" * 72
 
 
 def _section(title: str) -> None:
-    logger.info(f"\n{SEP}\n{title}\n{SEP}")
+    logger.info(f"----- {title} -----")
+
+
+def _end_section() -> None:
+    print("", file=sys.stderr)
 
 
 # ============================================================
@@ -39,6 +45,7 @@ try:
         raise IngestStageError(DATASET) from err
 except IngestStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("IngestStageError  ←  httpx.TimeoutException")
 try:
@@ -51,6 +58,7 @@ try:
         raise IngestStageError(DATASET) from err
 except IngestStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("IngestStageError  ←  httpx.HTTPStatusError")
 try:
@@ -66,6 +74,7 @@ try:
         raise IngestStageError(DATASET) from err
 except IngestStageError as error:
     error.log(logger.critical)
+_end_section()
 
 # ============================================================
 # 2) ExtractStageError — archive causes
@@ -83,6 +92,7 @@ try:
         raise ExtractStageError(DATASET) from err
 except ExtractStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("ExtractStageError  ←  FileNotFoundInArchiveError")
 try:
@@ -100,6 +110,7 @@ try:
         raise ExtractStageError(DATASET) from err
 except ExtractStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("ExtractStageError  ←  FileIntegrityError")
 try:
@@ -117,6 +128,7 @@ try:
         raise ExtractStageError(DATASET) from err
 except ExtractStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("ExtractStageError  ←  ValueError")
 try:
@@ -131,6 +143,7 @@ try:
         raise ExtractStageError(DATASET) from err
 except ExtractStageError as error:
     error.log(logger.critical)
+_end_section()
 
 # ============================================================
 # 3) BronzeStageError — transform / duckdb / IO causes
@@ -143,6 +156,7 @@ try:
         raise BronzeStageError(DATASET) from err
 except BronzeStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("BronzeStageError  ←  duckdb.IOException")
 try:
@@ -152,6 +166,7 @@ try:
         raise BronzeStageError(DATASET) from err
 except BronzeStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("BronzeStageError  ←  OSError")
 try:
@@ -161,6 +176,7 @@ try:
         raise BronzeStageError(DATASET) from err
 except BronzeStageError as error:
     error.log(logger.critical)
+_end_section()
 
 # ============================================================
 # 4) SilverStageError — transform / duckdb / IO causes
@@ -173,6 +189,7 @@ try:
         raise SilverStageError(DATASET) from err
 except SilverStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("SilverStageError  ←  duckdb.ConversionException")
 try:
@@ -182,6 +199,7 @@ try:
         raise SilverStageError(DATASET) from err
 except SilverStageError as error:
     error.log(logger.critical)
+_end_section()
 
 _section("SilverStageError  ←  OSError")
 try:

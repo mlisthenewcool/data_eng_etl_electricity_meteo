@@ -7,6 +7,8 @@ from typing import Literal, Self
 from pydantic import DirectoryPath, Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+__all__: list[str] = ["settings", "LogLevel"]
+
 
 class LogLevel(StrEnum):
     """Standard logging levels."""
@@ -25,8 +27,6 @@ class Settings(BaseSettings):
     # General config
     # =========================================================================
     logging_level: LogLevel = Field(default=LogLevel.INFO, description="The logger verbosity level")
-
-    logger_name: str = Field(default="DEFAULT_LOGGER", description="The logger name displayed")
 
     # =========================================================================
     # Data config
@@ -186,5 +186,3 @@ class Settings(BaseSettings):
 
 # Singleton instance
 settings = Settings()
-
-__all__: list[str] = ["settings", "LogLevel"]

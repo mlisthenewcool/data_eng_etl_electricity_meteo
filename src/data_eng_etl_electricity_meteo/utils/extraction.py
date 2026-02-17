@@ -15,9 +15,11 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     FileIntegrityError,
     FileNotFoundInArchiveError,
 )
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+
+logger = get_logger("extraction")
 
 __all__: list[str] = ["ExtractionInfo", "ExtractedFileInfo", "extract_7z"]
 
@@ -101,7 +103,7 @@ def _validate_sqlite_header(path: Path) -> None:
             if header != b"SQLite format 3\x00":
                 raise FileIntegrityError(path, reason="Invalid SQLite/GeoPackage header")
     except OSError as error:
-        raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from None
+        raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from error
 
 
 def extract_7z(
@@ -124,6 +126,11 @@ def extract_7z(
         Destination directory (created if needed).
     validate_sqlite:
         If ``True``, validate SQLite header after extraction.
+
+    Returns
+    -------
+    ExtractedFileInfo
+        Extracted file path, hash, and size.
 
     Raises
     ------
@@ -156,7 +163,7 @@ def extract_7z(
             except StopIteration:
                 raise FileNotFoundInArchiveError(target_filename, archive_path) from None
 
-            logger.info(f"Found target in archive: {target_internal_path}")
+            logger.info("Found target in archive", target_path=target_internal_path)
 
             # Get uncompressed size for progress bar
             target_info = next(

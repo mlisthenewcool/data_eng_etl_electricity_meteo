@@ -448,7 +448,9 @@ class DataCatalog(StrictModel):
 if __name__ == "__main__":
     import sys
 
-    from data_eng_etl_electricity_meteo.core.logger import logger
+    from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+    logger = get_logger("data_catalog")
 
     try:
         catalog = DataCatalog.load(settings.data_catalog_file_path)
@@ -456,7 +458,7 @@ if __name__ == "__main__":
         error.log(log_method=logger.critical)
         sys.exit(-1)
 
-    logger.info(f"--- Catalog loaded: {len(catalog.datasets)} dataset(s) ---")
+    logger.info("Catalog loaded", dataset_count=len(catalog.datasets))
 
     for _name, _dataset in catalog.datasets.items():
-        logger.info(_name, **_dataset.model_dump(exclude={"name"}))
+        logger.info("Dataset entry", dataset_name=_name, **_dataset.model_dump(exclude={"name"}))

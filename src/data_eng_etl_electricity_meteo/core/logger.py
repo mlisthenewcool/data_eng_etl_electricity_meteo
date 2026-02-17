@@ -1,26 +1,25 @@
-"""Structured logging module providing environment-aware configuration.
+"""Structured logging with environment-aware configuration.
 
-The module auto-detects the execution context (Airflow, TTY, or Pipe)
-to apply the most appropriate rendering and processing strategy.
+Auto-detects the execution context (Airflow, TTY, or pipe) and applies
+the most appropriate rendering strategy.  Exposes a single public
+function — ``get_logger`` — that returns named structlog loggers.
 
-Notes
------
-This setup implements four specific output modes:
-
-airflow:
-    Delegates entirely to Airflow's 3+ internal structlog config.
-tty:
-    colored console output with timestamp and log level, ideal for local
-    interactive development.
-plain:
-    identical to *tty* but without colors — suitable when stderr is redirected
-    to a file or piped to another process.
-json:
-    machine-readable JSON lines (UTC timestamps), serialized with *orjson* for
-    speed.
+Output modes
+------------
+airflow
+    Extends Airflow 3's structlog processor chain with project-specific
+    processors (see ``_setup_airflow_logger``).
+tty
+    Colored console output with timestamp, log level and logger name.
+    Ideal for local interactive development.
+plain
+    Identical to *tty* but without colors — suitable when stderr is
+    redirected to a file or piped to another process.
+json
+    Machine-readable JSON lines (UTC timestamps), serialized with
+    *orjson* for speed.
 """
 
-import logging
 import sys
 from enum import Enum
 from functools import cache
@@ -34,13 +33,13 @@ from structlog.typing import EventDict, WrappedLogger
 
 from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
 
-__all__: list[str] = ["logger"]
+__all__: list[str] = ["get_logger"]
 
 OutputMode = Literal["airflow", "tty", "plain", "json"]
 
 
 # ---------------------------------------------------------------------------
-# Normalize and flatten log values
+# Processors — normalize and flatten log values
 # ---------------------------------------------------------------------------
 _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
 
@@ -68,10 +67,10 @@ def _normalize_and_flatten(
 ) -> EventDict:
     """Normalize values and flatten nested dicts into dotted keys.
 
-    *source={'provider': 'IGN', 'format': '7z'}*
-    becomes *source.provider=IGN  source.format=7z*.
-
-    Drops ``None`` values and converts Path/Enum to strings.
+    - Drops ``None`` values.
+    - Converts ``Path`` and ``Enum`` to strings.
+    - Flattens nested dicts: ``source={'provider': 'IGN'}``
+      becomes ``source.provider=IGN``.
     """
     flat: EventDict = {}
     for key, value in event_dict.items():
@@ -86,10 +85,7 @@ def _normalize_and_flatten(
     return flat
 
 
-def _flatten_dict(
-    prefix: str,
-    mapping: EventDict,
-) -> EventDict:
+def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
     """Recursively flatten *mapping* into dotted keys."""
     result: EventDict = {}
     for key, value in mapping.items():
@@ -104,7 +100,89 @@ def _flatten_dict(
 
 
 # ---------------------------------------------------------------------------
-# Environment detection (evaluated once at import time)
+# Processors — console styling (tty / plain)
+# ---------------------------------------------------------------------------
+_RESET = "\033[0m"
+_CYAN = "\033[36m"
+_EVENT_PAD = 30
+
+
+def _build_level_styles() -> dict[str, str]:
+    """Build level styles from structlog defaults with project overrides.
+
+    The returned dict is the single source of truth for level-based
+    coloring: it is shared between ``ConsoleRenderer`` (level badge)
+    and ``_colorize_event`` (event text).
+    """
+    styles = structlog.dev.ConsoleRenderer.get_default_level_styles(colors=True)
+    styles["debug"] = "\033[2m"  # dim
+    styles["info"] = ""  # default (white)
+    return styles
+
+
+def _colorize_event(
+    level_styles: dict[str, str],
+) -> structlog.types.Processor:
+    """Return a processor that pads and colorizes the event by level."""
+
+    def processor(
+        _logger: WrappedLogger,
+        _method: str,
+        event_dict: EventDict,
+    ) -> EventDict:
+        level: str = event_dict.get("level", "")
+        color = level_styles.get(level)
+        if color is not None and "event" in event_dict:
+            event = f"{event_dict['event']:<{_EVENT_PAD}}"
+            event_dict["event"] = f"{color}{event}{_RESET}" if color else event
+        return event_dict
+
+    return processor
+
+
+def _prepend_logger_name(
+    use_colors: bool = False,
+) -> structlog.types.Processor:
+    """Return a processor that prefixes the event with ``[logger_name]``.
+
+    Inserted **after** ``_colorize_event`` so the name stays
+    uncolored while the event text keeps its level color.
+    """
+
+    def processor(
+        _logger: WrappedLogger,
+        _method: str,
+        event_dict: EventDict,
+    ) -> EventDict:
+        name = event_dict.pop("logger_name", None)
+        if name:
+            prefix = f"[{_CYAN}{name}{_RESET}]" if use_colors else f"[{name}]"
+            event_dict["event"] = f"{prefix} {event_dict['event']}"
+        return event_dict
+
+    return processor
+
+
+# ---------------------------------------------------------------------------
+# Rich traceback helper
+# ---------------------------------------------------------------------------
+def _rich_traceback(
+    use_colors: bool = True,
+    width: int | None = None,
+    show_locals: bool = False,
+    word_wrap: bool = False,
+) -> structlog.dev.RichTracebackFormatter:
+    """Create a ``RichTracebackFormatter`` with customized rendering."""
+    return structlog.dev.RichTracebackFormatter(
+        width=width,
+        show_locals=show_locals,
+        word_wrap=word_wrap,
+        color_system="truecolor" if use_colors else "auto",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Environment detection
 # ---------------------------------------------------------------------------
 @cache
 def _detect_output_mode() -> OutputMode:
@@ -117,91 +195,74 @@ def _detect_output_mode() -> OutputMode:
 
 
 # ---------------------------------------------------------------------------
-# Colorize event text by log level
+# Airflow-specific configuration
 # ---------------------------------------------------------------------------
-_RESET = "\033[0m"
-_LEVEL_COLORS: dict[str, str] = {
-    LogLevel.DEBUG: "\033[2m",  # dim
-    LogLevel.INFO: "\033[32m",  # green
-    LogLevel.WARNING: "\033[33m",  # yellow
-    LogLevel.ERROR: "\033[31m",  # red
-    LogLevel.CRITICAL: "\033[1;31m",  # bold red
-}
+def _setup_airflow_logger() -> None:
+    """Extend Airflow 3's structlog config with project processors.
 
-_EVENT_PAD = 30
+    Airflow 3 already calls ``structlog.configure()`` at startup with
+    its own processor chain.  Instead of replacing it, we read the
+    existing chain and insert our processors before the final renderer.
 
+    Currently injected processors:
 
-def _colorize_event(
-    _logger: WrappedLogger,
-    _method: str,
-    event_dict: EventDict,
-) -> EventDict:
-    """Pad the event to ``_EVENT_PAD`` visible chars, then colorize."""
-    level: str = event_dict.get("level", "").upper()
-    color = _LEVEL_COLORS.get(level)
-    if color and "event" in event_dict:
-        event = f"{event_dict['event']:<{_EVENT_PAD}}"
-        event_dict["event"] = f"{color}{event}{_RESET}"
-    return event_dict
+    - ``_normalize_and_flatten``
 
+    Notes
+    -----
+    Two levels of customization are possible:
 
-# ---------------------------------------------------------------------------
-# Rich traceback helper
-# ---------------------------------------------------------------------------
-def _rich_traceback(
-    use_colors: bool = True,
-    width: int | None = None,
-    show_locals: bool = False,
-    word_wrap: bool = False,
-) -> structlog.dev.RichTracebackFormatter:
-    """Create a RichTracebackFormatter with customized rendering."""
-    return structlog.dev.RichTracebackFormatter(
-        width=width,
-        show_locals=show_locals,
-        word_wrap=word_wrap,
-        color_system="truecolor" if use_colors else "auto",
-    )
+    1. **Add a processor** (current approach)::
+
+        processors = list(structlog.get_config()["processors"])
+        processors.insert(-1, my_processor)
+        structlog.configure(processors=processors)
+
+    2. **Replace a processor** (e.g. ``TimeStamper``)::
+
+        processors = [
+            p for p in config["processors"]
+            if not isinstance(p, structlog.processors.TimeStamper)
+        ]
+        processors.insert(-1, custom_timestamper)
+        structlog.configure(processors=processors)
+
+    Replacing Airflow processors may break the task log UI if the
+    replacement omits keys expected by Airflow's renderer (e.g.
+    ``'timestamp'`` for ``json_processor``).
+    """
+    config = structlog.get_config()
+    processors = list(config.get("processors", []))
+    # insert(-1) places our processor just before the final renderer
+    processors.insert(-1, _normalize_and_flatten)
+    structlog.configure(processors=processors)
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Global configuration (called once at first import)
 # ---------------------------------------------------------------------------
-def setup_logger(
+def _setup_logger(
     output: OutputMode | None = None,
     level: LogLevel = settings.logging_level,
-) -> BoundLogger:
-    """Configure *structlog* globally and return a bound logger.
+) -> None:
+    """Configure structlog globally.
 
     Parameters
     ----------
     output
         Logging output mode. ``None`` triggers auto-detection.
     level
-        Minimum severity level as a string.
-
-    Returns
-    -------
-    BoundLogger
-        A ready-to-use bound logger instance.
-
-    Notes
-    -----
-    In 'airflow' mode, we strictly avoid calling ``structlog.configure()``
-    to prevent overwriting Airflow 3's internal logging setup, which
-    would break the Task UI integration. Airflow 3 already configures structlog
-    globally. Calling ``structlog.configure()`` here would overwrite its state and
-    break Airflow's own logging.
-    By simply returning a logger bound to the project name, logs will flow
-    through Airflow's handlers (task UI, file logs, remote storage) while
-    retaining native features like : timestamp, level, JWT redaction ...
-
-    For full rendering control (at the cost of Airflow UI integration)
-    see ``_setup_airflow_bypass_logger()``.
+        Minimum severity level.
     """
     if output is None:
         output = _detect_output_mode()
 
-    # --- processors shared by every mode ---
+    # --- Airflow delegates to its own config ---
+    if output == "airflow":
+        _setup_airflow_logger()
+        return
+
+    # --- Shared processors (tty / plain / json) ---
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.StackInfoRenderer(),
@@ -210,19 +271,20 @@ def setup_logger(
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=False),
     ]
 
-    # --- mode-specific configuration ---
-    if output == "airflow":
-        return structlog.get_logger(logger_name=settings.logger_name)  # or "airflow.task"
-
+    # --- Console modes (tty / plain) ---
     if output in ("tty", "plain"):
         use_colors = output == "tty"
+        level_styles = _build_level_styles() if use_colors else None
+
         console_chain: list[structlog.types.Processor] = [_normalize_and_flatten]
-        if use_colors:
-            console_chain.append(_colorize_event)
+        if use_colors and level_styles:
+            console_chain.append(_colorize_event(level_styles))
+        console_chain.append(_prepend_logger_name(use_colors))
         console_chain.append(
             structlog.dev.ConsoleRenderer(
                 colors=use_colors,
                 sort_keys=False,
+                level_styles=level_styles,
                 pad_event_to=0 if use_colors else _EVENT_PAD,
                 exception_formatter=_rich_traceback(
                     use_colors=use_colors,
@@ -231,9 +293,10 @@ def setup_logger(
                 ),
             ),
         )
-        processors: list[structlog.types.Processor] = shared_processors + console_chain
+        processors = shared_processors + console_chain
         logger_factory = structlog.PrintLoggerFactory(file=sys.stderr)
 
+    # --- JSON mode ---
     elif output == "json":
         processors = shared_processors + [
             structlog.processors.format_exc_info,
@@ -242,7 +305,6 @@ def setup_logger(
         logger_factory = structlog.BytesLoggerFactory()
 
     else:
-        # Should never happen thanks to the Literal type, but just in case.
         msg = f"Unknown output mode: {output!r}"
         raise ValueError(msg)
 
@@ -250,90 +312,45 @@ def setup_logger(
         wrapper_class=structlog.make_filtering_bound_logger(min_level=level),
         processors=processors,
         logger_factory=logger_factory,
-        # Note: the cache freezes each logger after its first use.
-        # A subsequent call to setup_logger() with other parameters
-        # will NOT update loggers that have already been cached.
         cache_logger_on_first_use=True,
     )
 
-    return structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# Module initialization
+# ---------------------------------------------------------------------------
+_setup_logger()
 
 
 # ---------------------------------------------------------------------------
-# Airflow bypass (kept for reference — not used by default)
+# Public API
 # ---------------------------------------------------------------------------
-def _setup_airflow_bypass_logger(
-    level: LogLevel,
-    shared_processors: list[structlog.types.Processor],
-) -> BoundLogger:
-    """Bypass Airflow's structlog config — writes directly to stderr.
+def get_logger(name: str | None = None) -> BoundLogger:
+    """Return a named structlog logger.
 
     Parameters
     ----------
-    level:
-        Minimum severity level as a string.
-    shared_processors:
-        The common processor chain to build upon.
+    name
+        Logger name.  Appears as ``[name]`` in console output.
+        ``None`` returns an unnamed default logger.
 
     Returns
     -------
     BoundLogger
-        A logger instance mapped to a stdlib StreamHandler.
-
-    Notes
-    -----
-    * Not used by default: Kept here in case we need full control over rendering
-    (rich traceback width, colors, timestamp format, etc.) at the cost of losing
-    Airflow UI log integration and remote logging.
-
-    * (warning) Logs bypass Airflow's handlers → not visible in the task UI or
-    remote storage (S3, GCS, etc.).  They only appear on stderr.
-
-    * (warning) Calling ``structlog.configure()`` overwrites Airflow's global
-    config, which can break Airflow's own internal logging.
-
+        A bound logger instance.
     """
-    processors: list[structlog.types.Processor] = shared_processors + [
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.ExtraAdder(),
-        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-    ]
+    if name is None:
+        return structlog.get_logger()
 
-    formatter = structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.dev.ConsoleRenderer(
-                colors=True,
-                exception_formatter=_rich_traceback(use_colors=True),
-            ),
-        ],
-    )
+    # TODO: auto-shorten dotted module paths
+    # short = name.rsplit(".", maxsplit=1)[-1]
 
-    # Attach the formatter to a named stdlib logger.
-    stdlib_logger = logging.getLogger(settings.logger_name)
-    stdlib_logger.handlers.clear()
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(formatter)
-    stdlib_logger.addHandler(handler)
-    stdlib_logger.setLevel(level)
-
-    structlog.configure(
-        wrapper_class=structlog.make_filtering_bound_logger(min_level=level),
-        processors=processors,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    return structlog.stdlib.get_logger(logger_name=settings.logger_name)
+    return structlog.get_logger(logger_name=name)
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton (auto-detected mode if no ``output`` parameter)
+# Manual smoke test
 # ---------------------------------------------------------------------------
-logger = setup_logger()
-"""The singleton logger instance."""
-
-
 if __name__ == "__main__":
     from pydantic import BaseModel
 
@@ -342,15 +359,16 @@ if __name__ == "__main__":
         y: float
 
     _x = X(x=1, y=2)
+    _logger = get_logger("demo")
 
-    logger.debug("debug text", extra_data={"k": 3}, x=_x)
-    logger.info("info text", extra_data={"k": 3}, x=_x)
-    logger.warning("warning text", extra_data={"k": 3}, x=_x)
-    logger.error("error text", extra_data={"k": 3}, x=_x)
-    logger.critical("critical text", extra_data={"k": 3}, x=_x)
+    _logger.debug("debug text", extra_data={"k": 3}, x=_x)
+    _logger.info("info text", extra_data={"k": 3}, x=_x)
+    _logger.warning("warning text", extra_data={"k": 3}, x=_x)
+    _logger.error("error text", extra_data={"k": 3}, x=_x)
+    _logger.critical("critical text", extra_data={"k": 3}, x=_x)
 
-    logger.exception("exception text (without)", extra_data={"k": 3}, x=_x)
+    _logger.exception("exception text (without)", extra_data={"k": 3}, x=_x)
     try:
         _ = 1 / 0
     except ZeroDivisionError:
-        logger.exception("exception text (with)", extra_data={"k": 3}, x=_x)
+        _logger.exception("exception text (with)", extra_data={"k": 3}, x=_x)

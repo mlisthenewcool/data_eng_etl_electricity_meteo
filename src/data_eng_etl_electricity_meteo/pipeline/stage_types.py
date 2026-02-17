@@ -9,11 +9,11 @@ Architecture
 
 - Pipeline functions (typed) ←→ Airflow tasks (dicts via XCom)
 
-    - download()  → DownloadStageResult   → to_serializable() → XCom dict
-    - extract()   → ExtractionStageResult
-    - bronze()    → BronzeStageResult
-    - silver()    → SilverStageResult
-    - gold()      → GoldStageResult
+    - ingest()        → DownloadStageResult   → model_dump() → XCom dict
+    - extract()       → DownloadStageResult (with extraction_info)
+    - to_bronze()     → BronzeStageResult
+    - to_silver()     → SilverStageResult
+    - (to_gold)       → GoldStageResult
 """
 
 from pathlib import Path
@@ -38,7 +38,6 @@ __all__: list[str] = [
 # =============================================================================
 # Stage-specific info types
 # =============================================================================
-# TODO: classes privées ?
 
 
 class BronzeInfo(StrictModel):

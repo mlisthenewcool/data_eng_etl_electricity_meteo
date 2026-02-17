@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
+
+logger = get_logger("path_resolver")
 
 __all__: list[str] = ["RemotePathResolver", "DerivedPathResolver"]
 
@@ -173,8 +175,8 @@ if __name__ == "__main__":
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 
         logger.info(
-            f"dataset → {_dataset.name}",
-            # dataset=_dataset.model_dump(mode="json"),
+            "Remote dataset paths",
+            dataset_name=_dataset.name,
             run_version=_run_version,
             landing_dir=_resolver.landing_dir,
             bronze_path=_resolver.bronze_path(_run_version),
@@ -189,8 +191,8 @@ if __name__ == "__main__":
         _resolver = DerivedPathResolver(dataset_name=_dataset.name)
 
         logger.info(
-            f"dataset → {_dataset.name}",
-            # dataset=_dataset.model_dump(mode="json"),
+            "Derived dataset paths",
+            dataset_name=_dataset.name,
             gold_current_path=_resolver.gold_current_path,
             gold_backup_path=_resolver.gold_backup_path,
         )

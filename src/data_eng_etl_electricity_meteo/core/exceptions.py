@@ -7,7 +7,6 @@ from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 
 __all__: list[str] = [
     "BaseProjectException",
-    "DownloadError",
     "ExtractionError",
     "ArchiveNotFoundError",
     "FileNotFoundInArchiveError",
@@ -48,14 +47,8 @@ class BaseProjectException(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Download/archive errors
+# Archive errors
 # ---------------------------------------------------------------------------
-class DownloadError(BaseProjectException):
-    """Base exception for download-related failures."""
-
-    # TODO: utile ?
-
-
 class ExtractionError(BaseProjectException):
     """Base exception for archive extraction failures."""
 
@@ -157,7 +150,9 @@ class PipelineStageError(BaseProjectException):
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes."""
         cause = self.__cause__
-        if isinstance(cause, BaseProjectException):
+        if cause is None:
+            log_method(str(self), **self.to_dict())
+        elif isinstance(cause, BaseProjectException):
             log_method(
                 str(self),
                 **self.to_dict() | cause.to_dict(),

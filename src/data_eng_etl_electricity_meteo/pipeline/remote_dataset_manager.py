@@ -14,6 +14,7 @@ Uses ``RemotePathResolver`` for all path operations and
 
 import shutil
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     SilverStageError,
     TransformNotFoundError,
 )
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.pydantic_base import format_pydantic_errors
 from data_eng_etl_electricity_meteo.pipeline.file_manager import RemoteFileManager
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
@@ -57,8 +58,10 @@ from data_eng_etl_electricity_meteo.utils.remote_metadata import (
     has_remote_file_changed,
 )
 
+logger = get_logger("pipeline")
 
-@dataclass(frozen=True)
+
+@dataclass
 class RemoteDatasetPipeline:
     """Pipeline manager for a single remote dataset.
 
@@ -76,6 +79,11 @@ class RemoteDatasetPipeline:
         """Validate that transform modules exist for this dataset (fast-fail)."""
         get_bronze_transform(self.dataset.name)
         get_silver_transform(self.dataset.name)
+
+    @cached_property
+    def resolver(self) -> RemotePathResolver:
+        """Path resolver for this dataset (created once, cached)."""
+        return RemotePathResolver(dataset_name=self.dataset.name)
 
     @staticmethod
     def _safely_load_metadata(metadata: dict[str, Any] | None) -> PipelineRunSnapshot | None:
@@ -96,7 +104,7 @@ class RemoteDatasetPipeline:
         try:
             return PipelineRunSnapshot.model_validate(metadata)
         except ValidationError as e:
-            logger.warning("Metadata corrupted.", **format_pydantic_errors(e))
+            logger.warning("Metadata corrupted", **format_pydantic_errors(e))
             return None
 
     # ========================================
@@ -127,7 +135,7 @@ class RemoteDatasetPipeline:
             remote metadata used for the decision.
         """
         # --- 1. Check upstream consistency ---
-        silver_path = RemotePathResolver(dataset_name=self.dataset.name).silver_current_path
+        silver_path = self.resolver.silver_current_path
         silver_file_exists = silver_path.exists()
         remote_metadata_exists = previous_remote_file_info is not None
 
@@ -146,7 +154,7 @@ class RemoteDatasetPipeline:
             if not has_remote_file_changed(
                 current=current_remote_file_info, previous=previous_remote_file_info
             ):
-                logger.info("Skipping : hash (sha256) is identical to previous successful run.")
+                logger.info("Skipping: remote metadata unchanged since previous successful run")
                 return IngestionDecision(
                     should_ingest=False, is_healing=False, remote_metadata=current_remote_file_info
                 )
@@ -170,11 +178,9 @@ class RemoteDatasetPipeline:
         DownloadStageResult
             Download info with version and remote metadata.
         """
-        resolver = RemotePathResolver(dataset_name=self.dataset.name)
-
         download_info = download_to_file(
             url=self.dataset.source.url_as_str,
-            dest_dir=resolver.landing_dir,
+            dest_dir=self.resolver.landing_dir,
             fallback_filename=f"{version}.{self.dataset.source.format.value}",
         )
 
@@ -212,7 +218,7 @@ class RemoteDatasetPipeline:
                 safe_previous_metadata.remote_metadata if safe_previous_metadata else None
             )
 
-            # --- 3. todo: merge with the other function ? explain ?
+            # --- 3. Evaluate whether ingestion is needed ---
             need = self._evaluate_ingestion_need(
                 current_remote_file_info=remote_file_info,
                 previous_remote_file_info=previous_remote_metadata,
@@ -233,7 +239,7 @@ class RemoteDatasetPipeline:
                     return False
 
             return ingest_result
-        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.HTTPError) as err:
+        except httpx.HTTPError as err:
             raise IngestStageError(self.dataset.name) from err
 
     def should_skip_extraction(
@@ -343,7 +349,7 @@ class RemoteDatasetPipeline:
             ``True`` if hashes match (processing can be skipped).
         """
         if previous_hash == current_hash:
-            logger.info("Content hash identical to previous run. Cleaning up and skipping.")
+            logger.info("Content hash identical to previous run, cleaning up and skipping")
             self._cleanup_landing()
             return True
 
@@ -351,9 +357,8 @@ class RemoteDatasetPipeline:
 
     def _cleanup_landing(self) -> None:
         """Remove the landing directory and all its contents."""
-        path_resolver = RemotePathResolver(dataset_name=self.dataset.name)
-        if path_resolver.landing_dir.exists() and path_resolver.landing_dir.is_dir():
-            shutil.rmtree(path_resolver.landing_dir)
+        if self.resolver.landing_dir.exists() and self.resolver.landing_dir.is_dir():
+            shutil.rmtree(self.resolver.landing_dir)
 
     # =============================================================================
     # Transformations
@@ -376,9 +381,7 @@ class RemoteDatasetPipeline:
             Upstream download context and bronze metrics.
         """
         try:
-            resolver = RemotePathResolver(dataset_name=self.dataset.name)
-
-            bronze_path = resolver.bronze_path(ingest_or_extract_result.version)
+            bronze_path = self.resolver.bronze_path(ingest_or_extract_result.version)
             bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
             logger.info(
@@ -395,7 +398,7 @@ class RemoteDatasetPipeline:
             df.write_parquet(bronze_path)
 
             # Update latest symlink to point to this version
-            file_manager = RemoteFileManager(resolver)
+            file_manager = RemoteFileManager(self.resolver)
             file_manager.update_bronze_latest_link(ingest_or_extract_result.version)
 
             # Cleanup all landing files
@@ -412,7 +415,7 @@ class RemoteDatasetPipeline:
                 row_count=row_count,
                 columns=columns,
                 bronze_path=bronze_path,
-                latest_link=resolver.bronze_latest_path,
+                latest_link=self.resolver.bronze_latest_path,
             )
 
             return BronzeStageResult(
@@ -443,32 +446,29 @@ class RemoteDatasetPipeline:
             Upstream download/bronze context and silver metrics.
         """
         try:
-            resolver = RemotePathResolver(dataset_name=self.dataset.name)
-
             logger.info(
                 "Transforming to silver",
                 dataset_name=self.dataset.name,
-                bronze_source=resolver.bronze_latest_path,
-                silver_dest=resolver.silver_current_path,
+                bronze_source=self.resolver.bronze_latest_path,
+                silver_dest=self.resolver.silver_current_path,
             )
 
             # Retrieve and apply dataset-specific silver transformation
             transform = get_silver_transform(self.dataset.name)
-            df = transform(resolver.bronze_latest_path)
+            df = transform(self.resolver.bronze_latest_path)
 
             # Rotate silver BEFORE writing to disk: current → backup
-            file_manager = RemoteFileManager(resolver)
+            file_manager = RemoteFileManager(self.resolver)
             file_manager.rotate_silver()
 
-            # TODO: at this point, is it necessary to create parent ?
-            resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
+            self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Now that we rotated versions, write to disk
-            df.write_parquet(resolver.silver_current_path)
+            df.write_parquet(self.resolver.silver_current_path)
 
             columns = df.columns
             row_count = len(df)
-            parquet_size = resolver.silver_current_path.stat().st_size / (1024 * 1024)
+            parquet_size = self.resolver.silver_current_path.stat().st_size / (1024 * 1024)
 
             logger.info(
                 "Silver transformation complete",
@@ -476,8 +476,8 @@ class RemoteDatasetPipeline:
                 file_size_mib=parquet_size,
                 row_count=row_count,
                 columns=columns,
-                silver_current=resolver.silver_current_path,
-                silver_backup=resolver.silver_backup_path,
+                silver_current=self.resolver.silver_current_path,
+                silver_backup=self.resolver.silver_backup_path,
             )
 
             return SilverStageResult(

@@ -14,9 +14,11 @@ from urllib.parse import unquote, urlparse
 import httpx
 from tqdm import tqdm
 
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+
+logger = get_logger("download")
 
 __all__: list[str] = ["HttpDownloadInfo", "download_to_file"]
 
@@ -82,10 +84,10 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 
         # check if it's an actual file and not a folder
         if filename and filename != "." and "." in filename:
-            logger.info("Extracted filename from URL path.", filename=filename, url=url)
+            logger.info("Extracted filename from URL path", filename=filename, url=url)
             return filename
 
-    logger.warning("Could not extract filename.", url=url)
+    logger.warning("Could not extract filename", url=url)
     return None
 
 
@@ -100,6 +102,11 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
         Destination directory (created if needed).
     fallback_filename:
         Fallback filename if none could be extracted from the response.
+
+    Returns
+    -------
+    HttpDownloadInfo
+        Downloaded file path, SHA-256 hash, and size in MiB.
 
     Raises
     ------
@@ -126,14 +133,14 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
             filename = _extract_filename(response, url)
             if filename is None:
                 logger.warning(
-                    "Could not extract filename, fallback to default.",
+                    "Could not extract filename, fallback to default",
                     fallback_filename=fallback_filename,
                 )
                 filename = fallback_filename
             dest_path = dest_dir / filename
 
             if dest_path.exists():
-                logger.warning("File already exists. Overwriting.", url=url, dest_path=dest_path)
+                logger.warning("File already exists, overwriting", url=url, dest_path=dest_path)
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             downloaded_bytes = 0

@@ -7,8 +7,10 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
+
+logger = get_logger("transform.ign_contours_iris")
 
 # from data_eng_etl_electricity_meteo.pipeline.validators
 # import validate_ign_contours_iris
@@ -108,9 +110,6 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     try:
         conn.execute("LOAD spatial;")
 
-        # Register the parquet file as a table
-        conn.execute(f"CREATE VIEW bronze AS SELECT * FROM read_parquet('{latest_bronze_path}')")
-
         # Compute centroids and transform to WGS84
         # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154)
         # Note: DuckDB's ST_Transform from Lambert 93 to WGS84 returns coordinates
@@ -135,11 +134,11 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
                 'EPSG:2154',
                 'EPSG:4326'
             )) AS centroid_lon
-        FROM bronze
+        FROM read_parquet(?)
         """
 
         logger.info("Computing centroids with DuckDB spatial extension")
-        df = conn.execute(query).pl()
+        df = conn.execute(query, [str(latest_bronze_path)]).pl()
     finally:
         conn.close()
 

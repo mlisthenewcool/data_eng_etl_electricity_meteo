@@ -1,17 +1,18 @@
-"""DAG factory for landing-to-silver ingestion pipelines."""
+"""Smoke-test DAG for verifying structlog integration in Airflow."""
 
-from airflow import XComArg
-from airflow.sdk import DAG, Asset, dag, task
+from airflow.sdk import DAG, Asset, XComArg, dag, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_asset
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+logger = get_logger("dag_factory")
 
 __all__: list[str] = []
 
 
 def _create_dag(asset: Asset) -> DAG:
     @dag(
-        dag_id="landing_to_silver_factory",
+        dag_id="test_logging_dag",
     )
     def _dag() -> None:
         @task(outlets=[asset])

@@ -7,7 +7,9 @@ from typing import Self
 
 import httpx
 
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+logger = get_logger("remote_metadata")
 
 __all__: list[str] = [
     "ChangeDetectionResult",
@@ -95,6 +97,11 @@ def get_remote_file_metadata(
     follow_redirects:
         Whether to follow HTTP redirects.
 
+    Returns
+    -------
+    RemoteFileMetadata
+        Parsed metadata from HTTP HEAD response headers.
+
     Raises
     ------
     httpx.HTTPStatusError
@@ -108,18 +115,13 @@ def get_remote_file_metadata(
         with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, http2=True) as client:
             response = client.head(url)
             response.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        logger.error(
-            f"HTTP error checking remote file: {e.response.status_code}",
-            url=url,
-            status=e.response.status_code,
-        )
-        raise
-    except httpx.TimeoutException:
-        logger.error("Timeout checking remote file", url=url, timeout=timeout)
-        raise
     except httpx.HTTPError as e:
-        logger.error("Network error checking remote file", url=url, error=str(e))
+        logger.error(
+            "Failed to check remote file metadata",
+            url=url,
+            error_type=type(e).__name__,
+            error=str(e),
+        )
         raise
 
     headers = response.headers
@@ -176,6 +178,11 @@ def has_remote_file_changed(
         Newly fetched metadata.
     previous:
         Metadata from a previous execution.
+
+    Returns
+    -------
+    ChangeDetectionResult
+        Verdict indicating whether the remote file has changed.
     """
     # TODO: ajouter méthode If-None-Match
     # headers = {}

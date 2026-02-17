@@ -12,14 +12,102 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from data_eng_etl_electricity_meteo.core.logger import logger
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
     DerivedPathResolver,
     RemotePathResolver,
 )
 
+logger = get_logger("file_manager")
+
 __all__: list[str] = ["RemoteFileManager", "DerivedFileManager"]
+
+
+# ---------------------------------------------------------------------------
+# Shared rotation / rollback helpers
+# ---------------------------------------------------------------------------
+
+
+def _rotate(
+    dataset_name: str,
+    current_path: Path,
+    backup_path: Path,
+    layer: str,
+) -> None:
+    """Copy ``current`` → ``backup``. No-op if current doesn't exist.
+
+    Parameters
+    ----------
+    dataset_name:
+        Dataset identifier (for log context).
+    current_path:
+        Path to the current file.
+    backup_path:
+        Path to the backup file.
+    layer:
+        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+    """
+    if current_path.exists():
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(current_path, backup_path)
+        logger.info(
+            f"Rotated {layer} files",
+            dataset_name=dataset_name,
+            current=current_path,
+            backup=backup_path,
+        )
+    else:
+        logger.warning(
+            f"Skipped {layer} rotation: no current file (expected on first run)",
+            dataset_name=dataset_name,
+        )
+
+
+def _rollback(
+    dataset_name: str,
+    current_path: Path,
+    backup_path: Path,
+    layer: str,
+) -> bool:
+    """Restore ``backup`` → ``current``.
+
+    Parameters
+    ----------
+    dataset_name:
+        Dataset identifier (for log context).
+    current_path:
+        Path to the current file.
+    backup_path:
+        Path to the backup file.
+    layer:
+        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+
+    Returns
+    -------
+    bool
+        ``True`` if rollback succeeded, ``False`` if no backup exists.
+    """
+    if not backup_path.exists():
+        logger.warning(
+            f"Cannot rollback {layer}: no backup exists",
+            dataset_name=dataset_name,
+        )
+        return False
+
+    shutil.copy2(backup_path, current_path)
+    logger.info(
+        f"Rolled back {layer} to backup version",
+        dataset_name=dataset_name,
+        backup=backup_path,
+        current=current_path,
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Remote datasets (landing → bronze → silver)
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -74,7 +162,7 @@ class RemoteFileManager:
                 symlink=latest_link,
                 target=relative_target,
             )
-        except Exception:
+        except OSError:
             if temp_link.exists():
                 temp_link.unlink()
             raise
@@ -97,9 +185,6 @@ class RemoteFileManager:
         cutoff_time = datetime.now() - timedelta(days=retention_days)
         deleted = []
 
-        # TODO: Optimize by calculating cutoff date (YYYYMMDD)
-        #       and using binary search on sorted filenames,
-        #       instead of checking mtime of all files.
         for version_path in self.resolver.list_bronze_versions():
             file_mtime = datetime.fromtimestamp(version_path.stat().st_mtime)
 
@@ -120,23 +205,12 @@ class RemoteFileManager:
 
         Call **before** writing new current. No-op if current doesn't exist.
         """
-        if self.resolver.silver_current_path.exists():
-            self.resolver.silver_backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(
-                self.resolver.silver_current_path,
-                self.resolver.silver_backup_path,
-            )
-            logger.info(
-                "Rotated silver files",
-                dataset_name=self.resolver.dataset_name,
-                current=self.resolver.silver_current_path,
-                backup=self.resolver.silver_backup_path,
-            )
-        else:
-            logger.warning(
-                "Skipped silver rotation: no current file (expected on first run)",
-                dataset_name=self.resolver.dataset_name,
-            )
+        _rotate(
+            self.resolver.dataset_name,
+            self.resolver.silver_current_path,
+            self.resolver.silver_backup_path,
+            "silver",
+        )
 
     def rollback_silver(self) -> bool:
         """Restore ``backup.parquet`` → ``current.parquet``.
@@ -146,24 +220,17 @@ class RemoteFileManager:
         bool
             ``True`` if rollback succeeded, ``False`` if no backup exists.
         """
-        if not self.resolver.silver_backup_path.exists():
-            logger.warning(
-                "Cannot rollback silver: no backup exists",
-                dataset_name=self.resolver.dataset_name,
-            )
-            return False
-
-        shutil.copy2(
-            self.resolver.silver_backup_path,
+        return _rollback(
+            self.resolver.dataset_name,
             self.resolver.silver_current_path,
+            self.resolver.silver_backup_path,
+            "silver",
         )
-        logger.info(
-            "Rolled back silver to backup version",
-            dataset_name=self.resolver.dataset_name,
-            backup=self.resolver.silver_backup_path,
-            current=self.resolver.silver_current_path,
-        )
-        return True
+
+
+# ---------------------------------------------------------------------------
+# Derived datasets (gold)
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -177,23 +244,12 @@ class DerivedFileManager:
 
         Call **before** writing new current. No-op if current doesn't exist.
         """
-        if self.resolver.gold_current_path.exists():
-            self.resolver.gold_backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(
-                self.resolver.gold_current_path,
-                self.resolver.gold_backup_path,
-            )
-            logger.info(
-                "Rotated gold files",
-                dataset_name=self.resolver.dataset_name,
-                current=self.resolver.gold_current_path,
-                backup=self.resolver.gold_backup_path,
-            )
-        else:
-            logger.warning(
-                "Skipped gold rotation: no current file (expected on first run)",
-                dataset_name=self.resolver.dataset_name,
-            )
+        _rotate(
+            self.resolver.dataset_name,
+            self.resolver.gold_current_path,
+            self.resolver.gold_backup_path,
+            "gold",
+        )
 
     def rollback_gold(self) -> bool:
         """Restore ``backup.parquet`` → ``current.parquet``.
@@ -203,21 +259,9 @@ class DerivedFileManager:
         bool
             ``True`` if rollback succeeded, ``False`` if no backup exists.
         """
-        if not self.resolver.gold_backup_path.exists():
-            logger.warning(
-                "Cannot rollback gold: no backup exists",
-                dataset_name=self.resolver.dataset_name,
-            )
-            return False
-
-        shutil.copy2(
-            self.resolver.gold_backup_path,
+        return _rollback(
+            self.resolver.dataset_name,
             self.resolver.gold_current_path,
+            self.resolver.gold_backup_path,
+            "gold",
         )
-        logger.info(
-            "Rolled back gold to backup version",
-            dataset_name=self.resolver.dataset_name,
-            backup=self.resolver.gold_backup_path,
-            current=self.resolver.gold_current_path,
-        )
-        return True
