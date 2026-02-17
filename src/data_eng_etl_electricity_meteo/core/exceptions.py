@@ -14,6 +14,7 @@ __all__: list[str] = [
     "InvalidCatalogError",
     "DatasetNotFoundError",
     "AirflowContextError",
+    "TransformNotFoundError",
 ]
 
 
@@ -121,3 +122,15 @@ class AirflowContextError(BaseProjectException):
         self.operation = operation
         self.expected_context = expected_context
         super().__init__(f"Invalid Airflow context: {suggestion}.")
+
+
+# ---------------------------------------------------------------------------
+# Transformation errors
+# ---------------------------------------------------------------------------
+class TransformNotFoundError(BaseProjectException):
+    """Raised when no transformation is registered for a dataset/layer pair."""
+
+    def __init__(self, dataset_name: str, layer: str) -> None:
+        self.dataset_name = dataset_name
+        self.layer = layer
+        super().__init__("Transform not found for dataset.")

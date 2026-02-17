@@ -11,6 +11,7 @@ dependencies = [
     "orjson>=3.11.7",
     "polars>=1.38.1",
     "py7zr>=1.1.0",
+    "pyarrow>=23.0.1",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.0",
     "pyyaml>=6.0.3",

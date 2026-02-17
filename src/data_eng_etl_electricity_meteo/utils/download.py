@@ -18,12 +18,12 @@ from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
-__all__: list[str] = ["HttpDownloadResult", "download_to_file"]
+__all__: list[str] = ["HttpDownloadInfo", "download_to_file"]
 
 
 @dataclass(frozen=True)
-class HttpDownloadResult:
-    """Downloaded file metadata (path, hash, size)."""
+class HttpDownloadInfo:
+    """Downloaded file information (path, hash, size)."""
 
     path: Path
     file_hash: str
@@ -89,7 +89,7 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
     return None
 
 
-def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDownloadResult:
+def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDownloadInfo:
     """Stream a file from *url* to *dest_dir* with progress and SHA256.
 
     Parameters
@@ -176,4 +176,4 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
                 file_hash=file_hash,
             )
 
-            return HttpDownloadResult(path=dest_path, file_hash=file_hash, size_mib=size_mib)
+            return HttpDownloadInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

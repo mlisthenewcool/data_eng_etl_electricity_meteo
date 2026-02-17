@@ -19,12 +19,12 @@ from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
-__all__: list[str] = ["ExtractionResult", "ExtractedFileInfo", "extract_7z"]
+__all__: list[str] = ["ExtractionInfo", "ExtractedFileInfo", "extract_7z"]
 
 
 @dataclass(frozen=True)
-class ExtractionResult:
-    """Extraction result with archive context (for pipeline traceability)."""
+class ExtractionInfo:
+    """Extraction information with archive context (for pipeline traceability)."""
 
     archive_path: Path
     file_path: Path

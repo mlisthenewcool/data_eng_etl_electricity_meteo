@@ -36,11 +36,8 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     DatasetNotFoundError,
     InvalidCatalogError,
 )
+from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.utils.pydantic_utils import (
-    StrictModel,
-    format_pydantic_errors,
-)
 
 __all__: list[str] = [
     "SourceFormat",
@@ -115,7 +112,7 @@ class IngestionFrequency(StrEnum):
 
         Parameters
         ----------
-        no_dash : bool
+        no_dash:
             If ``True``, return the ``_nodash`` variant.
 
         Returns
@@ -147,9 +144,9 @@ class IngestionFrequency(StrEnum):
 
         Parameters
         ----------
-        dt : datetime
+        dt:
             Datetime to format.
-        no_dash : bool
+        no_dash:
             If ``True``, return compact format without separators.
 
         Returns
@@ -175,13 +172,13 @@ class RemoteSourceConfig(StrictModel):
 
     Attributes
     ----------
-    provider : str
+    provider:
         Data provider name (e.g. ``"IGN"``).
-    url : HttpUrl
+    url:
         Download URL.
-    format : SourceFormat
+    format:
         File format.
-    inner_file : str | None
+    inner_file:
         File to extract from archive (required iff ``format.is_archive``).
     """
 
@@ -210,7 +207,7 @@ class DerivedSourceConfig(StrictModel):
 
     Attributes
     ----------
-    depends_on : list[str]
+    depends_on:
         Silver dataset names this Gold dataset is built from.
     """
 
@@ -241,9 +238,9 @@ class IngestionPolicy(StrictModel):
 
     Attributes
     ----------
-    frequency : IngestionFrequency
+    frequency:
         Update frequency (also determines version format).
-    mode : IngestionMode
+    mode:
         Snapshot or incremental.
     """
 
@@ -262,13 +259,13 @@ class RemoteDatasetConfig(StrictModel):
 
     Attributes
     ----------
-    name : str
+    name:
         Dataset identifier (auto-injected from YAML key).
-    description : str
+    description:
         Human-readable description.
-    source : RemoteSourceConfig
+    source:
         Remote source (url, provider, format).
-    ingestion : IngestionPolicy
+    ingestion:
         Ingestion frequency and mode.
     """
 
@@ -283,11 +280,11 @@ class DerivedDatasetConfig(StrictModel):
 
     Attributes
     ----------
-    name : str
+    name:
         Dataset identifier (auto-injected from YAML key).
-    description : str
+    description:
         Human-readable description.
-    source : DerivedSourceConfig
+    source:
         Derived source (depends_on).
     """
 
@@ -312,7 +309,7 @@ def _dataset_discriminator(v: Any) -> str:
     return "derived"
 
 
-DatasetConfig = Annotated[
+type DatasetConfig = Annotated[
     Annotated[RemoteDatasetConfig, Tag("remote")] | Annotated[DerivedDatasetConfig, Tag("derived")],
     Discriminator(_dataset_discriminator),
 ]
@@ -328,7 +325,7 @@ class DataCatalog(StrictModel):
 
     Attributes
     ----------
-    datasets : dict[str, DatasetConfig]
+    datasets:
         Mapping of dataset name to its configuration.
     """
 
@@ -350,7 +347,7 @@ class DataCatalog(StrictModel):
 
         Parameters
         ----------
-        path : Path
+        path:
             Path to the YAML catalog file.
 
         Returns
@@ -395,7 +392,7 @@ class DataCatalog(StrictModel):
 
         Parameters
         ----------
-        name : str
+        name:
             Dataset identifier.
 
         Returns

@@ -38,7 +38,7 @@ class RemoteFileManager:
 
         Parameters
         ----------
-        target_version : str
+        target_version:
             Version string of the bronze file to point to.
 
         Raises
@@ -86,7 +86,7 @@ class RemoteFileManager:
 
         Parameters
         ----------
-        retention_days : int
+        retention_days:
             Number of days to retain versions (default from settings).
 
         Returns

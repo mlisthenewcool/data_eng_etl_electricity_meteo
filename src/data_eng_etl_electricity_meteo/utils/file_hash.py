@@ -34,11 +34,11 @@ class FileHasher:
 
         Parameters
         ----------
-        path : Path
+        path:
             File to hash.
-        algorithm : str
+        algorithm:
             Hash algorithm (default from settings).
-        chunk_size : int
+        chunk_size:
             Read buffer size in bytes (default from settings).
 
         Returns

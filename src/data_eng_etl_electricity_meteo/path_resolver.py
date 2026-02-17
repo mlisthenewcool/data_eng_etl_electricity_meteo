@@ -21,7 +21,7 @@ class _BasePathResolver:
     """Common base: dataset name + base directory."""
 
     dataset_name: str
-    base_dir: Path = settings.data_dir_path
+    _base_dir: Path = settings.data_dir_path
 
     def __post_init__(self) -> None:
         """Validate that dataset_name is not empty.
@@ -46,7 +46,7 @@ class RemotePathResolver(_BasePathResolver):
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
-        return self.base_dir / "landing" / self.dataset_name
+        return self._base_dir / "landing" / self.dataset_name
 
     # =========================================================================
     # Bronze Layer (Versioned History)
@@ -54,14 +54,14 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _bronze_dir(self) -> Path:
-        return self.base_dir / "bronze" / self.dataset_name
+        return self._base_dir / "bronze" / self.dataset_name
 
     def bronze_path(self, version: str) -> Path:
         """Return ``bronze/{dataset_name}/{version}.parquet``.
 
         Parameters
         ----------
-        version : str
+        version:
             Version string (e.g. ``"2026-01-17"``).
 
         Returns
@@ -122,7 +122,7 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _silver_dir(self) -> Path:
-        return self.base_dir / "silver" / self.dataset_name
+        return self._base_dir / "silver" / self.dataset_name
 
     @property
     def silver_current_path(self) -> Path:
@@ -141,7 +141,7 @@ class DerivedPathResolver(_BasePathResolver):
 
     @property
     def _gold_dir(self) -> Path:
-        return self.base_dir / "gold" / self.dataset_name
+        return self._base_dir / "gold" / self.dataset_name
 
     @property
     def gold_current_path(self) -> Path:

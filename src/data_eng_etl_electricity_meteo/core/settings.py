@@ -105,14 +105,14 @@ class Settings(BaseSettings):
         """Path to pipeline state directory."""
         return self.data_dir_path / "_state"
 
-    @computed_field
-    @property
-    def secrets_dir_path(self) -> DirectoryPath:
-        """Path to secrets directory (Docker secrets on Airflow, local otherwise)."""
-        if self.is_running_on_airflow:
-            return Path("/run/secrets")
-
-        return self.root_dir / "secrets"
+    # @computed_field
+    # @property
+    # def secrets_dir_path(self) -> DirectoryPath:
+    #     """Path to secrets directory (Docker secrets on Airflow, local otherwise)."""
+    #     if self.is_running_on_airflow:
+    #         return Path("/run/secrets")
+    #
+    #     return self.root_dir / "secrets"
 
     # =========================================================================
     # Download Settings
