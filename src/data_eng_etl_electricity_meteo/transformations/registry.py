@@ -8,6 +8,7 @@ its transforms will fail fast in ``RemoteDatasetPipeline.__post_init__``.
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import TypeAlias
 
 import polars as pl
 
@@ -26,9 +27,9 @@ __all__: list[str] = [
 # Type aliases
 # ---------------------------------------------------------------------------
 
-type BronzeTransformFunc = Callable[[Path], pl.DataFrame]
-type SilverTransformFunc = Callable[[Path], pl.DataFrame]
-type GoldTransformFunc = Callable[..., pl.DataFrame]
+BronzeTransformFunc: TypeAlias = Callable[[Path], pl.DataFrame]
+SilverTransformFunc: TypeAlias = Callable[[Path], pl.DataFrame]
+GoldTransformFunc: TypeAlias = Callable[..., pl.DataFrame]
 
 # ---------------------------------------------------------------------------
 # Registries

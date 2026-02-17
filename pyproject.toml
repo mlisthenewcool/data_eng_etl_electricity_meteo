@@ -3,7 +3,7 @@ name = "data-eng-etl-electricity-meteo"
 version = "2026.02.10"
 description = "Projet personnel d'ingénierie des données (data engineering)."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "duckdb>=1.4.4",
     "httpx[http2]>=0.28.1",

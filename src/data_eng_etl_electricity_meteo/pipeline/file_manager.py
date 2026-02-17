@@ -14,7 +14,7 @@ from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.path_resolver import (
+from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
     DerivedPathResolver,
     RemotePathResolver,
 )

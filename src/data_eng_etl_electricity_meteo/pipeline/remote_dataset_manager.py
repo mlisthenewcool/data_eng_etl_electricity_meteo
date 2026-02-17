@@ -17,13 +17,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import duckdb
+import httpx
 from pydantic import ValidationError
 
+from data_eng_etl_electricity_meteo.core.data_catalog import RemoteDatasetConfig
+from data_eng_etl_electricity_meteo.core.exceptions import (
+    ArchiveNotFoundError,
+    BronzeStageError,
+    ExtractStageError,
+    FileIntegrityError,
+    FileNotFoundInArchiveError,
+    IngestStageError,
+    SilverStageError,
+    TransformNotFoundError,
+)
 from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.pydantic_base import format_pydantic_errors
-from data_eng_etl_electricity_meteo.data_catalog import RemoteDatasetConfig
-from data_eng_etl_electricity_meteo.file_manager import RemoteFileManager
-from data_eng_etl_electricity_meteo.path_resolver import RemotePathResolver
+from data_eng_etl_electricity_meteo.pipeline.file_manager import RemoteFileManager
+from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 from data_eng_etl_electricity_meteo.pipeline.stage_types import (
     BronzeInfo,
     BronzeStageResult,
@@ -190,36 +202,39 @@ class RemoteDatasetPipeline:
         DownloadStageResult | bool
             Download result, or ``False`` if skipped.
         """
-        # --- 1. Load metadata from previous run ---
-        safe_previous_metadata = self._safely_load_metadata(previous_metadata)
+        try:
+            # --- 1. Load metadata from previous run ---
+            safe_previous_metadata = self._safely_load_metadata(previous_metadata)
 
-        # --- 2. Retrieve metadata from remote with HEAD request ---
-        remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
-        previous_remote_metadata = (
-            safe_previous_metadata.remote_metadata if safe_previous_metadata else None
-        )
+            # --- 2. Retrieve metadata from remote with HEAD request ---
+            remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
+            previous_remote_metadata = (
+                safe_previous_metadata.remote_metadata if safe_previous_metadata else None
+            )
 
-        # --- 3. todo: merge with the other function ? explain ?
-        need = self._evaluate_ingestion_need(
-            current_remote_file_info=remote_file_info,
-            previous_remote_file_info=previous_remote_metadata,
-        )
+            # --- 3. todo: merge with the other function ? explain ?
+            need = self._evaluate_ingestion_need(
+                current_remote_file_info=remote_file_info,
+                previous_remote_file_info=previous_remote_metadata,
+            )
 
-        if not need.should_ingest:
-            return False
-
-        # --- 4. Download content ---
-        ingest_result = self._download(version=version, remote_metadata=remote_file_info)
-
-        # --- 5. Hash check (smart skip #2) but don't skip if we are in healing mode ---
-        if not need.is_healing and safe_previous_metadata:
-            if self._should_skip_on_hash(
-                previous_hash=safe_previous_metadata.raw_file_sha256,
-                current_hash=ingest_result.download_info.file_hash,
-            ):
+            if not need.should_ingest:
                 return False
 
-        return ingest_result
+            # --- 4. Download content ---
+            ingest_result = self._download(version=version, remote_metadata=remote_file_info)
+
+            # --- 5. Hash check (smart skip #2) but don't skip in healing mode ---
+            if not need.is_healing and safe_previous_metadata:
+                if self._should_skip_on_hash(
+                    previous_hash=safe_previous_metadata.raw_file_sha256,
+                    current_hash=ingest_result.download_info.file_hash,
+                ):
+                    return False
+
+            return ingest_result
+        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.HTTPError) as err:
+            raise IngestStageError(self.dataset.name) from err
 
     def should_skip_extraction(
         self, extract_result: DownloadStageResult, previous_metadata: dict[str, Any] | None
@@ -268,37 +283,45 @@ class RemoteDatasetPipeline:
         ValueError
             If the dataset is not an archive or ``inner_file`` is missing.
         """
-        if not self.dataset.source.format.is_archive or not self.dataset.source.inner_file:
-            logger.warning(
-                "Trying to extract a non-archive format",
-                format=self.dataset.source.format.value,
-            )
-            raise ValueError(
-                f"Dataset {self.dataset.name} is not an archive or missing inner_file"
-            )  # TODO exception spécifique
+        try:
+            if not self.dataset.source.format.is_archive or not self.dataset.source.inner_file:
+                logger.warning(
+                    "Trying to extract a non-archive format",
+                    format=self.dataset.source.format.value,
+                )
+                raise ValueError(
+                    f"Dataset {self.dataset.name} is not an archive or missing inner_file"
+                )
 
-        # Extract to same directory as archive (preserves directory structure)
-        archive_path = ingest_result.download_info.path
-        landing_dir = archive_path.parent
+            # Extract to same directory as archive (preserves directory structure)
+            archive_path = ingest_result.download_info.path
+            landing_dir = archive_path.parent
 
-        extract_info = extract_7z(
-            archive_path=archive_path,
-            target_filename=self.dataset.source.inner_file,
-            dest_dir=landing_dir,
-            validate_sqlite=Path(self.dataset.source.inner_file).suffix == ".gpkg",
-        )
-
-        return DownloadStageResult(
-            version=ingest_result.version,
-            remote_metadata=ingest_result.remote_metadata,
-            download_info=ingest_result.download_info,
-            extraction_info=ExtractionInfo(
+            extract_info = extract_7z(
                 archive_path=archive_path,
-                file_path=extract_info.path,
-                file_hash=extract_info.file_hash,
-                size_mib=extract_info.size_mib,
-            ),
-        )
+                target_filename=self.dataset.source.inner_file,
+                dest_dir=landing_dir,
+                validate_sqlite=Path(self.dataset.source.inner_file).suffix == ".gpkg",
+            )
+
+            return DownloadStageResult(
+                version=ingest_result.version,
+                remote_metadata=ingest_result.remote_metadata,
+                download_info=ingest_result.download_info,
+                extraction_info=ExtractionInfo(
+                    archive_path=archive_path,
+                    file_path=extract_info.path,
+                    file_hash=extract_info.file_hash,
+                    size_mib=extract_info.size_mib,
+                ),
+            )
+        except (
+            ArchiveNotFoundError,
+            FileNotFoundInArchiveError,
+            FileIntegrityError,
+            ValueError,
+        ) as err:
+            raise ExtractStageError(self.dataset.name) from err
 
     # =============================================================================
     # Smart skip #2
@@ -352,53 +375,56 @@ class RemoteDatasetPipeline:
         BronzeStageResult
             Upstream download context and bronze metrics.
         """
-        resolver = RemotePathResolver(dataset_name=self.dataset.name)
+        try:
+            resolver = RemotePathResolver(dataset_name=self.dataset.name)
 
-        bronze_path = resolver.bronze_path(ingest_or_extract_result.version)
-        bronze_path.parent.mkdir(parents=True, exist_ok=True)
+            bronze_path = resolver.bronze_path(ingest_or_extract_result.version)
+            bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(
-            "Converting to bronze",
-            dataset_name=self.dataset.name,
-            landing_path=ingest_or_extract_result.landing_path,
-            bronze_path=bronze_path,
-            version=ingest_or_extract_result.version,
-        )
+            logger.info(
+                "Converting to bronze",
+                dataset_name=self.dataset.name,
+                landing_path=ingest_or_extract_result.landing_path,
+                bronze_path=bronze_path,
+                version=ingest_or_extract_result.version,
+            )
 
-        # Retrieve and apply dataset-specific bronze transformation
-        transform = get_bronze_transform(self.dataset.name)
-        df = transform(ingest_or_extract_result.landing_path)
-        df.write_parquet(bronze_path)
+            # Retrieve and apply dataset-specific bronze transformation
+            transform = get_bronze_transform(self.dataset.name)
+            df = transform(ingest_or_extract_result.landing_path)
+            df.write_parquet(bronze_path)
 
-        # Update latest symlink to point to this version
-        file_manager = RemoteFileManager(resolver)
-        file_manager.update_bronze_latest_link(ingest_or_extract_result.version)
+            # Update latest symlink to point to this version
+            file_manager = RemoteFileManager(resolver)
+            file_manager.update_bronze_latest_link(ingest_or_extract_result.version)
 
-        # Cleanup all landing files
-        self._cleanup_landing()
+            # Cleanup all landing files
+            self._cleanup_landing()
 
-        columns = df.columns
-        row_count = len(df)
-        parquet_size = bronze_path.stat().st_size / (1024 * 1024)
+            columns = df.columns
+            row_count = len(df)
+            parquet_size = bronze_path.stat().st_size / (1024 * 1024)
 
-        logger.info(
-            "Bronze conversion complete",
-            dataset_name=self.dataset.name,
-            file_size_mib=parquet_size,
-            row_count=row_count,
-            columns=columns,
-            bronze_path=bronze_path,
-            latest_link=resolver.bronze_latest_path,
-        )
-
-        return BronzeStageResult(
-            download=ingest_or_extract_result,
-            bronze=BronzeInfo(
+            logger.info(
+                "Bronze conversion complete",
+                dataset_name=self.dataset.name,
                 file_size_mib=parquet_size,
                 row_count=row_count,
                 columns=columns,
-            ),
-        )
+                bronze_path=bronze_path,
+                latest_link=resolver.bronze_latest_path,
+            )
+
+            return BronzeStageResult(
+                download=ingest_or_extract_result,
+                bronze=BronzeInfo(
+                    file_size_mib=parquet_size,
+                    row_count=row_count,
+                    columns=columns,
+                ),
+            )
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise BronzeStageError(self.dataset.name) from err
 
     def to_silver(self, bronze_result: BronzeStageResult) -> SilverStageResult:
         """Apply business transformations to create silver layer.
@@ -416,52 +442,55 @@ class RemoteDatasetPipeline:
         SilverStageResult
             Upstream download/bronze context and silver metrics.
         """
-        resolver = RemotePathResolver(dataset_name=self.dataset.name)
+        try:
+            resolver = RemotePathResolver(dataset_name=self.dataset.name)
 
-        logger.info(
-            "Transforming to silver",
-            dataset_name=self.dataset.name,
-            bronze_source=resolver.bronze_latest_path,
-            silver_dest=resolver.silver_current_path,
-        )
+            logger.info(
+                "Transforming to silver",
+                dataset_name=self.dataset.name,
+                bronze_source=resolver.bronze_latest_path,
+                silver_dest=resolver.silver_current_path,
+            )
 
-        # Retrieve and apply dataset-specific silver transformation
-        transform = get_silver_transform(self.dataset.name)
-        df = transform(resolver.bronze_latest_path)
+            # Retrieve and apply dataset-specific silver transformation
+            transform = get_silver_transform(self.dataset.name)
+            df = transform(resolver.bronze_latest_path)
 
-        # Rotate silver BEFORE writing to disk: current → backup
-        file_manager = RemoteFileManager(resolver)
-        file_manager.rotate_silver()
+            # Rotate silver BEFORE writing to disk: current → backup
+            file_manager = RemoteFileManager(resolver)
+            file_manager.rotate_silver()
 
-        # TODO: at this point, is it necessary to create parent ?
-        resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
+            # TODO: at this point, is it necessary to create parent ?
+            resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Now that we rotated versions, write to disk
-        df.write_parquet(resolver.silver_current_path)
+            # Now that we rotated versions, write to disk
+            df.write_parquet(resolver.silver_current_path)
 
-        columns = df.columns
-        row_count = len(df)
-        parquet_size = resolver.silver_current_path.stat().st_size / (1024 * 1024)
+            columns = df.columns
+            row_count = len(df)
+            parquet_size = resolver.silver_current_path.stat().st_size / (1024 * 1024)
 
-        logger.info(
-            "Silver transformation complete",
-            dataset_name=self.dataset.name,
-            file_size_mib=parquet_size,
-            row_count=row_count,
-            columns=columns,
-            silver_current=resolver.silver_current_path,
-            silver_backup=resolver.silver_backup_path,
-        )
-
-        return SilverStageResult(
-            download=bronze_result.download,
-            bronze=bronze_result.bronze,
-            silver=SilverInfo(
+            logger.info(
+                "Silver transformation complete",
+                dataset_name=self.dataset.name,
                 file_size_mib=parquet_size,
                 row_count=row_count,
                 columns=columns,
-            ),
-        )
+                silver_current=resolver.silver_current_path,
+                silver_backup=resolver.silver_backup_path,
+            )
+
+            return SilverStageResult(
+                download=bronze_result.download,
+                bronze=bronze_result.bronze,
+                silver=SilverInfo(
+                    file_size_mib=parquet_size,
+                    row_count=row_count,
+                    columns=columns,
+                ),
+            )
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise SilverStageError(self.dataset.name) from err
 
     @staticmethod
     def create_metadata_emission(silver_result: SilverStageResult) -> PipelineRunSnapshot:

@@ -3,16 +3,18 @@
 import sys
 from datetime import datetime
 
+from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
-    ArchiveNotFoundError,
+    BronzeStageError,
     DatasetNotFoundError,
-    FileIntegrityError,
+    ExtractStageError,
+    IngestStageError,
     InvalidCatalogError,
+    SilverStageError,
 )
 from data_eng_etl_electricity_meteo.core.logger import logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.data_catalog import DataCatalog, RemoteDatasetConfig
-from data_eng_etl_electricity_meteo.path_resolver import RemotePathResolver
+from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 from data_eng_etl_electricity_meteo.pipeline.remote_dataset_manager import RemoteDatasetPipeline
 
 if __name__ == "__main__":
@@ -75,8 +77,8 @@ if __name__ == "__main__":
 
     try:
         _ingest_result = _manager.ingest(version=_version, previous_metadata=_previous_metadata)
-    except Exception as error:
-        logger.critical(str(error))
+    except IngestStageError as error:
+        error.log(logger.critical)
         sys.exit(-1)
 
     assert not isinstance(_ingest_result, bool), "todo: charger métadonnées des runs"
@@ -89,10 +91,7 @@ if __name__ == "__main__":
         logger.info("----- (3.bis) Extract stage -----")
         try:
             _extract_result = _manager.extract_archive(ingest_result=_ingest_result)
-        except (ValueError, FileNotFoundError) as error:  # TODO: erreur spécifique
-            logger.critical(str(error))
-            sys.exit(-1)
-        except (ArchiveNotFoundError, FileIntegrityError) as error:
+        except ExtractStageError as error:
             error.log(logger.critical)
             sys.exit(-1)
 
@@ -113,16 +112,24 @@ if __name__ == "__main__":
     # 4) Bronze stage
     # ============================================================
     logger.info("----- (4) Bronze stage -----")
-    _bronze_result = _manager.to_bronze(
-        ingest_or_extract_result=_extract_result if _extract_result else _ingest_result
-    )
+    try:
+        _bronze_result = _manager.to_bronze(
+            ingest_or_extract_result=_extract_result if _extract_result else _ingest_result
+        )
+    except BronzeStageError as error:
+        error.log(logger.critical)
+        sys.exit(-1)
     logger.info("Bronze stage completed !", **_bronze_result.model_dump(mode="json"))
 
     # ============================================================
     # 5) Silver stage
     # ============================================================
     logger.info("----- (5) Silver stage -----")
-    _silver_result = _manager.to_silver(bronze_result=_bronze_result)
+    try:
+        _silver_result = _manager.to_silver(bronze_result=_bronze_result)
+    except SilverStageError as error:
+        error.log(logger.critical)
+        sys.exit(-1)
     logger.info("Silver stage completed !", **_silver_result.model_dump(mode="json"))
 
     # ============================================================

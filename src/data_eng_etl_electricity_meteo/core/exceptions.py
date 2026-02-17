@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any, Protocol
 
+from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
+
 __all__: list[str] = [
     "BaseProjectException",
     "DownloadError",
@@ -15,6 +17,11 @@ __all__: list[str] = [
     "DatasetNotFoundError",
     "AirflowContextError",
     "TransformNotFoundError",
+    "PipelineStageError",
+    "IngestStageError",
+    "ExtractStageError",
+    "BronzeStageError",
+    "SilverStageError",
 ]
 
 
@@ -130,7 +137,64 @@ class AirflowContextError(BaseProjectException):
 class TransformNotFoundError(BaseProjectException):
     """Raised when no transformation is registered for a dataset/layer pair."""
 
-    def __init__(self, dataset_name: str, layer: str) -> None:
+    def __init__(self, dataset_name: str, layer: MedallionLayer) -> None:
         self.dataset_name = dataset_name
         self.layer = layer
         super().__init__("Transform not found for dataset.")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline stage errors
+# ---------------------------------------------------------------------------
+class PipelineStageError(BaseProjectException):
+    """Raised when a pipeline stage fails."""
+
+    def __init__(self, dataset_name: str, stage: MedallionLayer) -> None:
+        self.dataset_name = dataset_name
+        self.stage = stage
+        super().__init__(f"Pipeline failed at {stage} stage.")
+
+    def log(self, log_method: _LogMethod) -> None:
+        """Log this exception and its cause with structured attributes."""
+        cause = self.__cause__
+        if isinstance(cause, BaseProjectException):
+            log_method(
+                str(self),
+                **self.to_dict() | cause.to_dict(),
+                cause_type=type(cause).__qualname__,
+            )
+        else:
+            log_method(
+                str(self),
+                **self.to_dict(),
+                cause_type=type(cause).__qualname__,
+                cause=str(cause),
+            )
+
+
+class IngestStageError(PipelineStageError):
+    """Raised when the ingest (download) stage fails."""
+
+    def __init__(self, dataset_name: str) -> None:
+        super().__init__(dataset_name, "landing")
+
+
+class ExtractStageError(PipelineStageError):
+    """Raised when archive extraction fails."""
+
+    def __init__(self, dataset_name: str) -> None:
+        super().__init__(dataset_name, "landing")
+
+
+class BronzeStageError(PipelineStageError):
+    """Raised when the bronze transformation stage fails."""
+
+    def __init__(self, dataset_name: str) -> None:
+        super().__init__(dataset_name, "bronze")
+
+
+class SilverStageError(PipelineStageError):
+    """Raised when the silver transformation stage fails."""
+
+    def __init__(self, dataset_name: str) -> None:
+        super().__init__(dataset_name, "silver")

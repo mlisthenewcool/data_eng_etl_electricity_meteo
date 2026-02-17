@@ -157,8 +157,8 @@ class DerivedPathResolver(_BasePathResolver):
 if __name__ == "__main__":
     import sys
 
+    from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
     from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
-    from data_eng_etl_electricity_meteo.data_catalog import DataCatalog
 
     try:
         _catalog = DataCatalog.load(settings.data_catalog_file_path)

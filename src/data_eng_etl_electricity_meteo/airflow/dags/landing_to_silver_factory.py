@@ -3,7 +3,7 @@
 from airflow import XComArg
 from airflow.sdk import DAG, Asset, dag, task
 
-from data_eng_etl_electricity_meteo.airflow.assets import ASSETS
+from data_eng_etl_electricity_meteo.airflow.assets import get_asset
 from data_eng_etl_electricity_meteo.core.logger import logger
 
 __all__: list[str] = []
@@ -45,7 +45,7 @@ def _create_dag(asset: Asset) -> DAG:
 
 def _generate_all_dags() -> dict[str, DAG]:
     return {
-        "ign_contours_iris": _create_dag(ASSETS["ign_contours_iris"]),
+        "ign_contours_iris": _create_dag(get_asset("ign_contours_iris", "silver")),
     }
 
 
