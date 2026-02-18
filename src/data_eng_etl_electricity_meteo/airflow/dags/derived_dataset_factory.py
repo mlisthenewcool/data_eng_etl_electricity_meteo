@@ -7,8 +7,6 @@ from data_eng_etl_electricity_meteo.core.logger import get_logger
 
 logger = get_logger("dag_factory")
 
-__all__: list[str] = []
-
 
 def _create_dag(asset: Asset) -> DAG:
     @dag(

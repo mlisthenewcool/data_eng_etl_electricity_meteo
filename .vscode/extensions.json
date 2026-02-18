@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "ms-python.python", // python (should include debugger, pylance and envs)
+    // "ms-python.debugpy", // python (debugger)
+    // "ms-python.vscode-python-envs", // python (envs)
+    // "ms-python.vscode-pylance", // python (pylance)
+    "ms-azuretools.vscode-containers", // docker
+    "ms-azuretools.vscode-docker", // docker
+    "charliermarsh.ruff", // ruff (lint/format python)
+    "marimo-team.vscode-marimo", // marimo notebooks
+    "tamasfe.even-better-toml", // toml
+    "lucien-martijn.parquet-visualizer", // Parquet, Avro and CSV visualizer
+    "Gruntfuggly.todo-tree", // todos
+  ]
+}

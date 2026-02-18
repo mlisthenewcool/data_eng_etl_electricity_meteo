@@ -21,8 +21,6 @@ from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
 logger = get_logger("extraction")
 
-__all__: list[str] = ["ExtractionInfo", "ExtractedFileInfo", "extract_7z"]
-
 
 @dataclass(frozen=True)
 class ExtractionInfo:

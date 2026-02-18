@@ -1,0 +1,53 @@
+{
+  "workbench.colorCustomizations": {
+    "editorRuler.foreground": "#ffffff22"
+  },
+  "editor.renderWhitespace": "boundary",
+  "editor.guides.indentation": true,
+  "editor.detectIndentation": false,
+  "editor.insertSpaces": true,
+  "editor.tabSize": 4,
+  // "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.rulers": [
+    88,
+    100
+  ],
+  // "editor.renderLineHighlight": "all",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "[python]": {
+    "editor.defaultColorDecorators": "never",
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    },
+    "diffEditor.ignoreTrimWhitespace": false,
+  },
+  "[yaml]": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true
+  },
+  "[toml]": {
+    "editor.formatOnSave": true
+  },
+  "[json][jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+  },
+  "[sql]": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+  },
+  "todo-tree.highlights.defaultHighlight": {
+    "type": "text-and-comment",
+    "foreground": "#FFEB3B", // yellow
+    "background": "#FFEB3B",
+    "opacity": 10,
+    "iconColour": "#FFEB3B",
+    "gutterIcon": true
+  }
+}

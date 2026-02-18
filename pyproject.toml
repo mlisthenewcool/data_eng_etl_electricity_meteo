@@ -9,6 +9,7 @@ dependencies = [
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.7",
     "polars>=1.38.1",
+    "psycopg[c]>=3.3.2",
     "py7zr>=1.1.0",
     "pyarrow>=23.0.1",
     "pydantic>=2.12.5",
@@ -32,10 +33,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-include = [
-    "src/**/*.py",
-    "tests/**/*.py"
-]
+include = ["src/**/*.py", "tests/**/*.py"]
 #src = ["src", "test"]
 extend-exclude = ["notebooks"]
 
@@ -44,9 +42,20 @@ extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = [
-    "I", "E", "W", "F", "PL", "D", "NPY"
+    "I",   # isort
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "PL",  # pylint
+    "D",   # pydocstyle (docstrings)
+    "NPY", # numpy-specific
+    "UP",  # pyupgrade
+    "TC",  # flake8-type-checking
 ]
-ignore = ["D107"]
+
+# "D105", # Missing docstring in magic method (__post_init__, etc.)
+# "D107", # Missing docstring in __init__ (class docstring suffices)
+ignore = []
 #fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -69,7 +78,7 @@ pythonpath = ["src"]
 #testpaths = ["tests"]
 
 [tool.coverage.run]
-branch = true # check if all branches of if/else statement are used
+branch = true                 # check if all branches of if/else statement are used
 data_file = "tests/.coverage"
 #source = ["data_eng_etl_electricity_meteo"]
 
@@ -77,9 +86,7 @@ data_file = "tests/.coverage"
 #fail_under = 90
 show_missing = true
 skip_empty = true
-exclude_also = [
-    'if __name__ == .__main__.:'
-]
+exclude_also = ['if __name__ == .__main__.:']
 
 [tool.marimo.runtime]
 pythonpath = ["src"] # required to use absolute imports inside notebooks

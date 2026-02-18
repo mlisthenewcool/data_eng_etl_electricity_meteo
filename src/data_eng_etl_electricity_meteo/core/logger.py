@@ -15,7 +15,7 @@ tty
 plain
     Identical to *tty* but without colors — suitable when stderr is
     redirected to a file or piped to another process.
-json
+JSON
     Machine-readable JSON lines (UTC timestamps), serialized with
     *orjson* for speed.
 """
@@ -32,8 +32,6 @@ from structlog.stdlib import BoundLogger
 from structlog.typing import EventDict, WrappedLogger
 
 from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
-
-__all__: list[str] = ["get_logger"]
 
 OutputMode = Literal["airflow", "tty", "plain", "json"]
 
@@ -355,6 +353,8 @@ if __name__ == "__main__":
     from pydantic import BaseModel
 
     class X(BaseModel):
+        """Dummy class used for logging demonstration."""
+
         x: float
         y: float
 

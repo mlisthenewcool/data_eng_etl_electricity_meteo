@@ -19,8 +19,6 @@ from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
     RemotePathResolver,
 )
 
-__all__: list[str] = ["get_asset"]
-
 
 @cache
 def get_asset(dataset_name: str, layer: MedallionLayer) -> Asset:

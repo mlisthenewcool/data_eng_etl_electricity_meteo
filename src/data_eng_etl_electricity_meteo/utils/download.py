@@ -20,8 +20,6 @@ from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
 logger = get_logger("download")
 
-__all__: list[str] = ["HttpDownloadInfo", "download_to_file"]
-
 
 @dataclass(frozen=True)
 class HttpDownloadInfo:

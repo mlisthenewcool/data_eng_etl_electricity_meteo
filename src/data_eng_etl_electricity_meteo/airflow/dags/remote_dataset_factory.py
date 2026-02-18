@@ -158,7 +158,7 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
         # 5. TRANSFORM TO SILVER - Business Rules + Metadata
         # ============================================================
         @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[asset])
-        def silver_task(ctx: XComArg) -> Generator[Metadata, None, None]:
+        def silver_task(ctx: XComArg) -> Generator[Metadata]:
             """Apply business transformations and emit Asset metadata."""
             silver_result = manager.to_silver(BronzeStageResult.model_validate(ctx))
 

@@ -21,8 +21,6 @@ from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
 
 logger = get_logger("file_manager")
 
-__all__: list[str] = ["RemoteFileManager", "DerivedFileManager"]
-
 
 # ---------------------------------------------------------------------------
 # Shared rotation / rollback helpers
