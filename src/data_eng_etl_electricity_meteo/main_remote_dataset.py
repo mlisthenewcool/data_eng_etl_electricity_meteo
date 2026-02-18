@@ -35,9 +35,8 @@ if __name__ == "__main__":
         error.log(logger.critical)
         sys.exit(-1)
 
-    logger.info(
+    logger.debug(
         "Data catalog loaded",
-        stage=0,
         remote_datasets=[dataset.name for dataset in _catalog.get_remote_datasets()],
         derived_datasets=[dataset.name for dataset in _catalog.get_derived_datasets()],
     )
@@ -48,7 +47,7 @@ if __name__ == "__main__":
         error.log(logger.critical)
         sys.exit(-1)
 
-    logger.info(
+    logger.debug(
         "Dataset config loaded",
         dataset_name=_DATASET_NAME,
         dataset_type=type(_dataset_config).__name__,
@@ -62,12 +61,16 @@ if __name__ == "__main__":
     _version = _dataset_config.ingestion.frequency.format_datetime_as_version(_start_datetime)
     _manager = RemoteDatasetPipeline(dataset=_dataset_config)
 
-    logger.info("Pipeline initialized", stage=1, version=_version)
+    logger.info(
+        "--- (1) Pipeline initialized",
+        version=_version,
+        **_dataset_config.model_dump(mode="json", include={"source": {"url"}}),
+    )
 
     # ============================================================
     # 2) Load metadata from previous run (not-implemented yet)
     # ============================================================
-    logger.warning("Previous run metadata not yet implemented", stage=2)
+    logger.warning("--- (2) Load previous run metadata not yet implemented outside of Airflow")
     _previous_metadata = None
 
     # ============================================================
@@ -80,10 +83,13 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     assert not isinstance(_ingest_result, bool), "todo: charger métadonnées des runs"
-    logger.info("Download stage completed", stage=3, **_ingest_result.model_dump(mode="json"))
+    logger.info(
+        "--- (3) Download stage completed",
+        **_ingest_result.model_dump(mode="json", include={"download_info": {"path", "size_mib"}}),
+    )
 
     # ============================================================
-    # 3.bis) (optional) Extract stage
+    # 4) (optional) Extract stage
     # ============================================================
     if _dataset_config.source.format.is_archive:
         try:
@@ -92,9 +98,15 @@ if __name__ == "__main__":
             error.log(logger.critical)
             sys.exit(-1)
 
+        assert _extract_result.extraction_info is not None, "todo: info de l'extraction absentes"
         logger.info(
-            "Extraction stage completed", stage="3bis", **_extract_result.model_dump(mode="json")
+            "--- (4) Extraction stage completed",
+            **_extract_result.model_dump(
+                mode="json", include={"extraction_info": {"file_path", "size_mib"}}
+            ),
         )
+        # file_path = _extract_result.extraction_info.file_path,
+        # size_mib = _extract_result.extraction_info.size_mib,
 
         _should_skip = _manager.should_skip_extraction(
             extract_result=_extract_result, previous_metadata=_previous_metadata
@@ -104,10 +116,11 @@ if __name__ == "__main__":
             logger.info("Stopping pipeline: extracted content unchanged")
             sys.exit(0)
     else:
+        logger.info("--- (4) Extraction stage skipped : dataset.source.format is not archive")
         _extract_result = None
 
     # ============================================================
-    # 4) Bronze stage
+    # 5) Bronze stage
     # ============================================================
     try:
         _bronze_result = _manager.to_bronze(
@@ -116,19 +129,24 @@ if __name__ == "__main__":
     except BronzeStageError as error:
         error.log(logger.critical)
         sys.exit(-1)
-    logger.info("Bronze stage completed", stage=4, **_bronze_result.model_dump(mode="json"))
+    logger.info(
+        "--- (5) Bronze stage completed",
+        **_bronze_result.model_dump(mode="json", include={"bronze"}),
+    )
 
     # ============================================================
-    # 5) Silver stage
+    # 6) Silver stage
     # ============================================================
     try:
         _silver_result = _manager.to_silver(bronze_result=_bronze_result)
     except SilverStageError as error:
         error.log(logger.critical)
         sys.exit(-1)
-    logger.info("Silver stage completed", stage=5, **_silver_result.model_dump(mode="json"))
-
+    logger.info(
+        "--- (6) Silver stage completed",
+        **_silver_result.model_dump(mode="json", include={"silver"}),
+    )
     # ============================================================
-    # 6) Save successful run metadata
+    # 7) Save successful run metadata
     # ============================================================
-    logger.warning("Save run metadata not yet implemented", stage=6)
+    logger.warning("--- (7) Save run metadata not yet implemented outside of Airflow")

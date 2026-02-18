@@ -31,13 +31,13 @@ class HttpDownloadInfo:
     file_hash: str
     size_mib: float
 
-    def to_dict(self) -> dict[str, str | float]:
-        """Serialize to a JSON-compatible dict (for Airflow XCom)."""
-        return {
-            "path": str(self.path),
-            "file_hash": self.file_hash,
-            "size_mib": self.size_mib,
-        }
+    # def to_dict(self) -> dict[str, str | float]:
+    #     """Serialize to a JSON-compatible dict (for Airflow XCom)."""
+    #     return {
+    #         "path": str(self.path),
+    #         "file_hash": self.file_hash,
+    #         "size_mib": self.size_mib,
+    #     }
 
 
 def _extract_filename(response: httpx.Response, url: str) -> str | None:
@@ -69,7 +69,7 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
             # Remove any path separators for security
             filename = Path(filename).name
             if filename and filename != ".":
-                logger.info(
+                logger.debug(
                     "Extracted filename from Content-Disposition",
                     filename=filename,
                     header=content_disp,
@@ -84,13 +84,19 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 
         # check if it's an actual file and not a folder
         if filename and filename != "." and "." in filename:
-            logger.info("Extracted filename from URL path", filename=filename, url=url)
+            logger.debug("Extracted filename from URL path", filename=filename, url=url)
             return filename
 
-    logger.warning("Could not extract filename", url=url)
+    # note: this is already logged by `download_to_file(...)`
+    # logger.warning("Could not extract filename", url=url)
     return None
 
 
+# TODO: ajouter ces paramètres à la fonction qui sont hardcodé depuis settings
+#  download_timeout_total
+#  download_timeout_connect
+#  download_timeout_sock_read
+#  download_chunk_size
 def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDownloadInfo:
     """Stream a file from *url* to *dest_dir* with progress and SHA256.
 
@@ -115,7 +121,7 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
     httpx.TimeoutException:
         If request times out.
     """
-    logger.info("Starting download", url=url, dest_dir=dest_dir)
+    logger.debug("Starting download", url=url, dest_dir=dest_dir)
 
     # TODO, documenter & ajouter arguments write/pool
     timeout = httpx.Timeout(
@@ -172,10 +178,9 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
                 progress_bar.close()
 
             file_hash = hasher.hexdigest
-
             size_mib = downloaded_bytes / (1024 * 1024)
 
-            logger.info(
+            logger.debug(
                 "Download completed",
                 path=dest_path,
                 filename=filename,

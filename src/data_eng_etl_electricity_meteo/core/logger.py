@@ -204,7 +204,7 @@ def _setup_airflow_logger() -> None:
     its own processor chain.  Instead of replacing it, we read the
     existing chain and insert our processors before the final renderer.
 
-    Currently injected processors:
+    Currently, injected processors:
 
     - ``_normalize_and_flatten``
 

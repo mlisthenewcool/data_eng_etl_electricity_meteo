@@ -33,14 +33,14 @@ class ExtractionInfo:
     file_hash: str
     size_mib: float
 
-    def to_dict(self) -> dict[str, str | float]:
-        """Serialize to a JSON-compatible dict (for Airflow XCom)."""
-        return {
-            "archive_path": str(self.archive_path),
-            "file_path": str(self.file_path),
-            "file_hash": self.file_hash,
-            "size_mib": self.size_mib,
-        }
+    # def to_dict(self) -> dict[str, str | float]:
+    #     """Serialize to a JSON-compatible dict (for Airflow XCom)."""
+    #     return {
+    #         "archive_path": str(self.archive_path),
+    #         "file_path": str(self.file_path),
+    #         "file_hash": self.file_hash,
+    #         "size_mib": self.size_mib,
+    #     }
 
 
 @dataclass(frozen=True)
@@ -144,11 +144,7 @@ def extract_7z(
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
 
-    logger.info(
-        "Starting extraction",
-        archive=archive_path.name,
-        target=target_filename,
-    )
+    logger.debug("Starting extraction", archive=archive_path.name, target=target_filename)
 
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
@@ -163,7 +159,7 @@ def extract_7z(
             except StopIteration:
                 raise FileNotFoundInArchiveError(target_filename, archive_path) from None
 
-            logger.info("Found target in archive", target_path=target_internal_path)
+            logger.debug("Found target in archive", target_path=target_internal_path)
 
             # Get uncompressed size for progress bar
             target_info = next(
@@ -211,15 +207,8 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.info(
-                "Extraction completed",
-                path=dest_path,
-                size_mib=size_mib,
-                file_hash=file_hash,
+            logger.debug(
+                "Extraction completed", path=dest_path, size_mib=size_mib, file_hash=file_hash
             )
 
-            return ExtractedFileInfo(
-                path=dest_path,
-                size_mib=size_mib,
-                file_hash=file_hash,
-            )
+            return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)

@@ -10,10 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-
-logger = get_logger("path_resolver")
 
 __all__: list[str] = ["RemotePathResolver", "DerivedPathResolver"]
 
@@ -108,11 +105,11 @@ class RemotePathResolver(_BasePathResolver):
         if not self._bronze_dir.exists():
             return []
 
-        versions = [
+        # Exclude symlink and only include regular files
+        # TODO: speed vs security (alternative: p.stem != "latest")
+        versions: list[Path] = [
             path
             for path in self._bronze_dir.glob("*.parquet")
-            # Exclude symlink and only include regular files
-            # TODO: speed vs security (alternative: p.stem != "latest")
             if path.is_file() and not path.is_symlink()
         ]
 
@@ -161,6 +158,9 @@ if __name__ == "__main__":
 
     from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
     from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
+    from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+    logger = get_logger("path_resolver")
 
     try:
         _catalog = DataCatalog.load(settings.data_catalog_file_path)

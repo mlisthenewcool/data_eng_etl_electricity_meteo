@@ -218,8 +218,8 @@ def _generate_all_dags() -> dict[str, DAG]:
             pipelines[dataset.name] = _create_dag(manager, asset)
             factory_logger.info("Created dataset DAG", dag_id=f"ingest_{dataset.name}")
         # TODO: catch les exceptions au bon endroit
-        except TransformNotFoundError as e:
-            e.log(factory_logger.warning)
+        except TransformNotFoundError as error:
+            error.log(factory_logger.warning)
         except ValueError:
             factory_logger.exception(
                 "Failed to create DAG.",

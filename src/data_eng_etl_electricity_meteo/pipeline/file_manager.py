@@ -51,7 +51,7 @@ def _rotate(
     if current_path.exists():
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current_path, backup_path)
-        logger.info(
+        logger.debug(
             f"Rotated {layer} files",
             dataset_name=dataset_name,
             current=current_path,
@@ -96,7 +96,7 @@ def _rollback(
         return False
 
     shutil.copy2(backup_path, current_path)
-    logger.info(
+    logger.debug(
         f"Rolled back {layer} to backup version",
         dataset_name=dataset_name,
         backup=backup_path,
@@ -155,7 +155,7 @@ class RemoteFileManager:
             temp_link.symlink_to(relative_target)
             temp_link.replace(latest_link)
 
-            logger.info(
+            logger.debug(
                 "Updated bronze latest symlink",
                 dataset_name=self.resolver.dataset_name,
                 target_version=target_version,
@@ -191,7 +191,7 @@ class RemoteFileManager:
             if file_mtime < cutoff_time:
                 version_path.unlink()
                 deleted.append(version_path)
-                logger.info(
+                logger.debug(
                     "Deleted old bronze version",
                     dataset_name=self.resolver.dataset_name,
                     version=version_path.stem,

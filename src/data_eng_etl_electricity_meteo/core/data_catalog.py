@@ -23,13 +23,7 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 import yaml
-from pydantic import (
-    Discriminator,
-    HttpUrl,
-    Tag,
-    ValidationError,
-    model_validator,
-)
+from pydantic import Discriminator, HttpUrl, Tag, ValidationError, model_validator
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     AirflowContextError,

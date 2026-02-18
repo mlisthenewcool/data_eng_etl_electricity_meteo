@@ -384,7 +384,7 @@ class RemoteDatasetPipeline:
             bronze_path = self.resolver.bronze_path(ingest_or_extract_result.version)
             bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
-            logger.info(
+            logger.debug(
                 "Converting to bronze",
                 dataset_name=self.dataset.name,
                 landing_path=ingest_or_extract_result.landing_path,
@@ -406,9 +406,9 @@ class RemoteDatasetPipeline:
 
             columns = df.columns
             row_count = len(df)
-            parquet_size = bronze_path.stat().st_size / (1024 * 1024)
+            parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
 
-            logger.info(
+            logger.debug(
                 "Bronze conversion complete",
                 dataset_name=self.dataset.name,
                 file_size_mib=parquet_size,
@@ -446,7 +446,7 @@ class RemoteDatasetPipeline:
             Upstream download/bronze context and silver metrics.
         """
         try:
-            logger.info(
+            logger.debug(
                 "Transforming to silver",
                 dataset_name=self.dataset.name,
                 bronze_source=self.resolver.bronze_latest_path,
@@ -468,9 +468,11 @@ class RemoteDatasetPipeline:
 
             columns = df.columns
             row_count = len(df)
-            parquet_size = self.resolver.silver_current_path.stat().st_size / (1024 * 1024)
+            parquet_size = round(
+                self.resolver.silver_current_path.stat().st_size / (1024 * 1024), 2
+            )
 
-            logger.info(
+            logger.debug(
                 "Silver transformation complete",
                 dataset_name=self.dataset.name,
                 file_size_mib=parquet_size,

@@ -109,7 +109,7 @@ def get_remote_file_metadata(
     httpx.TimeoutException
         If the request times out.
     """
-    logger.info("Checking remote file metadata", url=url)
+    logger.debug("Checking remote file metadata", url=url)
 
     try:
         with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, http2=True) as client:
@@ -157,7 +157,7 @@ def get_remote_file_metadata(
         etag=etag, last_modified=last_modified, content_length=content_length
     )
 
-    logger.info(
+    logger.debug(
         "Remote file metadata retrieved",
         etag=etag,
         last_modified=last_modified,
