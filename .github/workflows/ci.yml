@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, dev ]
+  pull_request:
+    branches: [ master, dev ]
+
+jobs:
+  lint-format-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # https://github.com/actions/setup-python
+      # https://docs.astral.sh/uv/guides/integration/github/#setting-up-python
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      # https://github.com/astral-sh/setup-uv
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: 'auto'
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Linter (ruff check)
+        run: uv run ruff check --output-format=github
+
+      - name: Formatter (ruff format)
+        run: uv run ruff format --check
+
+      - name: Type checking (ty)
+        run: uv run ty check
+
+      - name: Test coverage (pytest)
+        env:
+          # Override pytest-cov settings (in pyproject.toml) for a cleaner CI summary
+          PYTEST_ADDOPTS: "--cov-report=term-missing:skip-covered"
+        run: |
+          echo "### Test coverage summary" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          uv run pytest >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
