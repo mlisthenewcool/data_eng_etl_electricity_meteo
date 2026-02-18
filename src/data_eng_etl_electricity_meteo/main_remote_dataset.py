@@ -85,7 +85,9 @@ if __name__ == "__main__":
     assert not isinstance(_ingest_result, bool), "todo: charger métadonnées des runs"
     logger.info(
         "--- (3) Download stage completed",
-        **_ingest_result.model_dump(mode="json", include={"download_info": {"path", "size_mib"}}),
+        **_ingest_result.model_dump(
+            mode="json", include={"download": {"download_info": {"path", "size_mib"}}}
+        ),
     )
 
     # ============================================================
@@ -93,23 +95,25 @@ if __name__ == "__main__":
     # ============================================================
     if _dataset_config.source.format.is_archive:
         try:
-            _extract_result = _manager.extract_archive(ingest_result=_ingest_result)
+            _extract_result = _manager.extract_archive(context=_ingest_result)
         except ExtractStageError as error:
             error.log(logger.critical)
             sys.exit(-1)
 
-        assert _extract_result.extraction_info is not None, "todo: info de l'extraction absentes"
+        assert _extract_result.download.extraction_info is not None, (
+            "todo: info de l'extraction absentes"
+        )
         logger.info(
             "--- (4) Extraction stage completed",
             **_extract_result.model_dump(
-                mode="json", include={"extraction_info": {"file_path", "size_mib"}}
+                mode="json", include={"download": {"extraction_info": {"file_path", "size_mib"}}}
             ),
         )
         # file_path = _extract_result.extraction_info.file_path,
         # size_mib = _extract_result.extraction_info.size_mib,
 
         _should_skip = _manager.should_skip_extraction(
-            extract_result=_extract_result, previous_metadata=_previous_metadata
+            context=_extract_result, previous_metadata=_previous_metadata
         )
 
         if _should_skip:
@@ -124,7 +128,7 @@ if __name__ == "__main__":
     # ============================================================
     try:
         _bronze_result = _manager.to_bronze(
-            ingest_or_extract_result=_extract_result if _extract_result else _ingest_result
+            context=_extract_result if _extract_result else _ingest_result
         )
     except BronzeStageError as error:
         error.log(logger.critical)
@@ -138,7 +142,7 @@ if __name__ == "__main__":
     # 6) Silver stage
     # ============================================================
     try:
-        _silver_result = _manager.to_silver(bronze_result=_bronze_result)
+        _silver_result = _manager.to_silver(context=_bronze_result)
     except SilverStageError as error:
         error.log(logger.critical)
         sys.exit(-1)
