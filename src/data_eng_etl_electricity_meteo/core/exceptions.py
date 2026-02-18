@@ -118,6 +118,15 @@ class TransformNotFoundError(BaseProjectException):
         super().__init__("Transform not found for dataset.")
 
 
+class TransformValidationError(BaseProjectException):
+    """Raised when a silver transform validation fails."""
+
+    def __init__(self, dataset_name: str, reason: str) -> None:
+        self.dataset_name = dataset_name
+        self.reason = reason
+        super().__init__("Transform validation failed.")
+
+
 # ---------------------------------------------------------------------------
 # Pipeline stage errors
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Transformations for IGN Contours IRIS dataset."""
+"""Transformations for IGN contours IRIS dataset."""
 
 import shutil
 import tempfile
@@ -140,7 +140,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     finally:
         conn.close()
 
-    # todo: Validate output before returning
+    # TODO: Validate output before returning
     # validate_ign_contours_iris(df)
 
     logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)

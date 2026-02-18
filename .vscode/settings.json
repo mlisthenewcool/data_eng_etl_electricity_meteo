@@ -2,7 +2,7 @@
   "workbench.colorCustomizations": {
     "editorRuler.foreground": "#ffffff22"
   },
-  "editor.renderWhitespace": "boundary",
+  "editor.renderWhitespace": "trailing",
   "editor.guides.indentation": true,
   "editor.detectIndentation": false,
   "editor.insertSpaces": true,
@@ -26,6 +26,14 @@
     },
     "diffEditor.ignoreTrimWhitespace": false,
   },
+  "files.exclude": {
+    "**/.idea": true,
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.git": true
+  },
   "[yaml]": {
     "editor.tabSize": 2,
     "editor.formatOnSave": true
@@ -44,7 +52,7 @@
   },
   "todo-tree.highlights.defaultHighlight": {
     "type": "text-and-comment",
-    "foreground": "#FFEB3B", // yellow
+    "foreground": "#FFEB3B",
     "background": "#FFEB3B",
     "opacity": 10,
     "iconColour": "#FFEB3B",
