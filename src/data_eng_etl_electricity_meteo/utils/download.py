@@ -7,8 +7,10 @@ Airflow handles retries at the task level, so no retry logic is included here.
 
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -28,6 +30,23 @@ class HttpDownloadInfo:
     path: Path
     file_hash: str
     size_mib: float
+
+
+class DownloadProgressReporter(Protocol):
+    """Reports byte-count updates during a streaming download.
+
+    Implementations receive the total expected bytes at construction time
+    (``0`` when ``Content-Length`` is absent) and individual chunk sizes
+    via :meth:`update`.
+    """
+
+    def update(self, n: int) -> None:
+        """Accumulate *n* downloaded bytes."""
+        ...
+
+    def close(self) -> None:
+        """Release any resources held by the reporter."""
+        ...
 
 
 def _extract_filename(response: httpx.Response, url: str) -> str | None:
@@ -87,7 +106,12 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 #  download_timeout_connect
 #  download_timeout_sock_read
 #  download_chunk_size
-def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDownloadInfo:
+def download_to_file(
+    url: str,
+    dest_dir: Path,
+    fallback_filename: str,
+    progress: Callable[[int], DownloadProgressReporter] | None = None,
+) -> HttpDownloadInfo:
     """Stream a file from *url* to *dest_dir* with progress and SHA256.
 
     Parameters
@@ -98,6 +122,10 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
         Destination directory (created if needed).
     fallback_filename:
         Fallback filename if none could be extracted from the response.
+    progress:
+        Factory called with ``total_bytes`` (``0`` if unknown) that returns a
+        :class:`DownloadProgressReporter`.  Pass ``None`` (default) to use the
+        built-in tqdm progress bar.
 
     Returns
     -------
@@ -144,16 +172,19 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
 
             hasher = FileHasher()
 
-            progress_bar = tqdm(
-                total=content_length,
-                unit="iB",
-                unit_scale=True,
-                unit_divisor=1024,
-                desc=f"Downloading {filename} (content_length={content_length})",
-                # file=TqdmToLogger(logger.info)
-                # if settings.is_running_on_airflow else sys.stderr,
-                file=sys.stderr,
-                leave=False,  # disappears when complete
+            _reporter: DownloadProgressReporter = (
+                progress(content_length)
+                if progress is not None
+                else tqdm(
+                    total=content_length,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc=f"Downloading {filename}",
+                    file=sys.stderr,
+                    leave=False,
+                    mininterval=1.0,
+                )
             )
 
             try:
@@ -163,9 +194,9 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
                         hasher.update(chunk)
                         chunk_len = len(chunk)
                         downloaded_bytes += chunk_len
-                        progress_bar.update(chunk_len)
+                        _reporter.update(chunk_len)
             finally:
-                progress_bar.close()
+                _reporter.close()
 
             file_hash = hasher.hexdigest
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)

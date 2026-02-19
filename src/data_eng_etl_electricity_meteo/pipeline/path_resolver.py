@@ -18,10 +18,17 @@ class _BasePathResolver:
     """Common base: dataset name + base directory."""
 
     dataset_name: str
-    _base_dir: Path = field(init=False, default_factory=lambda: settings.data_dir_path)
+    base_dir: Path = field(init=False, default_factory=lambda: settings.data_dir_path)
 
     def __post_init__(self) -> None:
         """Validate that dataset_name is not empty.
+
+        Notes
+        -----
+        Necessary because resolvers can be instantiated directly (e.g. in tests
+        or scripts) without going through the catalog, where an empty name would
+        silently produce broken paths (e.g. ``bronze/latest.parquet`` instead of
+        ``bronze/{dataset_name}/latest.parquet``).
 
         Raises
         ------
@@ -43,7 +50,7 @@ class RemotePathResolver(_BasePathResolver):
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
-        return self._base_dir / "landing" / self.dataset_name
+        return self.base_dir / "landing" / self.dataset_name
 
     # =========================================================================
     # Bronze Layer (Versioned History)
@@ -51,7 +58,7 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _bronze_dir(self) -> Path:
-        return self._base_dir / "bronze" / self.dataset_name
+        return self.base_dir / "bronze" / self.dataset_name
 
     def bronze_path(self, version: str) -> Path:
         """Return ``bronze/{dataset_name}/{version}.parquet``.
@@ -119,7 +126,7 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _silver_dir(self) -> Path:
-        return self._base_dir / "silver" / self.dataset_name
+        return self.base_dir / "silver" / self.dataset_name
 
     @property
     def silver_current_path(self) -> Path:
@@ -138,7 +145,7 @@ class DerivedPathResolver(_BasePathResolver):
 
     @property
     def _gold_dir(self) -> Path:
-        return self._base_dir / "gold" / self.dataset_name
+        return self.base_dir / "gold" / self.dataset_name
 
     @property
     def gold_current_path(self) -> Path:

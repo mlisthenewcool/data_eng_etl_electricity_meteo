@@ -68,7 +68,16 @@ def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
         DataFrame with standardized column names, validated.
     """
     df = df.rename(to_snake_case)
+
+    # Drop columns that are entirely null — these are spurious columns injected by
+    # some source APIs (e.g. column_30 / column_68 from the ODRE eco2mix parquet).
+    # Logged as a warning so operators are aware of structural drift in the source.
+    null_cols = [col for col in df.columns if df[col].is_null().all()]
+    if null_cols:
+        logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
+        df = df.drop(null_cols)
+
     validate_not_empty(df, dataset_name)
     validate_no_full_null_columns(df, dataset_name)
-    logger.debug("Common silver steps applied", dataset_name=dataset_name)
+    logger.debug("Common silver steps applied")
     return df

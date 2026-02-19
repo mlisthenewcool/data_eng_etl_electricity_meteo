@@ -84,7 +84,8 @@ class Settings(BaseSettings):
     # Download Settings
     # =========================================================================
     download_chunk_size: int = Field(
-        default=1024 * 1024,  # 1 MB
+        # default=1024 * 1024,  # 1 MB
+        default=512 * 512,  # 512 KB
         description="Chunk size for streaming downloads (bytes)",
         gt=0,
         le=10 * 1024 * 1024,  # Max 10 MB

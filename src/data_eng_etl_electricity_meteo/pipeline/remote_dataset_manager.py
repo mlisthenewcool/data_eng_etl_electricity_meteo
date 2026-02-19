@@ -30,10 +30,16 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     FileNotFoundInArchiveError,
     IngestStageError,
     SilverStageError,
+    TransformValidationError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.file_manager import RemoteFileManager
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
+from data_eng_etl_electricity_meteo.pipeline.progress import (
+    AirflowDownloadProgress,
+    AirflowExtractProgress,
+)
 from data_eng_etl_electricity_meteo.pipeline.stage_types import (
     BronzeMetrics,
     DownloadMetrics,
@@ -87,11 +93,14 @@ class RemoteDatasetPipeline:
         """Path resolver for this dataset (created once, cached)."""
         return RemotePathResolver(dataset_name=self.dataset.name)
 
-    # ========================================
-    # INGESTION
-    # ========================================
+    @cached_property
+    def _file_manager(self) -> RemoteFileManager:
+        """File manager for symlinks, rotation and rollback (created once, cached)."""
+        return RemoteFileManager(self.resolver)
 
-    def _evaluate_ingestion_need(
+    # --- Ingestion ---
+
+    def _decide_ingestion(
         self,
         current_remote_file_info: RemoteFileMetadata,
         previous_remote_file_info: RemoteFileMetadata | None,
@@ -114,9 +123,7 @@ class RemoteDatasetPipeline:
             Whether to ingest, whether this is a healing run, and the
             remote metadata used for the decision.
         """
-        # --- Check upstream consistency ---
-        silver_path = self.resolver.silver_current_path
-        silver_file_exists = silver_path.exists()
+        silver_file_exists = self.resolver.silver_current_path.exists()
         remote_metadata_exists = previous_remote_file_info is not None
 
         if remote_metadata_exists != silver_file_exists:
@@ -129,47 +136,21 @@ class RemoteDatasetPipeline:
                 should_ingest=True, is_healing=True, remote_metadata=current_remote_file_info
             )
 
-        # --- Smart skip #1 : Remote metadata comparison ---
         if previous_remote_file_info and silver_file_exists:
-            if not has_remote_file_changed(
+            change_detection_result = has_remote_file_changed(
                 current=current_remote_file_info, previous=previous_remote_file_info
-            ):
-                logger.info("Skipping ingestion: remote metadata unchanged")
+            )
+            if not change_detection_result.has_changed:
+                logger.info(
+                    "Skipping ingestion: remote metadata unchanged",
+                    reason=change_detection_result.reason,
+                )
                 return IngestionDecision(
                     should_ingest=False, is_healing=False, remote_metadata=current_remote_file_info
                 )
 
         return IngestionDecision(
             should_ingest=True, is_healing=False, remote_metadata=current_remote_file_info
-        )
-
-    def _download(self, version: str, remote_metadata: RemoteFileMetadata) -> PipelineContext:
-        """Download source file to the landing directory.
-
-        Parameters
-        ----------
-        version:
-            Run version string used as fallback filename.
-        remote_metadata:
-            HTTP HEAD metadata captured before download.
-
-        Returns
-        -------
-        PipelineContext
-            Initial pipeline context with download metrics populated.
-        """
-        download_info = download_to_file(
-            url=self.dataset.source.url_as_str,
-            dest_dir=self.resolver.landing_dir,
-            fallback_filename=f"{version}.{self.dataset.source.format.value}",
-        )
-
-        return PipelineContext(
-            version=version,
-            download=DownloadMetrics(
-                remote_metadata=remote_metadata,
-                download_info=download_info,
-            ),
         )
 
     def ingest(
@@ -195,17 +176,17 @@ class RemoteDatasetPipeline:
         try:
             logger.info("Ingesting", version=version)
 
-            # --- 1. Load metadata from previous run ---
-            safe_previous_metadata = PipelineRunSnapshot.from_metadata_dict(previous_metadata)
+            # --- 1. Deserialize previous run metadata ---
+            safe_previous = PipelineRunSnapshot.from_metadata_dict(previous_metadata)
 
-            # --- 2. Retrieve metadata from remote with HEAD request ---
+            # --- 2. Fetch current remote metadata (HEAD request) ---
             remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
             previous_remote_metadata = (
-                safe_previous_metadata.download.remote_metadata if safe_previous_metadata else None
+                safe_previous.download.remote_metadata if safe_previous else None
             )
 
-            # --- 3. Evaluate whether ingestion is needed ---
-            need = self._evaluate_ingestion_need(
+            # --- 3. Smart skip #1: remote metadata comparison ---
+            need = self._decide_ingestion(
                 current_remote_file_info=remote_file_info,
                 previous_remote_file_info=previous_remote_metadata,
             )
@@ -213,15 +194,28 @@ class RemoteDatasetPipeline:
             if not need.should_ingest:
                 return None
 
-            # --- 4. Download content ---
-            context = self._download(version=version, remote_metadata=remote_file_info)
+            # --- 4. Download ---
+            download_info = download_to_file(
+                url=self.dataset.source.url_as_str,
+                dest_dir=self.resolver.landing_dir,
+                fallback_filename=f"{version}.{self.dataset.source.format.value}",
+                progress=AirflowDownloadProgress if settings.is_running_on_airflow else None,
+            )
+            context = PipelineContext(
+                version=version,
+                download=DownloadMetrics(
+                    remote_metadata=remote_file_info,
+                    download_info=download_info,
+                ),
+            )
 
-            # --- 5. Hash check (smart skip #2) but don't skip in healing mode ---
-            if not need.is_healing and safe_previous_metadata:
+            # --- 5. Smart skip #2: content hash (skipped in healing mode) ---
+            if not need.is_healing and safe_previous:
                 if self._should_skip_on_hash(
-                    previous_hash=safe_previous_metadata.download.file_hash,
+                    previous_hash=safe_previous.download.file_hash,
                     current_hash=context.download.download_info.file_hash,
                 ):
+                    self._cleanup_landing()
                     return None
 
             return context
@@ -229,48 +223,26 @@ class RemoteDatasetPipeline:
         except httpx.HTTPError as err:
             raise IngestStageError(self.dataset.name) from err
 
-    def should_skip_extraction(
+    # --- Extraction ---
+
+    def extract_archive(
         self, context: PipelineContext, previous_metadata: dict[str, Any] | None
-    ) -> bool:
-        """Check if extracted file hash matches previous run (smart skip).
-
-        Parameters
-        ----------
-        context:
-            Pipeline context with ``download.extraction_info`` populated.
-        previous_metadata:
-            Raw metadata dict from the previous run, or ``None``.
-
-        Returns
-        -------
-        bool
-            ``True`` if extraction output is identical and processing can be skipped.
-        """
-        safe_previous_metadata = PipelineRunSnapshot.from_metadata_dict(previous_metadata)
-        if not safe_previous_metadata or not safe_previous_metadata.extraction:
-            return False
-
-        if context.download.extraction_info is None:
-            return False
-
-        return self._should_skip_on_hash(
-            safe_previous_metadata.extraction.file_hash,
-            context.download.extraction_info.file_hash,
-        )
-
-    def extract_archive(self, context: PipelineContext) -> PipelineContext:
-        """Extract target file from archive and populate ``extraction_info``.
+    ) -> PipelineContext | None:
+        """Extract target file from archive; returns ``None`` if hash unchanged.
 
         Parameters
         ----------
         context:
             Pipeline context whose ``download.download_info.path`` points to the
             archive.
+        previous_metadata:
+            Raw metadata dict from the previous run, or ``None``.
 
         Returns
         -------
-        PipelineContext
-            Updated context with ``download.extraction_info`` populated.
+        PipelineContext | None
+            Updated context with ``download.extraction_info`` populated,
+            or ``None`` if the extracted content hash matches the previous run.
         """
         try:
             archive_path = context.download.download_info.path
@@ -289,9 +261,10 @@ class RemoteDatasetPipeline:
                 target_filename=inner_file,
                 dest_dir=landing_dir,
                 validate_sqlite=Path(inner_file).suffix == ".gpkg",
+                progress=AirflowExtractProgress if settings.is_running_on_airflow else None,
             )
 
-            return PipelineContext(
+            updated_context = PipelineContext(
                 version=context.version,
                 download=DownloadMetrics(
                     remote_metadata=context.download.remote_metadata,
@@ -304,6 +277,19 @@ class RemoteDatasetPipeline:
                     ),
                 ),
             )
+
+            # Smart skip: hash comparison against previous extraction
+            safe_previous = PipelineRunSnapshot.from_metadata_dict(previous_metadata)
+            if safe_previous and safe_previous.extraction:
+                if self._should_skip_on_hash(
+                    previous_hash=safe_previous.extraction.file_hash,
+                    current_hash=extract_info.file_hash,
+                ):
+                    self._cleanup_landing()
+                    return None
+
+            return updated_context
+
         except (
             ArchiveNotFoundError,
             FileNotFoundInArchiveError,
@@ -311,30 +297,13 @@ class RemoteDatasetPipeline:
         ) as err:
             raise ExtractStageError(self.dataset.name) from err
 
-    # =============================================================================
-    # Smart skip #2
-    # =============================================================================
+    # --- Helpers ---
 
     def _should_skip_on_hash(self, previous_hash: str | None, current_hash: str) -> bool:
-        """Compare content hashes; cleanup landing and return ``True`` if identical.
-
-        Parameters
-        ----------
-        previous_hash:
-            Hash from the previous successful run, or ``None``.
-        current_hash:
-            Hash of the current file.
-
-        Returns
-        -------
-        bool
-            ``True`` if hashes match (processing can be skipped).
-        """
+        """Return ``True`` if hashes match (content unchanged since last run)."""
         if previous_hash == current_hash:
             logger.info("Skipping: content hash identical to previous run")
-            self._cleanup_landing()
             return True
-
         return False
 
     def _cleanup_landing(self) -> None:
@@ -342,9 +311,7 @@ class RemoteDatasetPipeline:
         if self.resolver.landing_dir.exists() and self.resolver.landing_dir.is_dir():
             shutil.rmtree(self.resolver.landing_dir)
 
-    # =============================================================================
-    # Transformations
-    # =============================================================================
+    # --- Transformations ---
 
     def to_bronze(self, context: PipelineContext) -> PipelineContext:
         """Convert landing file to versioned bronze Parquet.
@@ -368,16 +335,11 @@ class RemoteDatasetPipeline:
 
             logger.info("Converting to bronze", version=context.version)
 
-            # Retrieve and apply dataset-specific bronze transformation
             transform = get_bronze_transform(self.dataset.name)
             df = transform(context.download.landing_path)
             df.write_parquet(bronze_path)
 
-            # Update latest symlink to point to this version
-            file_manager = RemoteFileManager(self.resolver)
-            file_manager.update_bronze_latest_link(context.version)
-
-            # Cleanup all landing files
+            self._file_manager.update_bronze_latest_link(context.version)
             self._cleanup_landing()
 
             columns = df.columns
@@ -422,13 +384,11 @@ class RemoteDatasetPipeline:
         try:
             logger.info("Transforming to silver", version=context.version)
 
-            # Retrieve and apply dataset-specific silver transformation
             transform = get_silver_transform(self.dataset.name)
             df = transform(self.resolver.bronze_latest_path)
 
             # Rotate silver BEFORE writing to disk: current → backup
-            file_manager = RemoteFileManager(self.resolver)
-            file_manager.rotate_silver()
+            self._file_manager.rotate_silver()
 
             self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -458,5 +418,5 @@ class RemoteDatasetPipeline:
                     columns=columns,
                 ),
             )
-        except (duckdb.Error, OSError) as err:
+        except (duckdb.Error, OSError, TransformValidationError) as err:
             raise SilverStageError(self.dataset.name) from err

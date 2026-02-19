@@ -3,6 +3,7 @@
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     FileNotFoundInArchiveError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
 logger = get_logger("extraction")
@@ -90,6 +90,7 @@ def extract_7z(
     target_filename: str,
     dest_dir: Path,
     validate_sqlite: bool = True,
+    progress: Callable[[int], ExtractCallback] | None = None,
 ) -> ExtractedFileInfo:
     """Extract a specific file from a 7z archive.
 
@@ -105,6 +106,10 @@ def extract_7z(
         Destination directory (created if needed).
     validate_sqlite:
         If ``True``, validate SQLite header after extraction.
+    progress:
+        Factory called with ``total_bytes`` (uncompressed size) that returns
+        an :class:`~py7zr.callbacks.ExtractCallback`.  Pass ``None`` (default)
+        to use the built-in tqdm progress bar.
 
     Returns
     -------
@@ -147,20 +152,27 @@ def extract_7z(
             uncompressed_size = target_info.uncompressed
 
             # Extract to temp directory with progress
-            with tqdm(
-                total=uncompressed_size,
-                unit="B",
-                unit_scale=True,
-                desc=f"Extracting {target_filename}",
-                leave=False,
-                file=sys.stderr,  # TqdmToLoguru(logger.info) if settings.is_running_on_airflow else
-                mininterval=5.0 if settings.is_running_on_airflow else 1.0,
-            ) as pbar:
-                callback = _TqdmExtractCallback(pbar)
-
-                archive.extract(
-                    path=tmp_dir_path, targets=[target_internal_path], callback=callback
+            _owned_pbar: tqdm | None = None
+            if progress is not None:
+                _callback: ExtractCallback = progress(uncompressed_size)
+            else:
+                _owned_pbar = tqdm(
+                    total=uncompressed_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc=f"Extracting {target_filename}",
+                    leave=False,
+                    file=sys.stderr,
                 )
+                _callback = _TqdmExtractCallback(_owned_pbar)
+
+            try:
+                archive.extract(
+                    path=tmp_dir_path, targets=[target_internal_path], callback=_callback
+                )
+            finally:
+                if _owned_pbar is not None:
+                    _owned_pbar.close()
 
             extracted_file = tmp_dir_path / target_internal_path
 

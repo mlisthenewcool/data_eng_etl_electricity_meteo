@@ -17,6 +17,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     InvalidCatalogError,
     TransformNotFoundError,
 )
+from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.remote_dataset_manager import RemoteDatasetPipeline
@@ -132,10 +133,11 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
                 else None
             )
 
-            context = manager.extract_archive(PipelineContext.model_validate(ctx))
+            context = manager.extract_archive(
+                PipelineContext.model_validate(ctx), previous_metadata=previous_metadata
+            )
 
-            # If hash is identical, remove landing files and skip
-            if manager.should_skip_extraction(context=context, previous_metadata=previous_metadata):
+            if context is None:
                 return False
 
             return context.model_dump(mode="json")
@@ -208,7 +210,7 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_remote_datasets():
         try:
-            asset = get_asset(dataset.name, "silver")
+            asset = get_asset(dataset.name, MedallionLayer.SILVER)
             manager = RemoteDatasetPipeline(dataset=dataset)
             pipelines[dataset.name] = _create_dag(manager, asset)
             factory_logger.info("Created dataset DAG", dag_id=f"ingest_{dataset.name}")

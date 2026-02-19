@@ -46,10 +46,10 @@ def get_asset(dataset_name: str, layer: MedallionLayer) -> Asset:
     ValueError
         If *layer* is not ``"silver"`` or ``"gold"``.
     """
-    if layer == "silver":
+    if layer == MedallionLayer.SILVER:
         resolver = RemotePathResolver(dataset_name)
         uri = f"file:///{resolver.silver_current_path}"
-    elif layer == "gold":
+    elif layer == MedallionLayer.GOLD:
         resolver = DerivedPathResolver(dataset_name)
         uri = f"file:///{resolver.gold_current_path}"
     else:

@@ -24,6 +24,7 @@ if __name__ == "__main__":
     # /!\ DO NOT USE sys.exit() WHEN RUNNING ON AIRFLOW. Let Airflow handle exceptions.
     # ==================================================================================
     _DATASET_NAME = "ign_contours_iris"
+    # _DATASET_NAME = "odre_eco2mix_tr"
 
     _start_datetime = datetime.now(tz=UTC)
 
@@ -66,7 +67,8 @@ if __name__ == "__main__":
         )
         sys.exit(-1)
 
-    _remote_config: RemoteDatasetConfig = _dataset_config  # type: ignore[assignment]  # narrowed by isinstance + sys.exit above
+    assert isinstance(_dataset_config, RemoteDatasetConfig)
+    _remote_config = _dataset_config
     _version = _remote_config.ingestion.frequency.format_datetime_as_version(_start_datetime)
     _manager = RemoteDatasetPipeline(dataset=_remote_config)
 
@@ -89,31 +91,29 @@ if __name__ == "__main__":
         logger.info("Pipeline skipped: content unchanged")
         sys.exit(0)
 
-    _ingest_context: PipelineContext = _ingest_result  # type: ignore[assignment]  # narrowed by is None + sys.exit above
+    assert _ingest_result is not None
+    _ingest_context = _ingest_result
 
     # ============================================================
     # 4) (optional) Extract stage
     # ============================================================
-    _bronze_input = _ingest_context
+    _bronze_input: PipelineContext = _ingest_context
 
     if _remote_config.source.format.is_archive:
         try:
-            _bronze_input = _manager.extract_archive(context=_ingest_context)
+            _extract_result = _manager.extract_archive(
+                context=_ingest_context, previous_metadata=_previous_metadata
+            )
         except ExtractStageError as error:
             error.log(logger.critical)
             sys.exit(-1)
 
-        if _bronze_input.download.extraction_info is None:
-            logger.critical("Extraction completed but extraction_info is missing")
-            sys.exit(-1)
-
-        _should_skip = _manager.should_skip_extraction(
-            context=_bronze_input, previous_metadata=_previous_metadata
-        )
-
-        if _should_skip:
-            logger.info("Stopping pipeline: extracted content unchanged")
+        if _extract_result is None:
+            logger.info("Pipeline skipped: extracted content unchanged")
             sys.exit(0)
+
+        assert _extract_result is not None
+        _bronze_input = _extract_result
     else:
         logger.info("Extraction skipped: format is not archive", dataset_name=_DATASET_NAME)
 

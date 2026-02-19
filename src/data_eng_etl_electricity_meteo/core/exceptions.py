@@ -1,12 +1,9 @@
 """Custom exceptions with attribute extraction for structured logging."""
 
 from pathlib import Path
-from typing import Any, Protocol, get_args
+from typing import Any, Protocol
 
 from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
-
-# __value__ unwraps the PEP 695 TypeAliasType to access the underlying Literal
-_VALID_LAYERS: frozenset[str] = frozenset(get_args(MedallionLayer.__value__))
 
 
 class _LogMethod(Protocol):
@@ -137,8 +134,6 @@ class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
     def __init__(self, dataset_name: str, stage: MedallionLayer) -> None:
-        if stage not in _VALID_LAYERS:
-            raise ValueError(f"Invalid medallion layer: {stage!r}")
         self.dataset_name = dataset_name
         self.stage = stage
         super().__init__(f"Pipeline failed at {stage} stage.")
@@ -167,28 +162,28 @@ class IngestStageError(PipelineStageError):
     """Raised when the ingest (download) stage fails."""
 
     def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, "landing")
+        super().__init__(dataset_name, MedallionLayer.LANDING)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
     def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, "landing")
+        super().__init__(dataset_name, MedallionLayer.LANDING)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
     def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, "bronze")
+        super().__init__(dataset_name, MedallionLayer.BRONZE)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
     def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, "silver")
+        super().__init__(dataset_name, MedallionLayer.SILVER)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +292,7 @@ if __name__ == "__main__":
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer="bronze")
+            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.BRONZE)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise BronzeStageError(_DATASET) from err
     except BronzeStageError as error:
@@ -332,7 +327,7 @@ if __name__ == "__main__":
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer="silver")
+            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.SILVER)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise SilverStageError(_DATASET) from err
     except SilverStageError as error:

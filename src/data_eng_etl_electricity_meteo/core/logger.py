@@ -43,14 +43,23 @@ OutputMode = Literal["airflow", "tty", "plain", "json"]
 _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
 
 
-def _normalize_value(value: object) -> str | int | float | bool | None:
+def _normalize_value(value: object) -> str | int | float | None:
     """Convert a value to a log-friendly primitive.
 
     Returns ``None`` to signal the key should be dropped.
+
+    Notes
+    -----
+    Booleans are converted to ``"True"`` / ``"False"`` strings so that
+    renderers relying on truthiness (e.g. Airflow's log display) do not
+    silently swallow ``False``.  The ``bool`` branch must precede ``int``
+    because ``bool`` is a subclass of ``int`` in Python.
     """
     if value is None:
         return None
-    if isinstance(value, (str, int, float, bool)):
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (str, int, float)):
         return value
     if isinstance(value, Path):
         return str(value)

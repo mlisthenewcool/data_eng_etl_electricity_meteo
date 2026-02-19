@@ -12,6 +12,7 @@ from pathlib import Path
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.exceptions import TransformNotFoundError
+from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.transformations.shared import apply_common_silver
 
 # ---------------------------------------------------------------------------
@@ -78,7 +79,9 @@ def get_bronze_transform(dataset_name: str) -> BronzeTransformFunc:
     try:
         return BRONZE_TRANSFORMS[dataset_name]
     except KeyError:
-        raise TransformNotFoundError(dataset_name=dataset_name, layer="bronze") from None
+        raise TransformNotFoundError(
+            dataset_name=dataset_name, layer=MedallionLayer.BRONZE
+        ) from None
 
 
 def get_silver_transform(dataset_name: str) -> SilverTransformFunc:
@@ -102,7 +105,9 @@ def get_silver_transform(dataset_name: str) -> SilverTransformFunc:
     try:
         specific_fn = SILVER_TRANSFORMS[dataset_name]
     except KeyError:
-        raise TransformNotFoundError(dataset_name=dataset_name, layer="silver") from None
+        raise TransformNotFoundError(
+            dataset_name=dataset_name, layer=MedallionLayer.SILVER
+        ) from None
 
     def wrapped(path: Path) -> pl.DataFrame:
         df = specific_fn(path)
@@ -132,4 +137,4 @@ def get_gold_transform(dataset_name: str) -> GoldTransformFunc:
     try:
         return GOLD_TRANSFORMS[dataset_name]
     except KeyError:
-        raise TransformNotFoundError(dataset_name=dataset_name, layer="gold") from None
+        raise TransformNotFoundError(dataset_name=dataset_name, layer=MedallionLayer.GOLD) from None
