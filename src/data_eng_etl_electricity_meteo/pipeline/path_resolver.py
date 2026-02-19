@@ -6,7 +6,7 @@ Two resolver types match the two dataset types:
 - ``DerivedPathResolver`` → gold (derived datasets built from silver sources)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +18,7 @@ class _BasePathResolver:
     """Common base: dataset name + base directory."""
 
     dataset_name: str
-    _base_dir: Path = settings.data_dir_path
+    _base_dir: Path = field(init=False, default_factory=lambda: settings.data_dir_path)
 
     def __post_init__(self) -> None:
         """Validate that dataset_name is not empty.
@@ -172,7 +172,7 @@ if __name__ == "__main__":
 
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 
-        logger.info(
+        logger.debug(
             "Remote dataset paths",
             dataset_name=_dataset.name,
             run_version=_run_version,
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     for _dataset in _catalog.get_derived_datasets():
         _resolver = DerivedPathResolver(dataset_name=_dataset.name)
 
-        logger.info(
+        logger.debug(
             "Derived dataset paths",
             dataset_name=_dataset.name,
             gold_current_path=_resolver.gold_current_path,

@@ -9,7 +9,7 @@ Two manager types match the two dataset types:
 import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
@@ -50,14 +50,16 @@ def _rotate(
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current_path, backup_path)
         logger.debug(
-            f"Rotated {layer} files",
+            "Rotated files",
+            layer=layer,
             dataset_name=dataset_name,
             current=current_path,
             backup=backup_path,
         )
     else:
         logger.warning(
-            f"Skipped {layer} rotation: no current file (expected on first run)",
+            "Skipped rotation: no current file (expected on first run)",
+            layer=layer,
             dataset_name=dataset_name,
         )
 
@@ -88,14 +90,16 @@ def _rollback(
     """
     if not backup_path.exists():
         logger.warning(
-            f"Cannot rollback {layer}: no backup exists",
+            "Cannot rollback: no backup exists",
+            layer=layer,
             dataset_name=dataset_name,
         )
         return False
 
     shutil.copy2(backup_path, current_path)
     logger.debug(
-        f"Rolled back {layer} to backup version",
+        "Rolled back to backup version",
+        layer=layer,
         dataset_name=dataset_name,
         backup=backup_path,
         current=current_path,
@@ -180,11 +184,11 @@ class RemoteFileManager:
         list[Path]
             Paths of deleted version files.
         """
-        cutoff_time = datetime.now() - timedelta(days=retention_days)
+        cutoff_time = datetime.now(tz=UTC) - timedelta(days=retention_days)
         deleted = []
 
         for version_path in self.resolver.list_bronze_versions():
-            file_mtime = datetime.fromtimestamp(version_path.stat().st_mtime)
+            file_mtime = datetime.fromtimestamp(version_path.stat().st_mtime, tz=UTC)
 
             if file_mtime < cutoff_time:
                 version_path.unlink()
@@ -193,7 +197,7 @@ class RemoteFileManager:
                     "Deleted old bronze version",
                     dataset_name=self.resolver.dataset_name,
                     version=version_path.stem,
-                    age_days=(datetime.now() - file_mtime).days,
+                    age_days=(datetime.now(tz=UTC) - file_mtime).days,
                 )
 
         return deleted

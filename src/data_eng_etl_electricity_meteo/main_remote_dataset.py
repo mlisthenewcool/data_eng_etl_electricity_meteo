@@ -1,7 +1,7 @@
 """CLI entrypoint for local pipeline execution."""
 
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
@@ -15,6 +15,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.remote_dataset_manager import RemoteDatasetPipeline
+from data_eng_etl_electricity_meteo.pipeline.stage_types import PipelineContext
 
 logger = get_logger("main")
 
@@ -24,7 +25,7 @@ if __name__ == "__main__":
     # ==================================================================================
     _DATASET_NAME = "ign_contours_iris"
 
-    _start_datetime = datetime.now()
+    _start_datetime = datetime.now(tz=UTC)
 
     # ============================================================
     # 0) Load catalog and dataset configuration
@@ -57,20 +58,22 @@ if __name__ == "__main__":
     # ============================================================
     # 1) Prepare version and RemoteDatasetPipeline
     # ============================================================
-    assert isinstance(_dataset_config, RemoteDatasetConfig), "todo: créer get_remote_dataset"
-    _version = _dataset_config.ingestion.frequency.format_datetime_as_version(_start_datetime)
-    _manager = RemoteDatasetPipeline(dataset=_dataset_config)
+    if not isinstance(_dataset_config, RemoteDatasetConfig):
+        logger.critical(
+            "Expected a remote dataset",
+            dataset_name=_DATASET_NAME,
+            actual_type=type(_dataset_config).__name__,
+        )
+        sys.exit(-1)
 
-    logger.info(
-        "--- (1) Pipeline initialized",
-        version=_version,
-        **_dataset_config.model_dump(mode="json", include={"source": {"url"}}),
-    )
+    _remote_config: RemoteDatasetConfig = _dataset_config  # type: ignore[assignment]  # narrowed by isinstance + sys.exit above
+    _version = _remote_config.ingestion.frequency.format_datetime_as_version(_start_datetime)
+    _manager = RemoteDatasetPipeline(dataset=_remote_config)
 
     # ============================================================
     # 2) Load metadata from previous run (not-implemented yet)
     # ============================================================
-    logger.warning("--- (2) Load previous run metadata not yet implemented outside of Airflow")
+    logger.warning("Load previous run metadata not yet implemented outside of Airflow")
     _previous_metadata = None
 
     # ============================================================
@@ -82,61 +85,46 @@ if __name__ == "__main__":
         error.log(logger.critical)
         sys.exit(-1)
 
-    assert not isinstance(_ingest_result, bool), "todo: charger métadonnées des runs"
-    logger.info(
-        "--- (3) Download stage completed",
-        **_ingest_result.model_dump(
-            mode="json", include={"download": {"download_info": {"path", "size_mib"}}}
-        ),
-    )
+    if _ingest_result is None:
+        logger.info("Pipeline skipped: content unchanged")
+        sys.exit(0)
+
+    _ingest_context: PipelineContext = _ingest_result  # type: ignore[assignment]  # narrowed by is None + sys.exit above
 
     # ============================================================
     # 4) (optional) Extract stage
     # ============================================================
-    if _dataset_config.source.format.is_archive:
+    _bronze_input = _ingest_context
+
+    if _remote_config.source.format.is_archive:
         try:
-            _extract_result = _manager.extract_archive(context=_ingest_result)
+            _bronze_input = _manager.extract_archive(context=_ingest_context)
         except ExtractStageError as error:
             error.log(logger.critical)
             sys.exit(-1)
 
-        assert _extract_result.download.extraction_info is not None, (
-            "todo: info de l'extraction absentes"
-        )
-        logger.info(
-            "--- (4) Extraction stage completed",
-            **_extract_result.model_dump(
-                mode="json", include={"download": {"extraction_info": {"file_path", "size_mib"}}}
-            ),
-        )
-        # file_path = _extract_result.extraction_info.file_path,
-        # size_mib = _extract_result.extraction_info.size_mib,
+        if _bronze_input.download.extraction_info is None:
+            logger.critical("Extraction completed but extraction_info is missing")
+            sys.exit(-1)
 
         _should_skip = _manager.should_skip_extraction(
-            context=_extract_result, previous_metadata=_previous_metadata
+            context=_bronze_input, previous_metadata=_previous_metadata
         )
 
         if _should_skip:
             logger.info("Stopping pipeline: extracted content unchanged")
             sys.exit(0)
     else:
-        logger.info("--- (4) Extraction stage skipped : dataset.source.format is not archive")
-        _extract_result = None
+        logger.info("Extraction skipped: format is not archive", dataset_name=_DATASET_NAME)
 
     # ============================================================
     # 5) Bronze stage
     # ============================================================
     try:
-        _bronze_result = _manager.to_bronze(
-            context=_extract_result if _extract_result else _ingest_result
-        )
+        _bronze_result = _manager.to_bronze(context=_bronze_input)
     except BronzeStageError as error:
         error.log(logger.critical)
         sys.exit(-1)
-    logger.info(
-        "--- (5) Bronze stage completed",
-        **_bronze_result.model_dump(mode="json", include={"bronze"}),
-    )
 
     # ============================================================
     # 6) Silver stage
@@ -146,11 +134,8 @@ if __name__ == "__main__":
     except SilverStageError as error:
         error.log(logger.critical)
         sys.exit(-1)
-    logger.info(
-        "--- (6) Silver stage completed",
-        **_silver_result.model_dump(mode="json", include={"silver"}),
-    )
+
     # ============================================================
     # 7) Save successful run metadata
     # ============================================================
-    logger.warning("--- (7) Save run metadata not yet implemented outside of Airflow")
+    logger.warning("Save run metadata not yet implemented outside of Airflow")

@@ -20,6 +20,7 @@ JSON
     *orjson* for speed.
 """
 
+import re
 import sys
 from enum import Enum
 from functools import cache
@@ -102,7 +103,13 @@ def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
 # ---------------------------------------------------------------------------
 _RESET = "\033[0m"
 _CYAN = "\033[36m"
-_EVENT_PAD = 30
+_EVENT_PAD = 50
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visual_len(s: str) -> int:
+    """Return the visual length of a string, ignoring ANSI escape codes."""
+    return len(_ANSI_ESCAPE.sub("", s))
 
 
 def _build_level_styles() -> dict[str, str]:
@@ -121,7 +128,7 @@ def _build_level_styles() -> dict[str, str]:
 def _colorize_event(
     level_styles: dict[str, str],
 ) -> structlog.types.Processor:
-    """Return a processor that pads and colorizes the event by level."""
+    """Return a processor that colorizes the event by level."""
 
     def processor(
         _logger: WrappedLogger,
@@ -131,8 +138,9 @@ def _colorize_event(
         level: str = event_dict.get("level", "")
         color = level_styles.get(level)
         if color is not None and "event" in event_dict:
-            event = f"{event_dict['event']:<{_EVENT_PAD}}"
-            event_dict["event"] = f"{color}{event}{_RESET}" if color else event
+            event_dict["event"] = (
+                f"{color}{event_dict['event']}{_RESET}" if color else event_dict["event"]
+            )
         return event_dict
 
     return processor
@@ -140,11 +148,14 @@ def _colorize_event(
 
 def _prepend_logger_name(
     use_colors: bool = False,
+    pad_to: int = 0,
 ) -> structlog.types.Processor:
     """Return a processor that prefixes the event with ``[logger_name]``.
 
-    Inserted **after** ``_colorize_event`` so the name stays
-    uncolored while the event text keeps its level color.
+    Inserted **after** ``_colorize_event`` so the name stays uncolored
+    while the event text keeps its level color.  When *pad_to* is set,
+    padding is applied to the full visual length of ``[name] event``
+    (ANSI escape codes are excluded from the length calculation).
     """
 
     def processor(
@@ -153,9 +164,15 @@ def _prepend_logger_name(
         event_dict: EventDict,
     ) -> EventDict:
         name = event_dict.pop("logger_name", None)
-        if name:
-            prefix = f"[{_CYAN}{name}{_RESET}]" if use_colors else f"[{name}]"
-            event_dict["event"] = f"{prefix} {event_dict['event']}"
+        prefix = (
+            f"[{_CYAN}{name}{_RESET}]" if (name and use_colors) else (f"[{name}]" if name else "")
+        )
+        full = f"{prefix} {event_dict['event']}" if prefix else event_dict["event"]
+        if pad_to:
+            vlen = _visual_len(full)
+            if vlen < pad_to:
+                full += " " * (pad_to - vlen)
+        event_dict["event"] = full
         return event_dict
 
     return processor
@@ -277,7 +294,9 @@ def _setup_logger(
         console_chain: list[structlog.types.Processor] = [_normalize_and_flatten]
         if use_colors and level_styles:
             console_chain.append(_colorize_event(level_styles))
-        console_chain.append(_prepend_logger_name(use_colors))
+        console_chain.append(
+            _prepend_logger_name(use_colors, pad_to=_EVENT_PAD if use_colors else 0)
+        )
         console_chain.append(
             structlog.dev.ConsoleRenderer(
                 colors=use_colors,
@@ -340,7 +359,7 @@ def get_logger(name: str | None = None) -> BoundLogger:
     if name is None:
         return structlog.get_logger()
 
-    # TODO: auto-shorten dotted module paths
+    # TODO: auto-shorten dotted module paths to allow __name__ usage
     # short = name.rsplit(".", maxsplit=1)[-1]
 
     return structlog.get_logger(logger_name=name)

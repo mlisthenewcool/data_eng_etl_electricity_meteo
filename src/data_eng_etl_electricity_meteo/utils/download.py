@@ -29,14 +29,6 @@ class HttpDownloadInfo:
     file_hash: str
     size_mib: float
 
-    # def to_dict(self) -> dict[str, str | float]:
-    #     """Serialize to a JSON-compatible dict (for Airflow XCom)."""
-    #     return {
-    #         "path": str(self.path),
-    #         "file_hash": self.file_hash,
-    #         "size_mib": self.size_mib,
-    #     }
-
 
 def _extract_filename(response: httpx.Response, url: str) -> str | None:
     """Extract filename from Content-Disposition header or URL path.
@@ -119,7 +111,7 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
     httpx.TimeoutException:
         If request times out.
     """
-    logger.debug("Starting download", url=url, dest_dir=dest_dir)
+    logger.info("Starting download", url=url, dest_dir=dest_dir)
 
     # TODO, documenter & ajouter arguments write/pool
     timeout = httpx.Timeout(
@@ -176,14 +168,8 @@ def download_to_file(url: str, dest_dir: Path, fallback_filename: str) -> HttpDo
                 progress_bar.close()
 
             file_hash = hasher.hexdigest
-            size_mib = downloaded_bytes / (1024 * 1024)
+            size_mib = round(downloaded_bytes / (1024 * 1024), 2)
 
-            logger.debug(
-                "Download completed",
-                path=dest_path,
-                filename=filename,
-                size_mib=size_mib,
-                file_hash=file_hash,
-            )
+            logger.info("Download completed", filename=filename, size_mib=size_mib)
 
             return HttpDownloadInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

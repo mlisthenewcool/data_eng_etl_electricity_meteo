@@ -53,29 +53,6 @@ class Settings(BaseSettings):
         #   remplacer par les env vars AIRFLOW_CONFIG ou AIRFLOW_HOME par exemple
         return (self.airflow_home / "airflow.cfg").exists()
 
-    # @computed_field
-    # @property
-    # def is_running_in_notebook(self) -> bool:
-    #     """Detect if running inside an active Marimo notebook.
-    #
-    #     This property is evaluated at each call (not cached) to ensure it correctly
-    #     detects the runtime state after kernel initialization.
-    #
-    #     Returns
-    #     -------
-    #     bool
-    #         True if running in Marimo (edit/run mode).
-    #         False otherwise (terminal, script, tests).
-    #     """
-    #     try:
-    #         import marimo as mo  # noqa: PLC0415
-    #
-    #         if mo.running_in_notebook():
-    #             return True
-    #     except ImportError:
-    #         return False
-    #     return False
-
     # =========================================================================
     # Paths (computed from root_dir, not configurable via env)
     # =========================================================================
@@ -102,15 +79,6 @@ class Settings(BaseSettings):
     def data_state_dir_path(self) -> DirectoryPath:
         """Path to pipeline state directory."""
         return self.data_dir_path / "_state"
-
-    # @computed_field
-    # @property
-    # def secrets_dir_path(self) -> DirectoryPath:
-    #     """Path to secrets directory (Docker secrets on Airflow, local otherwise)."""
-    #     if self.is_running_on_airflow:
-    #         return Path("/run/secrets")
-    #
-    #     return self.root_dir / "secrets"
 
     # =========================================================================
     # Download Settings

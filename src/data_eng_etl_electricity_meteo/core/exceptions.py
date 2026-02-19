@@ -1,9 +1,12 @@
 """Custom exceptions with attribute extraction for structured logging."""
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, get_args
 
 from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
+
+# __value__ unwraps the PEP 695 TypeAliasType to access the underlying Literal
+_VALID_LAYERS: frozenset[str] = frozenset(get_args(MedallionLayer.__value__))
 
 
 class _LogMethod(Protocol):
@@ -134,6 +137,8 @@ class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
     def __init__(self, dataset_name: str, stage: MedallionLayer) -> None:
+        if stage not in _VALID_LAYERS:
+            raise ValueError(f"Invalid medallion layer: {stage!r}")
         self.dataset_name = dataset_name
         self.stage = stage
         super().__init__(f"Pipeline failed at {stage} stage.")
@@ -184,3 +189,171 @@ class SilverStageError(PipelineStageError):
 
     def __init__(self, dataset_name: str) -> None:
         super().__init__(dataset_name, "silver")
+
+
+# ---------------------------------------------------------------------------
+# Visual smoke test
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import sys
+
+    import duckdb
+    import httpx
+
+    from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+    _logger = get_logger("exception_demo")
+    _DATASET = "fake_dataset"
+
+    def _section(title: str) -> None:
+        _logger.info(title)
+
+    def _end() -> None:
+        print("", file=sys.stderr)
+
+    # ============================================================
+    # 1) IngestStageError — httpx causes
+    # ============================================================
+    _section("IngestStageError  <-  httpx.ConnectError")
+    try:
+        try:
+            raise httpx.ConnectError(
+                "[Errno -2] Name or service not known",
+                request=httpx.Request("HEAD", "https://data.example.fr/big_archive.7z"),
+            )
+        except httpx.HTTPError as err:
+            raise IngestStageError(_DATASET) from err
+    except IngestStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("IngestStageError  <-  httpx.TimeoutException")
+    try:
+        try:
+            raise httpx.ReadTimeout(
+                "timed out",
+                request=httpx.Request("GET", "https://data.example.fr/big_archive.7z"),
+            )
+        except httpx.HTTPError as err:
+            raise IngestStageError(_DATASET) from err
+    except IngestStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("IngestStageError  <-  httpx.HTTPStatusError")
+    try:
+        try:
+            _request = httpx.Request("GET", "https://data.example.fr/big_archive.7z")
+            _response = httpx.Response(status_code=503, request=_request)
+            raise httpx.HTTPStatusError("Server Error", request=_request, response=_response)
+        except httpx.HTTPError as err:
+            raise IngestStageError(_DATASET) from err
+    except IngestStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    # ============================================================
+    # 2) ExtractStageError — archive causes
+    # ============================================================
+    _section("ExtractStageError  <-  ArchiveNotFoundError")
+    try:
+        try:
+            raise ArchiveNotFoundError(path=Path("/data/landing/archive.7z"))
+        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+            raise ExtractStageError(_DATASET) from err
+    except ExtractStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("ExtractStageError  <-  FileNotFoundInArchiveError")
+    try:
+        try:
+            raise FileNotFoundInArchiveError(
+                target_filename="data.gpkg",
+                archive_path=Path("/data/landing/archive.7z"),
+            )
+        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+            raise ExtractStageError(_DATASET) from err
+    except ExtractStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("ExtractStageError  <-  FileIntegrityError")
+    try:
+        try:
+            raise FileIntegrityError(
+                path=Path("/data/landing/data.gpkg"),
+                reason="SHA-256 mismatch: expected abc123, got def456",
+            )
+        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+            raise ExtractStageError(_DATASET) from err
+    except ExtractStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    # ============================================================
+    # 3) BronzeStageError — transform / duckdb / IO causes
+    # ============================================================
+    _section("BronzeStageError  <-  TransformNotFoundError")
+    try:
+        try:
+            raise TransformNotFoundError(dataset_name=_DATASET, layer="bronze")
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise BronzeStageError(_DATASET) from err
+    except BronzeStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("BronzeStageError  <-  duckdb.IOException")
+    try:
+        try:
+            raise duckdb.IOException(
+                "Could not open file '/data/bronze/v1.parquet': Permission denied"
+            )
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise BronzeStageError(_DATASET) from err
+    except BronzeStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("BronzeStageError  <-  OSError")
+    try:
+        try:
+            raise OSError("[Errno 28] No space left on device: '/data/bronze/v1.parquet'")
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise BronzeStageError(_DATASET) from err
+    except BronzeStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    # ============================================================
+    # 4) SilverStageError — transform / duckdb / IO causes
+    # ============================================================
+    _section("SilverStageError  <-  TransformNotFoundError")
+    try:
+        try:
+            raise TransformNotFoundError(dataset_name=_DATASET, layer="silver")
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise SilverStageError(_DATASET) from err
+    except SilverStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("SilverStageError  <-  duckdb.ConversionException")
+    try:
+        try:
+            raise duckdb.ConversionException("Could not cast VARCHAR to INTEGER")
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise SilverStageError(_DATASET) from err
+    except SilverStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("SilverStageError  <-  OSError")
+    try:
+        try:
+            raise PermissionError("[Errno 13] Permission denied: '/data/silver/current.parquet'")
+        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+            raise SilverStageError(_DATASET) from err
+    except SilverStageError as error:
+        error.log(_logger.critical)

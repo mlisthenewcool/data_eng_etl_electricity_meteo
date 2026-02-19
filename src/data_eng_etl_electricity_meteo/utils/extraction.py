@@ -23,27 +23,8 @@ logger = get_logger("extraction")
 
 
 @dataclass(frozen=True)
-class ExtractionInfo:
-    """Extraction information with archive context (for pipeline traceability)."""
-
-    archive_path: Path
-    file_path: Path
-    file_hash: str
-    size_mib: float
-
-    # def to_dict(self) -> dict[str, str | float]:
-    #     """Serialize to a JSON-compatible dict (for Airflow XCom)."""
-    #     return {
-    #         "archive_path": str(self.archive_path),
-    #         "file_path": str(self.file_path),
-    #         "file_hash": self.file_hash,
-    #         "size_mib": self.size_mib,
-    #     }
-
-
-@dataclass(frozen=True)
 class ExtractedFileInfo:
-    """Extracted file metadata only (no archive context)."""
+    """Extracted file metadata (path, hash, size) returned by ``extract_7z``."""
 
     path: Path
     file_hash: str
@@ -57,23 +38,23 @@ class _TqdmExtractCallback(ExtractCallback):
         self.pbar = pbar
 
     def report_start(self, processing_file_path: str, processing_bytes: str) -> None:
-        """Signal that extraction of a file begins."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_end(self, processing_file_path: str, wrote_bytes: str) -> None:
-        """Signal that extraction of a file ends."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_update(self, decompressed_bytes: str) -> None:
         """Update the progress bar with decompressed bytes."""
         self.pbar.update(int(decompressed_bytes))
 
     def report_start_preparation(self) -> None:
-        """Signal that archive preparation starts."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_warning(self, message: str) -> None:
-        """Handle a py7zr warning."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_postprocess(self) -> None:
-        """Signal that post-processing starts."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
 
 def _validate_sqlite_header(path: Path) -> None:
@@ -142,7 +123,7 @@ def extract_7z(
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
 
-    logger.debug("Starting extraction", archive=archive_path.name, target=target_filename)
+    logger.info("Starting extraction", archive=archive_path.name, target=target_filename)
 
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
@@ -205,8 +186,6 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.debug(
-                "Extraction completed", path=dest_path, size_mib=size_mib, file_hash=file_hash
-            )
+            logger.info("Extraction completed", size_mib=size_mib)
 
             return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)

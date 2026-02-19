@@ -30,7 +30,6 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     FileNotFoundInArchiveError,
     IngestStageError,
     SilverStageError,
-    TransformNotFoundError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.pipeline.file_manager import RemoteFileManager
@@ -38,6 +37,7 @@ from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathReso
 from data_eng_etl_electricity_meteo.pipeline.stage_types import (
     BronzeMetrics,
     DownloadMetrics,
+    ExtractionInfo,
     IngestionDecision,
     PipelineContext,
     PipelineRunSnapshot,
@@ -48,7 +48,7 @@ from data_eng_etl_electricity_meteo.transformations.registry import (
     get_silver_transform,
 )
 from data_eng_etl_electricity_meteo.utils.download import download_to_file
-from data_eng_etl_electricity_meteo.utils.extraction import ExtractionInfo, extract_7z
+from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
 from data_eng_etl_electricity_meteo.utils.remote_metadata import (
     RemoteFileMetadata,
     get_remote_file_metadata,
@@ -68,6 +68,11 @@ class RemoteDatasetPipeline:
     ----------
     dataset:
         Remote dataset configuration from the catalog.
+
+    Raises
+    ------
+    TransformNotFoundError
+        At construction time if bronze or silver transforms are not registered.
     """
 
     dataset: RemoteDatasetConfig
@@ -109,14 +114,14 @@ class RemoteDatasetPipeline:
             Whether to ingest, whether this is a healing run, and the
             remote metadata used for the decision.
         """
-        # --- 1. Check upstream consistency ---
+        # --- Check upstream consistency ---
         silver_path = self.resolver.silver_current_path
         silver_file_exists = silver_path.exists()
         remote_metadata_exists = previous_remote_file_info is not None
 
         if remote_metadata_exists != silver_file_exists:
             logger.warning(
-                "Inconsistent state. Forcing ingestion to heal.",
+                "Inconsistent state, forcing ingestion to heal",
                 silver_file_exists=silver_file_exists,
                 remote_metadata_exists=remote_metadata_exists,
             )
@@ -129,7 +134,7 @@ class RemoteDatasetPipeline:
             if not has_remote_file_changed(
                 current=current_remote_file_info, previous=previous_remote_file_info
             ):
-                logger.info("Skipping: remote metadata unchanged since previous successful run")
+                logger.info("Skipping ingestion: remote metadata unchanged")
                 return IngestionDecision(
                     should_ingest=False, is_healing=False, remote_metadata=current_remote_file_info
                 )
@@ -169,10 +174,10 @@ class RemoteDatasetPipeline:
 
     def ingest(
         self, version: str, previous_metadata: dict[str, Any] | None
-    ) -> PipelineContext | bool:
+    ) -> PipelineContext | None:
         """Run the full ingestion flow: smart-skip checks then download.
 
-        Returns ``False`` if ingestion was skipped (unchanged remote or
+        Returns ``None`` if ingestion was skipped (unchanged remote or
         identical content hash), otherwise the initial pipeline context.
 
         Parameters
@@ -184,10 +189,12 @@ class RemoteDatasetPipeline:
 
         Returns
         -------
-        PipelineContext | bool
-            Initial pipeline context, or ``False`` if skipped.
+        PipelineContext | None
+            Initial pipeline context, or ``None`` if skipped.
         """
         try:
+            logger.info("Ingesting", version=version)
+
             # --- 1. Load metadata from previous run ---
             safe_previous_metadata = PipelineRunSnapshot.from_metadata_dict(previous_metadata)
 
@@ -204,7 +211,7 @@ class RemoteDatasetPipeline:
             )
 
             if not need.should_ingest:
-                return False
+                return None
 
             # --- 4. Download content ---
             context = self._download(version=version, remote_metadata=remote_file_info)
@@ -215,9 +222,10 @@ class RemoteDatasetPipeline:
                     previous_hash=safe_previous_metadata.download.file_hash,
                     current_hash=context.download.download_info.file_hash,
                 ):
-                    return False
+                    return None
 
             return context
+
         except httpx.HTTPError as err:
             raise IngestStageError(self.dataset.name) from err
 
@@ -263,31 +271,24 @@ class RemoteDatasetPipeline:
         -------
         PipelineContext
             Updated context with ``download.extraction_info`` populated.
-
-        Raises
-        ------
-        ValueError
-            If the dataset is not an archive or ``inner_file`` is missing.
         """
         try:
-            if not self.dataset.source.format.is_archive or not self.dataset.source.inner_file:
-                logger.warning(
-                    "Trying to extract a non-archive format",
-                    format=self.dataset.source.format.value,
-                )
-                raise ValueError(
-                    f"Dataset {self.dataset.name} is not an archive or missing inner_file"
-                )
-
-            # Extract to same directory as archive (preserves directory structure)
             archive_path = context.download.download_info.path
             landing_dir = archive_path.parent
 
+            # inner_file guaranteed by RemoteSourceConfig validator but ty complains
+            # NOTE: Local variable enables ty to narrow str | None → str after the check
+            inner_file = self.dataset.source.inner_file
+            if inner_file is None:
+                raise ExtractStageError(self.dataset.name) from ValueError(
+                    "inner_file is None (should be guaranteed by RemoteSourceConfig validator)"
+                )
+
             extract_info = extract_7z(
                 archive_path=archive_path,
-                target_filename=self.dataset.source.inner_file,
+                target_filename=inner_file,
                 dest_dir=landing_dir,
-                validate_sqlite=Path(self.dataset.source.inner_file).suffix == ".gpkg",
+                validate_sqlite=Path(inner_file).suffix == ".gpkg",
             )
 
             return PipelineContext(
@@ -307,7 +308,6 @@ class RemoteDatasetPipeline:
             ArchiveNotFoundError,
             FileNotFoundInArchiveError,
             FileIntegrityError,
-            ValueError,
         ) as err:
             raise ExtractStageError(self.dataset.name) from err
 
@@ -331,7 +331,7 @@ class RemoteDatasetPipeline:
             ``True`` if hashes match (processing can be skipped).
         """
         if previous_hash == current_hash:
-            logger.info("Content hash identical to previous run, cleaning up and skipping")
+            logger.info("Skipping: content hash identical to previous run")
             self._cleanup_landing()
             return True
 
@@ -366,13 +366,7 @@ class RemoteDatasetPipeline:
             bronze_path = self.resolver.bronze_path(context.version)
             bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
-            logger.debug(
-                "Converting to bronze",
-                dataset_name=self.dataset.name,
-                landing_path=context.download.landing_path,
-                bronze_path=bronze_path,
-                version=context.version,
-            )
+            logger.info("Converting to bronze", version=context.version)
 
             # Retrieve and apply dataset-specific bronze transformation
             transform = get_bronze_transform(self.dataset.name)
@@ -390,14 +384,11 @@ class RemoteDatasetPipeline:
             row_count = len(df)
             parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
 
-            logger.debug(
+            logger.info(
                 "Bronze conversion complete",
-                dataset_name=self.dataset.name,
-                file_size_mib=parquet_size,
                 row_count=row_count,
-                columns=columns,
-                bronze_path=bronze_path,
-                latest_link=self.resolver.bronze_latest_path,
+                n_columns=len(columns),
+                file_size_mib=parquet_size,
             )
 
             return PipelineContext(
@@ -409,7 +400,7 @@ class RemoteDatasetPipeline:
                     columns=columns,
                 ),
             )
-        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+        except (duckdb.Error, OSError) as err:
             raise BronzeStageError(self.dataset.name) from err
 
     def to_silver(self, context: PipelineContext) -> PipelineContext:
@@ -429,12 +420,7 @@ class RemoteDatasetPipeline:
             Updated context with ``silver`` metrics populated.
         """
         try:
-            logger.debug(
-                "Transforming to silver",
-                dataset_name=self.dataset.name,
-                bronze_source=self.resolver.bronze_latest_path,
-                silver_dest=self.resolver.silver_current_path,
-            )
+            logger.info("Transforming to silver", version=context.version)
 
             # Retrieve and apply dataset-specific silver transformation
             transform = get_silver_transform(self.dataset.name)
@@ -455,14 +441,11 @@ class RemoteDatasetPipeline:
                 self.resolver.silver_current_path.stat().st_size / (1024 * 1024), 2
             )
 
-            logger.debug(
+            logger.info(
                 "Silver transformation complete",
-                dataset_name=self.dataset.name,
-                file_size_mib=parquet_size,
                 row_count=row_count,
-                columns=columns,
-                silver_current=self.resolver.silver_current_path,
-                silver_backup=self.resolver.silver_backup_path,
+                n_columns=len(columns),
+                file_size_mib=parquet_size,
             )
 
             return PipelineContext(
@@ -475,5 +458,5 @@ class RemoteDatasetPipeline:
                     columns=columns,
                 ),
             )
-        except (TransformNotFoundError, duckdb.Error, OSError) as err:
+        except (duckdb.Error, OSError) as err:
             raise SilverStageError(self.dataset.name) from err

@@ -23,7 +23,6 @@ from pydantic import ValidationError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
-from data_eng_etl_electricity_meteo.utils.extraction import ExtractionInfo
 from data_eng_etl_electricity_meteo.utils.remote_metadata import RemoteFileMetadata
 
 logger = get_logger("pipeline")
@@ -31,6 +30,30 @@ logger = get_logger("pipeline")
 # =============================================================================
 # Stage-specific metrics
 # =============================================================================
+
+
+class ExtractionInfo(StrictModel):
+    """Archive extraction details for pipeline traceability.
+
+    Created by ``RemoteDatasetPipeline.extract_archive`` from the
+    ``ExtractedFileInfo`` returned by ``extract_7z`` plus archive context.
+
+    Attributes
+    ----------
+    archive_path:
+        Path to the source archive.
+    file_path:
+        Path to the extracted file.
+    file_hash:
+        SHA-256 hash of the extracted file.
+    size_mib:
+        Size of the extracted file in MiB.
+    """
+
+    archive_path: Path
+    file_path: Path
+    file_hash: str
+    size_mib: float
 
 
 class DownloadMetrics(StrictModel):

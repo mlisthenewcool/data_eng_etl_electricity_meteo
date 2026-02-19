@@ -111,7 +111,7 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
 
             ingestion_result = manager.ingest(version=version, previous_metadata=previous_metadata)
 
-            if isinstance(ingestion_result, bool):
+            if ingestion_result is None:
                 return False
 
             return ingestion_result.model_dump(mode="json")

@@ -32,12 +32,15 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     Selects only the columns defined in the schema, dropping any spurious
     columns from the source (e.g., column_30 from the ODRE API).
 
-    Args:
-        latest_bronze_path: Path to the latest bronze parquet file
+    Parameters
+    ----------
+    latest_bronze_path:
+        Path to the latest bronze parquet file.
 
     Returns
     -------
-        Silver layer DataFrame with exact schema
+    pl.DataFrame
+        Silver layer DataFrame with exact schema.
     """
     logger.debug("Apply silver transformations", latest_bronze_path=latest_bronze_path)
     df = pl.read_parquet(latest_bronze_path)
