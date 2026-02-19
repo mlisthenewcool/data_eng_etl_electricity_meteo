@@ -23,13 +23,7 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 import yaml
-from pydantic import (
-    Discriminator,
-    HttpUrl,
-    Tag,
-    ValidationError,
-    model_validator,
-)
+from pydantic import Discriminator, HttpUrl, Tag, ValidationError, model_validator
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     AirflowContextError,
@@ -38,19 +32,6 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
 from data_eng_etl_electricity_meteo.core.settings import settings
-
-__all__: list[str] = [
-    "SourceFormat",
-    "IngestionFrequency",
-    "IngestionMode",
-    "IngestionPolicy",
-    "RemoteSourceConfig",
-    "DerivedSourceConfig",
-    "RemoteDatasetConfig",
-    "DerivedDatasetConfig",
-    "DatasetConfig",
-    "DataCatalog",
-]
 
 
 class SourceFormat(StrEnum):

@@ -1,4 +1,4 @@
-"""Transformations for IGN Contours IRIS dataset."""
+"""Transformations for IGN contours IRIS dataset."""
 
 import shutil
 import tempfile
@@ -38,10 +38,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     pl.DataFrame
         Filtered DataFrame with geometry as WKB, ready for bronze layer.
     """
-    logger.info(
-        "Reading GeoPackage from landing",
-        landing_path=landing_path,
-        filename=landing_path.name,
+    logger.debug(
+        "Reading GeoPackage from landing", landing_path=landing_path, filename=landing_path.name
     )
 
     # Copy .gpkg to a temp file to avoid SQLite/GDAL file lock contention
@@ -68,13 +66,9 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
             ST_AsWKB(geometrie) AS geom_wkb \
         FROM ST_read(?, layer = 'contours_iris')
         """
-            logger.info("Executing DuckDB spatial query", query=query)
+            # logger.debug("Executing DuckDB spatial query", query=query)
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
-            logger.info(
-                "DuckDB spatial query completed",
-                row_count=len(df),
-                columns=df.columns,
-            )
+            logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
         finally:
             conn.close()
     return df
@@ -103,11 +97,15 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     pl.DataFrame
         Silver DataFrame with ``centroid_lat`` and ``centroid_lon`` columns.
     """
-    logger.info("Reading from bronze latest", bronze_path=latest_bronze_path)
+    logger.debug("Reading from bronze latest", bronze_path=latest_bronze_path)
 
     # Use DuckDB for spatial operations on the WKB geometry
     conn = duckdb.connect(":memory:")
     try:
+        # Spatial extension is installed with Docker when running on Airflow
+        if not settings.is_running_on_airflow:
+            conn.execute("INSTALL spatial;")
+
         conn.execute("LOAD spatial;")
 
         # Compute centroids and transform to WGS84
@@ -137,17 +135,13 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
         FROM read_parquet(?)
         """
 
-        logger.info("Computing centroids with DuckDB spatial extension")
+        logger.debug("Computing centroids with DuckDB spatial extension")
         df = conn.execute(query, [str(latest_bronze_path)]).pl()
     finally:
         conn.close()
 
-    # todo: Validate output before returning
+    # TODO: Validate output before returning
     # validate_ign_contours_iris(df)
 
-    logger.info(
-        "Silver transformation completed",
-        row_count=len(df),
-        columns=df.columns,
-    )
+    logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
     return df

@@ -1,7 +1,12 @@
 """Medallion architecture layer type."""
 
-from typing import Literal
+from enum import StrEnum
 
-__all__: list[str] = ["MedallionLayer"]
 
-type MedallionLayer = Literal["landing", "bronze", "silver", "gold"]
+class MedallionLayer(StrEnum):
+    """Medallion architecture layers, ordered from raw to analytical."""
+
+    LANDING = "landing"
+    BRONZE = "bronze"
+    SILVER = "silver"
+    GOLD = "gold"

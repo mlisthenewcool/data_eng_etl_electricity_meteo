@@ -1,0 +1,83 @@
+"""Shared transformation utilities."""
+
+import re
+
+import polars as pl
+
+from data_eng_etl_electricity_meteo.core.exceptions import TransformValidationError
+from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+logger = get_logger("transform.shared")
+
+
+def to_snake_case(name: str) -> str:
+    """Convert a CamelCase or mixed-case string to snake_case."""
+    # Add underscore before uppercase letters preceded by lowercase/digit
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    # Handle acronyms (e.g. EPCICommune -> EPCI_Commune)
+    s = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", s)
+    # Lowercase and replace spaces/hyphens with underscores
+    return s.lower().replace(" ", "_").replace("-", "_")
+
+
+def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
+    """Raise if the DataFrame has zero rows.
+
+    Parameters
+    ----------
+    df
+        DataFrame to validate.
+    dataset_name
+        Used in the exception for diagnostics.
+    """
+    if df.is_empty():
+        raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
+
+
+def validate_no_full_null_columns(df: pl.DataFrame, dataset_name: str) -> None:
+    """Raise if any column is entirely null.
+
+    Parameters
+    ----------
+    df
+        DataFrame to validate.
+    dataset_name
+        Used in the exception for diagnostics.
+    """
+    full_null_cols = [col for col in df.columns if df[col].is_null().all()]
+    if full_null_cols:
+        raise TransformValidationError(
+            dataset_name,
+            reason=f"Columns entirely null: {full_null_cols}",
+        )
+
+
+def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
+    """Apply common silver-layer steps: snake_case rename + validations.
+
+    Parameters
+    ----------
+    df
+        DataFrame returned by a dataset-specific silver transform.
+    dataset_name
+        Dataset identifier (for logging and error reporting).
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with standardized column names, validated.
+    """
+    df = df.rename(to_snake_case)
+
+    # Drop columns that are entirely null — these are spurious columns injected by
+    # some source APIs (e.g. column_30 / column_68 from the ODRE eco2mix parquet).
+    # Logged as a warning so operators are aware of structural drift in the source.
+    null_cols = [col for col in df.columns if df[col].is_null().all()]
+    if null_cols:
+        logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
+        df = df.drop(null_cols)
+
+    validate_not_empty(df, dataset_name)
+    validate_no_full_null_columns(df, dataset_name)
+    logger.debug("Common silver steps applied")
+    return df

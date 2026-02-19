@@ -31,7 +31,8 @@ RUN uv python upgrade
 # Config structurelle qui ne change pas entre dev et prod (executor, timezone, comportement des DAGs)
 # https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
-# AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG to prevent file conflicts within same dataset
+# - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG : prevent file conflicts within same dataset
+
 # TODO: configurer en production -> AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/src/de_projet_perso/airflow/dags
 ENV PYTHONPATH="/opt/airflow/src" \
     AIRFLOW__CORE__EXECUTOR="LocalExecutor" \
@@ -46,7 +47,8 @@ ENV PYTHONPATH="/opt/airflow/src" \
     AIRFLOW__DAG_PROCESSOR__BUNDLE_REFRESH_CHECK_INTERVAL="5"
 
 RUN uv pip install --no-cache \
-    duckdb "httpx[http2]" loguru orjson polars "psycopg[c]" py7zr pydantic pydantic-settings pyaml structlog tqdm
+    duckdb "httpx[http2]" orjson polars "psycopg[c]" py7zr pyarrow \
+    pydantic pydantic-settings pyaml structlog tqdm
 
 # Install DuckDB extensions once
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"

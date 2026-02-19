@@ -17,13 +17,11 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     InvalidCatalogError,
     TransformNotFoundError,
 )
+from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.remote_dataset_manager import RemoteDatasetPipeline
-from data_eng_etl_electricity_meteo.pipeline.stage_types import (
-    BronzeStageResult,
-    DownloadStageResult,
-)
+from data_eng_etl_electricity_meteo.pipeline.stage_types import PipelineContext, PipelineRunSnapshot
 
 if TYPE_CHECKING:
     from airflow.sdk.execution_time.context import InletEventsAccessors
@@ -114,7 +112,7 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
 
             ingestion_result = manager.ingest(version=version, previous_metadata=previous_metadata)
 
-            if isinstance(ingestion_result, bool):
+            if ingestion_result is None:
                 return False
 
             return ingestion_result.model_dump(mode="json")
@@ -135,15 +133,14 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
                 else None
             )
 
-            extract_result = manager.extract_archive(DownloadStageResult.model_validate(ctx))
+            context = manager.extract_archive(
+                PipelineContext.model_validate(ctx), previous_metadata=previous_metadata
+            )
 
-            # If hash is identical, remove landing files and skip
-            if manager.should_skip_extraction(
-                extract_result=extract_result, previous_metadata=previous_metadata
-            ):
+            if context is None:
                 return False
 
-            return extract_result.model_dump(mode="json")
+            return context.model_dump(mode="json")
 
         # ============================================================
         # 4. CONVERT TO BRONZE - parquet + column names normalisation
@@ -151,16 +148,16 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
         @task(task_id=TASK_BRONZE, execution_timeout=TASK_BRONZE_TIMEOUT)
         def bronze_task(ctx: XComArg) -> XComArg:
             """Convert landing file to versioned bronze Parquet."""
-            result = manager.to_bronze(DownloadStageResult.model_validate(ctx))
+            result = manager.to_bronze(PipelineContext.model_validate(ctx))
             return result.model_dump(mode="json")
 
         # ============================================================
         # 5. TRANSFORM TO SILVER - Business Rules + Metadata
         # ============================================================
         @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[asset])
-        def silver_task(ctx: XComArg) -> Generator[Metadata, None, None]:
+        def silver_task(ctx: XComArg) -> Generator[Metadata]:
             """Apply business transformations and emit Asset metadata."""
-            silver_result = manager.to_silver(BronzeStageResult.model_validate(ctx))
+            silver_result = manager.to_silver(PipelineContext.model_validate(ctx))
 
             # Emit enriched metadata for Airflow UI
             # These metadata fields will be visible in the Assets tab
@@ -169,7 +166,7 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
             yield Metadata(
                 asset=asset,
                 # exclude={"path", "extracted_file_path"}
-                extra=manager.create_metadata_emission(silver_result).model_dump(exclude_none=True),
+                extra=PipelineRunSnapshot.from_context(silver_result).model_dump(exclude_none=True),
             )
 
         # ============================================================
@@ -213,13 +210,13 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_remote_datasets():
         try:
-            asset = get_asset(dataset.name, "silver")
+            asset = get_asset(dataset.name, MedallionLayer.SILVER)
             manager = RemoteDatasetPipeline(dataset=dataset)
             pipelines[dataset.name] = _create_dag(manager, asset)
             factory_logger.info("Created dataset DAG", dag_id=f"ingest_{dataset.name}")
         # TODO: catch les exceptions au bon endroit
-        except TransformNotFoundError as e:
-            e.log(factory_logger.warning)
+        except TransformNotFoundError as error:
+            error.log(factory_logger.warning)
         except ValueError:
             factory_logger.exception(
                 "Failed to create DAG.",

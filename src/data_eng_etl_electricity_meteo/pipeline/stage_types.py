@@ -1,46 +1,91 @@
-"""Typed results for pipeline stages (composition-based).
+"""Typed metrics and pipeline context for the medallion architecture stages.
 
-Each pipeline stage produces its own info type. Stage results compose prior results
-rather than inheriting them, keeping each layer isolated while preserving full
-traceability across the pipeline.
+Each pipeline stage produces a ``...Metrics`` type capturing its own output.
+All metrics accumulate in a single ``PipelineContext`` passed via Airflow XCom,
+growing at each stage: download → (extraction) → bronze → silver.
 
 Architecture
 ------------
 
-- Pipeline functions (typed) ←→ Airflow tasks (dicts via XCom)
+Pipeline functions (typed) ↔ Airflow tasks (dicts via XCom):
 
-    - ingest()        → DownloadStageResult   → model_dump() → XCom dict
-    - extract()       → DownloadStageResult (with extraction_info)
-    - to_bronze()     → BronzeStageResult
-    - to_silver()     → SilverStageResult
-    - (to_gold)       → GoldStageResult
+    ingest()    → PipelineContext(download=DownloadMetrics(...))
+    extract()   → PipelineContext(download=DownloadMetrics(..., extraction_info=...))
+    to_bronze() → PipelineContext(..., bronze=BronzeMetrics(...))
+    to_silver() → PipelineContext(..., silver=SilverMetrics(...))
 """
 
 from pathlib import Path
+from typing import Any, Self
 
-from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel
+from pydantic import ValidationError
+
+from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
-from data_eng_etl_electricity_meteo.utils.extraction import ExtractionInfo
 from data_eng_etl_electricity_meteo.utils.remote_metadata import RemoteFileMetadata
 
-__all__: list[str] = [
-    "IngestionDecision",
-    "DownloadStageResult",
-    "BronzeInfo",
-    "BronzeStageResult",
-    "SilverInfo",
-    "SilverStageResult",
-    "GoldStageResult",
-    "PipelineRunSnapshot",
-]
-
+logger = get_logger("pipeline")
 
 # =============================================================================
-# Stage-specific info types
+# Stage-specific metrics
 # =============================================================================
 
 
-class BronzeInfo(StrictModel):
+class ExtractionInfo(StrictModel):
+    """Archive extraction details for pipeline traceability.
+
+    Created by ``RemoteDatasetPipeline.extract_archive`` from the
+    ``ExtractedFileInfo`` returned by ``extract_7z`` plus archive context.
+
+    Attributes
+    ----------
+    archive_path:
+        Path to the source archive.
+    file_path:
+        Path to the extracted file.
+    file_hash:
+        SHA-256 hash of the extracted file.
+    size_mib:
+        Size of the extracted file in MiB.
+    """
+
+    archive_path: Path
+    file_path: Path
+    file_hash: str
+    size_mib: float
+
+
+class DownloadMetrics(StrictModel):
+    """Metrics produced by the download (+ optional extraction) stage.
+
+    Attributes
+    ----------
+    remote_metadata:
+        HTTP HEAD metadata captured before download.
+    download_info:
+        Downloaded file path, hash, and size.
+    extraction_info:
+        Extraction details if the source format is an archive, ``None`` otherwise.
+    """
+
+    remote_metadata: RemoteFileMetadata
+    download_info: HttpDownloadInfo
+    extraction_info: ExtractionInfo | None = None
+
+    @property
+    def landing_path(self) -> Path:
+        """Path of the file entering the bronze stage.
+
+        Returns the extracted file when the source is an archive,
+        otherwise the raw downloaded file.
+        """
+        if self.extraction_info is not None:
+            return self.extraction_info.file_path
+        return self.download_info.path
+
+
+class BronzeMetrics(StrictModel):
     """Metrics produced by the bronze conversion stage."""
 
     file_size_mib: float
@@ -48,8 +93,16 @@ class BronzeInfo(StrictModel):
     columns: list[str]
 
 
-class SilverInfo(StrictModel):
+class SilverMetrics(StrictModel):
     """Metrics produced by the silver transformation stage."""
+
+    file_size_mib: float
+    row_count: int
+    columns: list[str]
+
+
+class GoldMetrics(StrictModel):
+    """Metrics produced by the gold aggregation stage (derived datasets)."""
 
     file_size_mib: float
     row_count: int
@@ -81,147 +134,167 @@ class IngestionDecision(StrictModel):
 
 
 # =============================================================================
-# Stage results (composition)
+# Pipeline context (accumulates across stages via XCom)
 # =============================================================================
 
 
-class DownloadStageResult(StrictModel):
-    """Result of the download (+ optional extraction) stage.
+class PipelineContext(StrictModel):
+    """Pipeline state passed via Airflow XCom, accumulating metrics across stages.
+
+    Starts with only ``download`` populated after the ingest/extract tasks,
+    then ``bronze`` and ``silver`` are added by their respective tasks.
 
     Attributes
     ----------
     version:
-        Run version string (e.g. ``"2026-01-17"``).
-    remote_metadata:
-        HTTP HEAD metadata captured before download.
-    download_info:
-        Downloaded file path, hash, and size.
-    extraction_info:
-        Extraction details if the source format is an archive, ``None`` otherwise.
+        Run version string (e.g. ``"2026-01-17"``). Determined by the DAG
+        from the run date and ingestion frequency, before any stage executes.
+    download:
+        Metrics from the download (and optional extraction) stage.
+    bronze:
+        Metrics from the bronze conversion stage, or ``None`` if not yet run.
+    silver:
+        Metrics from the silver transformation stage, or ``None`` if not yet run.
     """
 
     version: str
+    download: DownloadMetrics
+    bronze: BronzeMetrics | None = None
+    silver: SilverMetrics | None = None
+
+
+# =============================================================================
+# Pipeline run snapshot (nested view for observability / metadata store)
+# =============================================================================
+
+
+class DownloadSnapshot(StrictModel):
+    """Persisted download metrics, without ephemeral file paths.
+
+    Attributes
+    ----------
+    remote_metadata:
+        HTTP HEAD metadata captured before download.
+    file_hash:
+        SHA-256 hash of the downloaded file.
+    size_mib:
+        Size of the downloaded file in MiB.
+    """
+
     remote_metadata: RemoteFileMetadata
-    download_info: HttpDownloadInfo
-    extraction_info: ExtractionInfo | None = None
-
-    @property
-    def landing_path(self) -> Path:
-        """Path to the file that enters the bronze stage.
-
-        Returns the extracted file when the source is an archive,
-        otherwise the raw downloaded file.
-        """
-        if self.extraction_info is not None:
-            return self.extraction_info.file_path
-        return self.download_info.path
+    file_hash: str
+    size_mib: float
 
 
-class BronzeStageResult(StrictModel):
-    """Result of the bronze conversion stage.
+class ExtractionSnapshot(StrictModel):
+    """Persisted extraction metrics, without ephemeral file paths.
 
     Attributes
     ----------
-    download:
-        Upstream download/extraction context.
-    bronze:
-        Metrics of the produced bronze parquet file.
+    file_hash:
+        SHA-256 hash of the extracted file.
+    size_mib:
+        Size of the extracted file in MiB.
     """
 
-    download: DownloadStageResult
-    bronze: BronzeInfo
-
-
-class SilverStageResult(StrictModel):
-    """Result of the silver transformation stage.
-
-    Attributes
-    ----------
-    download:
-        Upstream download/extraction context.
-    bronze:
-        Metrics of the bronze parquet file that was consumed.
-    silver:
-        Metrics of the produced silver parquet file.
-    """
-
-    download: DownloadStageResult
-    bronze: BronzeInfo
-    silver: SilverInfo
-
-
-class GoldStageResult(StrictModel):
-    """Result of the gold aggregation stage (derived datasets).
-
-    Attributes
-    ----------
-    file_size_mib:
-        Size of the produced gold parquet file.
-    row_count:
-        Number of rows in the gold table.
-    columns:
-        Column names in the gold table.
-    """
-
-    file_size_mib: float
-    row_count: int
-    columns: list[str]
-
-
-# =============================================================================
-# Full pipeline snapshot (flattened view for observability / metadata store)
-# =============================================================================
+    file_hash: str
+    size_mib: float
 
 
 class PipelineRunSnapshot(StrictModel):
-    """Flattened snapshot of a complete pipeline run for observability.
+    """Snapshot of a complete pipeline run for observability.
 
-    Built from a ``SilverStageResult`` to persist in a metadata store
-    (Airflow's Postgres instance, local JSON, etc.) without nested models.
+    Persisted in Airflow's Asset metadata after each successful silver run,
+    and read back on subsequent runs for smart-skip decisions.
+
+    File paths are excluded: they are deterministic from ``version`` +
+    ``dataset_name`` via ``RemotePathResolver``, and ephemeral landing paths
+    no longer exist after the bronze stage.
 
     Attributes
     ----------
     version:
         Run version string.
-    remote_metadata:
-        HTTP HEAD metadata captured before download.
-    raw_file_sha256:
-        SHA-256 hash of the downloaded file.
-    raw_file_size_mib:
-        Size of the downloaded file in MiB.
-    extracted_file_sha256:
-        SHA-256 hash of the extracted file (``None`` if no extraction).
-    extracted_file_size_mib:
-        Size of the extracted file in MiB (``None`` if no extraction).
-    bronze_file_size_mib:
-        Size of the bronze parquet file in MiB.
-    bronze_row_count:
-        Number of rows in the bronze table.
-    bronze_columns:
-        Column names in the bronze table.
-    silver_file_size_mib:
-        Size of the silver parquet file in MiB.
-    silver_row_count:
-        Number of rows in the silver table.
-    silver_columns:
-        Column names in the silver table.
+    download:
+        Download metrics without ephemeral file paths.
+    extraction:
+        Extraction metrics, or ``None`` if the source is not an archive.
+    bronze:
+        Bronze conversion metrics (required — only set for complete runs).
+    silver:
+        Silver transformation metrics (required — only set for complete runs).
     """
 
-    # TODO: réutiliser les classes ou tout garder à plat ?
-
-    # Download
     version: str
-    remote_metadata: RemoteFileMetadata
-    raw_file_sha256: str
-    raw_file_size_mib: float
-    # Extraction (optional)
-    extracted_file_sha256: str | None = None
-    extracted_file_size_mib: float | None = None
-    # Bronze
-    bronze_file_size_mib: float
-    bronze_row_count: int
-    bronze_columns: list[str]
-    # Silver
-    silver_file_size_mib: float
-    silver_row_count: int
-    silver_columns: list[str]
+    download: DownloadSnapshot
+    extraction: ExtractionSnapshot | None = None
+    bronze: BronzeMetrics
+    silver: SilverMetrics
+
+    @classmethod
+    def from_context(cls, context: PipelineContext) -> Self:
+        """Build a run snapshot from a completed pipeline context.
+
+        Parameters
+        ----------
+        context:
+            Complete pipeline context with all stages populated.
+
+        Returns
+        -------
+        PipelineRunSnapshot
+            Snapshot suitable for persistence in a metadata store.
+
+        Raises
+        ------
+        ValueError
+            If bronze or silver metrics are missing from the context.
+        """
+        if context.bronze is None or context.silver is None:
+            raise ValueError(
+                "Cannot build snapshot: pipeline context is incomplete "
+                f"(bronze={'set' if context.bronze else 'missing'}, "
+                f"silver={'set' if context.silver else 'missing'})"
+            )
+
+        dl = context.download
+        extraction = dl.extraction_info
+
+        return cls(
+            version=context.version,
+            download=DownloadSnapshot(
+                remote_metadata=dl.remote_metadata,
+                file_hash=dl.download_info.file_hash,
+                size_mib=dl.download_info.size_mib,
+            ),
+            extraction=ExtractionSnapshot(
+                file_hash=extraction.file_hash,
+                size_mib=extraction.size_mib,
+            )
+            if extraction
+            else None,
+            bronze=context.bronze,
+            silver=context.silver,
+        )
+
+    @classmethod
+    def from_metadata_dict(cls, metadata: dict[str, Any] | None) -> Self | None:
+        """Parse and validate previous run metadata dict.
+
+        Parameters
+        ----------
+        metadata:
+            Raw metadata dict (e.g. from Airflow XCom ``extra``), or ``None``.
+
+        Returns
+        -------
+        PipelineRunSnapshot | None
+            Validated snapshot, or ``None`` if missing or corrupted.
+        """
+        if not metadata:
+            return None
+        try:
+            return cls.model_validate(metadata)
+        except ValidationError as e:
+            logger.warning("Previous run metadata corrupted", **format_pydantic_errors(e))
+            return None

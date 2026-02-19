@@ -3,6 +3,7 @@
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,36 +17,14 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     FileNotFoundInArchiveError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 
 logger = get_logger("extraction")
 
-__all__: list[str] = ["ExtractionInfo", "ExtractedFileInfo", "extract_7z"]
-
-
-@dataclass(frozen=True)
-class ExtractionInfo:
-    """Extraction information with archive context (for pipeline traceability)."""
-
-    archive_path: Path
-    file_path: Path
-    file_hash: str
-    size_mib: float
-
-    def to_dict(self) -> dict[str, str | float]:
-        """Serialize to a JSON-compatible dict (for Airflow XCom)."""
-        return {
-            "archive_path": str(self.archive_path),
-            "file_path": str(self.file_path),
-            "file_hash": self.file_hash,
-            "size_mib": self.size_mib,
-        }
-
 
 @dataclass(frozen=True)
 class ExtractedFileInfo:
-    """Extracted file metadata only (no archive context)."""
+    """Extracted file metadata (path, hash, size) returned by ``extract_7z``."""
 
     path: Path
     file_hash: str
@@ -59,23 +38,23 @@ class _TqdmExtractCallback(ExtractCallback):
         self.pbar = pbar
 
     def report_start(self, processing_file_path: str, processing_bytes: str) -> None:
-        """Signal that extraction of a file begins."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_end(self, processing_file_path: str, wrote_bytes: str) -> None:
-        """Signal that extraction of a file ends."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_update(self, decompressed_bytes: str) -> None:
         """Update the progress bar with decompressed bytes."""
         self.pbar.update(int(decompressed_bytes))
 
     def report_start_preparation(self) -> None:
-        """Signal that archive preparation starts."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_warning(self, message: str) -> None:
-        """Handle a py7zr warning."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
     def report_postprocess(self) -> None:
-        """Signal that post-processing starts."""
+        """No-op: required by ``ExtractCallback`` protocol."""
 
 
 def _validate_sqlite_header(path: Path) -> None:
@@ -111,6 +90,7 @@ def extract_7z(
     target_filename: str,
     dest_dir: Path,
     validate_sqlite: bool = True,
+    progress: Callable[[int], ExtractCallback] | None = None,
 ) -> ExtractedFileInfo:
     """Extract a specific file from a 7z archive.
 
@@ -126,6 +106,10 @@ def extract_7z(
         Destination directory (created if needed).
     validate_sqlite:
         If ``True``, validate SQLite header after extraction.
+    progress:
+        Factory called with ``total_bytes`` (uncompressed size) that returns
+        an :class:`~py7zr.callbacks.ExtractCallback`.  Pass ``None`` (default)
+        to use the built-in tqdm progress bar.
 
     Returns
     -------
@@ -144,11 +128,7 @@ def extract_7z(
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
 
-    logger.info(
-        "Starting extraction",
-        archive=archive_path.name,
-        target=target_filename,
-    )
+    logger.info("Starting extraction", archive=archive_path.name, target=target_filename)
 
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
@@ -163,7 +143,7 @@ def extract_7z(
             except StopIteration:
                 raise FileNotFoundInArchiveError(target_filename, archive_path) from None
 
-            logger.info("Found target in archive", target_path=target_internal_path)
+            logger.debug("Found target in archive", target_path=target_internal_path)
 
             # Get uncompressed size for progress bar
             target_info = next(
@@ -172,20 +152,27 @@ def extract_7z(
             uncompressed_size = target_info.uncompressed
 
             # Extract to temp directory with progress
-            with tqdm(
-                total=uncompressed_size,
-                unit="B",
-                unit_scale=True,
-                desc=f"Extracting {target_filename}",
-                leave=False,
-                file=sys.stderr,  # TqdmToLoguru(logger.info) if settings.is_running_on_airflow else
-                mininterval=5.0 if settings.is_running_on_airflow else 1.0,
-            ) as pbar:
-                callback = _TqdmExtractCallback(pbar)
-
-                archive.extract(
-                    path=tmp_dir_path, targets=[target_internal_path], callback=callback
+            _owned_pbar: tqdm | None = None
+            if progress is not None:
+                _callback: ExtractCallback = progress(uncompressed_size)
+            else:
+                _owned_pbar = tqdm(
+                    total=uncompressed_size,
+                    unit="B",
+                    unit_scale=True,
+                    desc=f"Extracting {target_filename}",
+                    leave=False,
+                    file=sys.stderr,
                 )
+                _callback = _TqdmExtractCallback(_owned_pbar)
+
+            try:
+                archive.extract(
+                    path=tmp_dir_path, targets=[target_internal_path], callback=_callback
+                )
+            finally:
+                if _owned_pbar is not None:
+                    _owned_pbar.close()
 
             extracted_file = tmp_dir_path / target_internal_path
 
@@ -211,15 +198,6 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.info(
-                "Extraction completed",
-                path=dest_path,
-                size_mib=size_mib,
-                file_hash=file_hash,
-            )
+            logger.info("Extraction completed", size_mib=size_mib)
 
-            return ExtractedFileInfo(
-                path=dest_path,
-                size_mib=size_mib,
-                file_hash=file_hash,
-            )
+            return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)

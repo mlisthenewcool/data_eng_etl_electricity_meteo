@@ -7,8 +7,6 @@ from typing import Literal, Self
 from pydantic import DirectoryPath, Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__: list[str] = ["settings", "LogLevel"]
-
 
 class LogLevel(StrEnum):
     """Standard logging levels."""
@@ -55,29 +53,6 @@ class Settings(BaseSettings):
         #   remplacer par les env vars AIRFLOW_CONFIG ou AIRFLOW_HOME par exemple
         return (self.airflow_home / "airflow.cfg").exists()
 
-    # @computed_field
-    # @property
-    # def is_running_in_notebook(self) -> bool:
-    #     """Detect if running inside an active Marimo notebook.
-    #
-    #     This property is evaluated at each call (not cached) to ensure it correctly
-    #     detects the runtime state after kernel initialization.
-    #
-    #     Returns
-    #     -------
-    #     bool
-    #         True if running in Marimo (edit/run mode).
-    #         False otherwise (terminal, script, tests).
-    #     """
-    #     try:
-    #         import marimo as mo  # noqa: PLC0415
-    #
-    #         if mo.running_in_notebook():
-    #             return True
-    #     except ImportError:
-    #         return False
-    #     return False
-
     # =========================================================================
     # Paths (computed from root_dir, not configurable via env)
     # =========================================================================
@@ -105,20 +80,12 @@ class Settings(BaseSettings):
         """Path to pipeline state directory."""
         return self.data_dir_path / "_state"
 
-    # @computed_field
-    # @property
-    # def secrets_dir_path(self) -> DirectoryPath:
-    #     """Path to secrets directory (Docker secrets on Airflow, local otherwise)."""
-    #     if self.is_running_on_airflow:
-    #         return Path("/run/secrets")
-    #
-    #     return self.root_dir / "secrets"
-
     # =========================================================================
     # Download Settings
     # =========================================================================
     download_chunk_size: int = Field(
-        default=1024 * 1024,  # 1 MB
+        # default=1024 * 1024,  # 1 MB
+        default=512 * 512,  # 512 KB
         description="Chunk size for streaming downloads (bytes)",
         gt=0,
         le=10 * 1024 * 1024,  # Max 10 MB

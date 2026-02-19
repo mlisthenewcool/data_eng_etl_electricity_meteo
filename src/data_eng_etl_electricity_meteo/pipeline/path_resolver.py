@@ -6,16 +6,11 @@ Two resolver types match the two dataset types:
 - ``DerivedPathResolver`` → gold (derived datasets built from silver sources)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-
-logger = get_logger("path_resolver")
-
-__all__: list[str] = ["RemotePathResolver", "DerivedPathResolver"]
 
 
 @dataclass(frozen=True)
@@ -23,10 +18,17 @@ class _BasePathResolver:
     """Common base: dataset name + base directory."""
 
     dataset_name: str
-    _base_dir: Path = settings.data_dir_path
+    base_dir: Path = field(init=False, default_factory=lambda: settings.data_dir_path)
 
     def __post_init__(self) -> None:
         """Validate that dataset_name is not empty.
+
+        Notes
+        -----
+        Necessary because resolvers can be instantiated directly (e.g. in tests
+        or scripts) without going through the catalog, where an empty name would
+        silently produce broken paths (e.g. ``bronze/latest.parquet`` instead of
+        ``bronze/{dataset_name}/latest.parquet``).
 
         Raises
         ------
@@ -48,7 +50,7 @@ class RemotePathResolver(_BasePathResolver):
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
-        return self._base_dir / "landing" / self.dataset_name
+        return self.base_dir / "landing" / self.dataset_name
 
     # =========================================================================
     # Bronze Layer (Versioned History)
@@ -56,7 +58,7 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _bronze_dir(self) -> Path:
-        return self._base_dir / "bronze" / self.dataset_name
+        return self.base_dir / "bronze" / self.dataset_name
 
     def bronze_path(self, version: str) -> Path:
         """Return ``bronze/{dataset_name}/{version}.parquet``.
@@ -108,11 +110,11 @@ class RemotePathResolver(_BasePathResolver):
         if not self._bronze_dir.exists():
             return []
 
-        versions = [
+        # Exclude symlink and only include regular files
+        # TODO: speed vs security (alternative: p.stem != "latest")
+        versions: list[Path] = [
             path
             for path in self._bronze_dir.glob("*.parquet")
-            # Exclude symlink and only include regular files
-            # TODO: speed vs security (alternative: p.stem != "latest")
             if path.is_file() and not path.is_symlink()
         ]
 
@@ -124,7 +126,7 @@ class RemotePathResolver(_BasePathResolver):
 
     @property
     def _silver_dir(self) -> Path:
-        return self._base_dir / "silver" / self.dataset_name
+        return self.base_dir / "silver" / self.dataset_name
 
     @property
     def silver_current_path(self) -> Path:
@@ -143,7 +145,7 @@ class DerivedPathResolver(_BasePathResolver):
 
     @property
     def _gold_dir(self) -> Path:
-        return self._base_dir / "gold" / self.dataset_name
+        return self.base_dir / "gold" / self.dataset_name
 
     @property
     def gold_current_path(self) -> Path:
@@ -161,6 +163,9 @@ if __name__ == "__main__":
 
     from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
     from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
+    from data_eng_etl_electricity_meteo.core.logger import get_logger
+
+    logger = get_logger("path_resolver")
 
     try:
         _catalog = DataCatalog.load(settings.data_catalog_file_path)
@@ -174,7 +179,7 @@ if __name__ == "__main__":
 
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 
-        logger.info(
+        logger.debug(
             "Remote dataset paths",
             dataset_name=_dataset.name,
             run_version=_run_version,
@@ -190,7 +195,7 @@ if __name__ == "__main__":
     for _dataset in _catalog.get_derived_datasets():
         _resolver = DerivedPathResolver(dataset_name=_dataset.name)
 
-        logger.info(
+        logger.debug(
             "Derived dataset paths",
             dataset_name=_dataset.name,
             gold_current_path=_resolver.gold_current_path,

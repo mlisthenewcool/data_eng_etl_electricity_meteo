@@ -12,6 +12,7 @@ data/**/*
 !data/catalog.yaml
 !data/**/.gitkeep
 
+# see more details bellow
 .idea/
 
 # TODO: remove when properly documented
@@ -24,7 +25,7 @@ opencode.jsonc
 
 # --------------------------------------------------------------
 # https://github.com/github/gitignore/blob/main/Python.gitignore
-# copy content from this file under (last copied 2025_12_22)
+# copy content from this file under (last check 2026_02_18)
 # --------------------------------------------------------------
 
 # Byte-compiled / optimized / DLL files
