@@ -221,45 +221,59 @@ def _detect_output_mode() -> OutputMode:
 # ---------------------------------------------------------------------------
 # Airflow-specific configuration
 # ---------------------------------------------------------------------------
+def _normalize_types(
+    _logger: WrappedLogger,
+    _method: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Convert non-JSON-serializable types to primitives.
+
+    Unlike ``_normalize_and_flatten``, this processor preserves the
+    structure of dicts, lists, and ``None`` values — only scalar leaves
+    are converted.  This is critical in Airflow's JSON pipeline where
+    ``ExceptionDictTransformer`` produces nested dicts that the UI
+    expects as-is.
+    """
+    return {key: _walk(value) for key, value in event_dict.items()}
+
+
+def _walk(value: object) -> object:
+    """Recursively convert non-JSON-serializable leaves.
+
+    Delegates scalar conversion to ``_normalize_value`` and additionally
+    handles containers (``dict``, ``list``, ``tuple``) by recursing into
+    them — preserving the nested structure that Airflow's UI expects.
+    ``None`` is preserved (unlike ``_normalize_and_flatten`` which drops it).
+    """
+    if value is None:
+        return value
+    if isinstance(value, dict):
+        return {k: _walk(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_walk(v) for v in value]
+    return _normalize_value(value)
+
+
 def _setup_airflow_logger() -> None:
-    """Extend Airflow 3's structlog config with project processors.
+    """Insert a lightweight type-normalizer into Airflow 3's structlog chain.
 
-    Airflow 3 already calls ``structlog.configure()`` at startup with
-    its own processor chain.  Instead of replacing it, we read the
-    existing chain and insert our processors before the final renderer.
+    Airflow 3 task subprocesses send structured JSON logs to the
+    supervisor via a dedicated pipe (``NamedBytesLogger``).  The
+    supervisor writes them to the log file; the UI renders that JSON.
 
-    Currently, injected processors:
+    The processor chain must **not** flatten dicts or drop ``None``
+    values — Airflow's ``ExceptionDictTransformer`` produces nested
+    structures (``[{"type": …, "frames": […]}]``) that the UI expects
+    intact.  Only scalar type conversion (``Path`` → ``str``, ``Enum``
+    → value) is safe here.
 
-    - ``_normalize_and_flatten``
-
-    Notes
-    -----
-    Two levels of customization are possible:
-
-    1. **Add a processor** (current approach)::
-
-        processors = list(structlog.get_config()["processors"])
-        processors.insert(-1, my_processor)
-        structlog.configure(processors=processors)
-
-    2. **Replace a processor** (e.g. ``TimeStamper``)::
-
-        processors = [
-            p for p in config["processors"]
-            if not isinstance(p, structlog.processors.TimeStamper)
-        ]
-        processors.insert(-1, custom_timestamper)
-        structlog.configure(processors=processors)
-
-    Replacing Airflow processors may break the task log UI if the
-    replacement omits keys expected by Airflow's renderer (e.g.
-    ``'timestamp'`` for ``json_processor``).
+    ``_normalize_and_flatten`` is used for console/tty modes only.
     """
     config = structlog.get_config()
     processors = list(config.get("processors", []))
-    # insert(-1) places our processor just before the final renderer
-    processors.insert(-1, _normalize_and_flatten)
-    structlog.configure(processors=processors)
+    if processors:
+        processors.insert(-1, _normalize_types)
+        structlog.configure(processors=processors)
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +306,7 @@ def _setup_logger(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.UnicodeDecoder(),
         structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=False),
+        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=True),
     ]
 
     # --- Console modes (tty / plain) ---

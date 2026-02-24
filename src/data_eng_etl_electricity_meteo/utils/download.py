@@ -172,7 +172,7 @@ def download_to_file(
 
             hasher = FileHasher()
 
-            _reporter: DownloadProgressReporter = (
+            reporter: DownloadProgressReporter = (
                 progress(content_length)
                 if progress is not None
                 else tqdm(
@@ -194,9 +194,9 @@ def download_to_file(
                         hasher.update(chunk)
                         chunk_len = len(chunk)
                         downloaded_bytes += chunk_len
-                        _reporter.update(chunk_len)
+                        reporter.update(chunk_len)
             finally:
-                _reporter.close()
+                reporter.close()
 
             file_hash = hasher.hexdigest
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)

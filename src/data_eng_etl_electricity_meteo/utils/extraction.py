@@ -152,11 +152,11 @@ def extract_7z(
             uncompressed_size = target_info.uncompressed
 
             # Extract to temp directory with progress
-            _owned_pbar: tqdm | None = None
+            owned_pbar: tqdm | None = None
             if progress is not None:
-                _callback: ExtractCallback = progress(uncompressed_size)
+                callback: ExtractCallback = progress(uncompressed_size)
             else:
-                _owned_pbar = tqdm(
+                owned_pbar = tqdm(
                     total=uncompressed_size,
                     unit="B",
                     unit_scale=True,
@@ -164,15 +164,15 @@ def extract_7z(
                     leave=False,
                     file=sys.stderr,
                 )
-                _callback = _TqdmExtractCallback(_owned_pbar)
+                callback = _TqdmExtractCallback(owned_pbar)
 
             try:
                 archive.extract(
-                    path=tmp_dir_path, targets=[target_internal_path], callback=_callback
+                    path=tmp_dir_path, targets=[target_internal_path], callback=callback
                 )
             finally:
-                if _owned_pbar is not None:
-                    _owned_pbar.close()
+                if owned_pbar is not None:
+                    owned_pbar.close()
 
             extracted_file = tmp_dir_path / target_internal_path
 

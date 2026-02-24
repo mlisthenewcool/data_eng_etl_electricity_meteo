@@ -2,10 +2,15 @@
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self
+from typing import ClassVar, Literal, Self
 
-from pydantic import DirectoryPath, Field, computed_field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, DirectoryPath, Field, SecretStr, computed_field, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SecretsSettingsSource,
+    SettingsConfigDict,
+)
 
 
 class LogLevel(StrEnum):
@@ -19,7 +24,27 @@ class LogLevel(StrEnum):
 
 
 class Settings(BaseSettings):
-    """Immutable application settings. Override via .env file."""
+    """Immutable application settings loaded from env vars and Docker secrets.
+
+    Credential resolution (``postgres_user`` / ``postgres_password``) follows
+    pydantic-settings' standard source priority chain:
+
+    1. Environment variables (``POSTGRES_USER`` / ``POSTGRES_PASSWORD``).
+    2. Docker secrets files in ``_SECRETS_DIR``
+       (``postgres_root_username`` / ``postgres_root_password``).
+
+    This means the loader always reads ``settings.postgres_user`` and
+    ``settings.postgres_password`` uniformly, regardless of environment.
+    """
+
+    # Secrets directory resolved at class-definition time:
+    # - Docker : /run/secrets  (Docker secrets mount)
+    # - Local  : {project_root}/secrets/  (local copies without .txt extension)
+    _SECRETS_DIR: ClassVar[Path] = (
+        Path("/run/secrets")
+        if Path("/run/secrets").exists()
+        else Path(__file__).resolve().parents[3] / "secrets"
+    )
 
     # =========================================================================
     # General config
@@ -34,6 +59,27 @@ class Settings(BaseSettings):
         description="Number of days to retain bronze layer versions",
         gt=0,
         le=365 * 3,  # Max 3 years
+    )
+
+    # =========================================================================
+    # PostgreSQL connection
+    # =========================================================================
+    postgres_host: str = Field(default="localhost", description="PostgreSQL host")
+    postgres_port: int = Field(default=5432, description="PostgreSQL port", gt=0, le=65535)
+    project_db_name: str = Field(default="project", description="Project database name")
+
+    # AliasChoices accepts both the env-var name and the Docker secrets filename.
+    # Local dev : set POSTGRES_USER / POSTGRES_PASSWORD env vars.
+    # Docker    : SecretsSettingsSource reads postgres_root_{username,password}.
+    postgres_user: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("postgres_user", "postgres_root_username"),
+        description="PostgreSQL user.",
+    )
+    postgres_password: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("postgres_password", "postgres_root_password"),
+        description="PostgreSQL password.",
     )
 
     # =========================================================================
@@ -57,7 +103,7 @@ class Settings(BaseSettings):
     # Paths (computed from root_dir, not configurable via env)
     # =========================================================================
     root_dir: Path = Field(
-        default=Path(__file__).resolve().parent.parent.parent.parent,
+        default=Path(__file__).resolve().parents[3],
         description="Project root directory (computed, not configurable)",
         exclude=True,  # Don't expose in env vars
     )
@@ -85,7 +131,7 @@ class Settings(BaseSettings):
     # =========================================================================
     download_chunk_size: int = Field(
         # default=1024 * 1024,  # 1 MB
-        default=512 * 512,  # 512 KB
+        default=512 * 1024,  # 512 KB
         description="Chunk size for streaming downloads (bytes)",
         gt=0,
         le=10 * 1024 * 1024,  # Max 10 MB
@@ -132,14 +178,14 @@ class Settings(BaseSettings):
     )
 
     hash_chunk_size: int = Field(
-        default=1024 * 128,  # 128 KB
+        default=128 * 1024,  # 128 KB
         description="Chunk size for file hashing (bytes)",
         gt=0,
         le=1024 * 1024,  # Max 1 MB
     )
 
     # =========================================================================
-    # Pydantic Config
+    # Pydantic Config + source chain
     # =========================================================================
     model_config = SettingsConfigDict(
         # env_prefix="ENV_",
@@ -149,6 +195,36 @@ class Settings(BaseSettings):
         extra="ignore",  # 'forbid' crashes because of PYTHONPATH
         frozen=True,  # Immutable settings
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Define the settings source chain.
+
+        Sources are listed in decreasing priority:
+
+        1. ``init_settings``    — values passed at instantiation (tests, overrides)
+        2. ``env_settings``     — environment variables
+        3. ``dotenv_settings``  — ``.env`` file
+        4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``)
+
+        The built-in ``file_secret_settings`` (which reads from
+        ``model_config['secrets_dir']``) is intentionally replaced by an
+        explicit ``SecretsSettingsSource`` so the path is a class constant
+        rather than a configurable setting.
+        """
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            SecretsSettingsSource(settings_cls, secrets_dir=cls._SECRETS_DIR),
+        )
 
 
 # Singleton instance

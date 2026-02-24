@@ -21,13 +21,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "apache-airflow-providers-postgres>=6.0.0",
     "apache-airflow-task-sdk>=1.1.7",
-    "marimo>=0.19.11",
+    "marimo>=0.20.2",
     "prek>=0.3.3",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.1",
-    "ty>=0.0.17",
+    "ty>=0.0.18",
 ]
 
 

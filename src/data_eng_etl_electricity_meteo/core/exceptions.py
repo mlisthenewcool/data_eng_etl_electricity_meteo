@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Protocol
 
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
+from data_eng_etl_electricity_meteo.core.layers import MedallionLayer, PipelineStage
 
 
 class _LogMethod(Protocol):
@@ -133,8 +133,7 @@ class TransformValidationError(BaseProjectException):
 class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
-    def __init__(self, dataset_name: str, stage: MedallionLayer) -> None:
-        self.dataset_name = dataset_name
+    def __init__(self, stage: PipelineStage) -> None:
         self.stage = stage
         super().__init__(f"Pipeline failed at {stage} stage.")
 
@@ -161,29 +160,36 @@ class PipelineStageError(BaseProjectException):
 class IngestStageError(PipelineStageError):
     """Raised when the ingest (download) stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.LANDING)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.INGEST)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.LANDING)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.EXTRACT)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.BRONZE)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.BRONZE)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.SILVER)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.SILVER)
+
+
+class PostgresLoadError(PipelineStageError):
+    """Raised when loading silver Parquet into PostgreSQL fails."""
+
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.LOAD_POSTGRES)
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +223,7 @@ if __name__ == "__main__":
                 request=httpx.Request("HEAD", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
@@ -230,7 +236,7 @@ if __name__ == "__main__":
                 request=httpx.Request("GET", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
@@ -242,7 +248,7 @@ if __name__ == "__main__":
             _response = httpx.Response(status_code=503, request=_request)
             raise httpx.HTTPStatusError("Server Error", request=_request, response=_response)
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
@@ -255,7 +261,7 @@ if __name__ == "__main__":
         try:
             raise ArchiveNotFoundError(path=Path("/data/landing/archive.7z"))
         except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
@@ -268,7 +274,7 @@ if __name__ == "__main__":
                 archive_path=Path("/data/landing/archive.7z"),
             )
         except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
@@ -281,7 +287,7 @@ if __name__ == "__main__":
                 reason="SHA-256 mismatch: expected abc123, got def456",
             )
         except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
@@ -294,7 +300,7 @@ if __name__ == "__main__":
         try:
             raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.BRONZE)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
@@ -306,7 +312,7 @@ if __name__ == "__main__":
                 "Could not open file '/data/bronze/v1.parquet': Permission denied"
             )
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
@@ -316,7 +322,7 @@ if __name__ == "__main__":
         try:
             raise OSError("[Errno 28] No space left on device: '/data/bronze/v1.parquet'")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
@@ -329,7 +335,7 @@ if __name__ == "__main__":
         try:
             raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.SILVER)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)
     _end()
@@ -339,7 +345,7 @@ if __name__ == "__main__":
         try:
             raise duckdb.ConversionException("Could not cast VARCHAR to INTEGER")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)
     _end()
@@ -349,6 +355,6 @@ if __name__ == "__main__":
         try:
             raise PermissionError("[Errno 13] Permission denied: '/data/silver/current.parquet'")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)

@@ -9,6 +9,9 @@ from data_eng_etl_electricity_meteo.transformations.shared import to_snake_case
 
 logger = get_logger("transform.odre_installations")
 
+# TODO: colonne id_peps nulle pour les installations aggrégées
+# TODO: df.with_columns(pl.coalesce(["id_peps"], pl.concat_str([...], separator="_")))
+
 # Renewable energy filieres
 FILIERES_RENOUVELABLES = ["SOLAI", "EOLIE", "HYDLQ", "BIOEN", "MARIN", "GEOTH"]
 

@@ -8,7 +8,7 @@ services:
     restart: always
     shm_size: 256mb # Shared memory increase for heavy PostgreSQL operations
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro # init scripts are executed only on empty volume
@@ -78,7 +78,19 @@ services:
       # printf "%s" avoids interpreting % characters in secrets as format specifiers
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}/${AIRFLOW_DB_NAME}\"'"
       AIRFLOW__API__SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
+      # JWT signing key shared by all Airflow components (scheduler log server ↔ api-server).
+      # Without this, each component derives its own ephemeral key → Signature verification failed.
+      AIRFLOW__API_AUTH__JWT_SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
       AIRFLOW__API_AUTH__JWT_ISSUER: "http://airflow-standalone"
+
+      # Project database connection (read by pydantic Settings → loaders/postgres.py)
+      POSTGRES_HOST: "${POSTGRES_HOST}"
+      POSTGRES_PORT: "${POSTGRES_PORT}"
+      PROJECT_DB_NAME: "${PROJECT_DB_NAME}"
+
+      # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD is).
+      # AIRFLOW_CONN_PROJECT_POSTGRES is instead exported in the command below,
+      # built at container startup from Docker secrets — no plaintext credentials in compose.
 
     ports:
       - "127.0.0.1:8080:8080"
@@ -96,7 +108,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    command: standalone
+    command:
+      - bash
+      - -c
+      - |
+        export AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${PROJECT_DB_NAME}"
+        exec airflow standalone
     secrets:
       - postgres_root_password
       - postgres_root_username
@@ -104,11 +121,11 @@ services:
 
 secrets:
   postgres_root_password:
-    file: secrets/postgres_root_password.txt
+    file: secrets/postgres_root_password
   postgres_root_username:
-    file: secrets/postgres_root_username.txt
+    file: secrets/postgres_root_username
   airflow_api_secret_key:
-    file: secrets/airflow_api_secret_key.txt
+    file: secrets/airflow_api_secret_key
 
 volumes:
   postgres_data:

@@ -27,10 +27,8 @@ _LOG_MIN_INTERVAL_S: float = 5.0
 class AirflowDownloadProgress:
     """Logs download progress via structlog every X seconds or Y%.
 
-    Attributes
-    ----------
-    _total:
-        Expected total bytes (``0`` when ``Content-Length`` is absent).
+    *total_bytes* is ``0`` when the ``Content-Length`` header is absent;
+    percentage-based triggering is then disabled.
     """
 
     def __init__(self, total_bytes: int) -> None:
@@ -42,39 +40,33 @@ class AirflowDownloadProgress:
     def update(self, n: int) -> None:
         """Accumulate *n* bytes and log if a threshold is crossed."""
         self._downloaded += n
-        _now = time.monotonic()
-        _pct = self._downloaded / self._total * 100 if self._total else None
-        _elapsed = _now - self._last_log_time
-        _time_trigger = _elapsed >= _LOG_INTERVAL_S
-        _pct_trigger = _pct is not None and (_pct - self._last_log_pct) >= _LOG_INTERVAL_PCT
+        now = time.monotonic()
+        pct = self._downloaded / self._total * 100 if self._total else None
+        elapsed = now - self._last_log_time
+        time_trigger = elapsed >= _LOG_INTERVAL_S
+        pct_trigger = pct is not None and (pct - self._last_log_pct) >= _LOG_INTERVAL_PCT
 
-        if (_time_trigger or _pct_trigger) and _elapsed >= _LOG_MIN_INTERVAL_S:
-            _total_mib = round(self._total / 1024**2, 2) if self._total else None
+        if (time_trigger or pct_trigger) and elapsed >= _LOG_MIN_INTERVAL_S:
+            total_mib = round(self._total / 1024**2, 2) if self._total else None
             logger.info(
                 "Download progress",
                 downloaded_mib=round(self._downloaded / 1024**2, 2),
                 **(
-                    {"total_mib": _total_mib, "progress_pct": round(_pct, 2)}
-                    if _pct is not None
+                    {"total_mib": total_mib, "progress_pct": round(pct, 2)}
+                    if pct is not None
                     else {"total_mib": "unknown"}
                 ),
             )
-            self._last_log_time = _now
-            if _pct is not None:
-                self._last_log_pct = _pct
+            self._last_log_time = now
+            if pct is not None:
+                self._last_log_pct = pct
 
     def close(self) -> None:
         """No-op: required by ``DownloadProgressReporter`` protocol."""
 
 
 class AirflowExtractProgress(ExtractCallback):
-    """Logs extraction progress via structlog every X seconds or Y%.
-
-    Attributes
-    ----------
-    _total:
-        Uncompressed size in bytes of the target file.
-    """
+    """Logs extraction progress via structlog every X seconds or Y%."""
 
     def __init__(self, total_bytes: int) -> None:
         self._total = total_bytes
@@ -85,21 +77,21 @@ class AirflowExtractProgress(ExtractCallback):
     def report_update(self, decompressed_bytes: str) -> None:
         """Accumulate decompressed bytes and log if a threshold is crossed."""
         self._decompressed += int(decompressed_bytes)
-        _now = time.monotonic()
-        _pct = self._decompressed / self._total * 100 if self._total else None
-        _elapsed = _now - self._last_log_time
-        _time_trigger = _elapsed >= _LOG_INTERVAL_S
-        _pct_trigger = _pct is not None and (_pct - self._last_log_pct) >= _LOG_INTERVAL_PCT
+        now = time.monotonic()
+        pct = self._decompressed / self._total * 100 if self._total else None
+        elapsed = now - self._last_log_time
+        time_trigger = elapsed >= _LOG_INTERVAL_S
+        pct_trigger = pct is not None and (pct - self._last_log_pct) >= _LOG_INTERVAL_PCT
 
-        if (_time_trigger or _pct_trigger) and _elapsed >= _LOG_MIN_INTERVAL_S:
+        if (time_trigger or pct_trigger) and elapsed >= _LOG_MIN_INTERVAL_S:
             logger.info(
                 "Extraction progress",
                 decompressed_mib=round(self._decompressed / 1024**2, 2),
-                **({"progress_pct": round(_pct, 2)} if _pct is not None else {}),
+                **({"progress_pct": round(pct, 2)} if pct is not None else {}),
             )
-            self._last_log_time = _now
-            if _pct is not None:
-                self._last_log_pct = _pct
+            self._last_log_time = now
+            if pct is not None:
+                self._last_log_pct = pct
 
     def report_start(self, processing_file_path: str, processing_bytes: str) -> None:
         """No-op: required by ``ExtractCallback`` protocol."""

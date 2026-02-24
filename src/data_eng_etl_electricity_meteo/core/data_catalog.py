@@ -387,7 +387,7 @@ class DataCatalog(StrictModel):
         """
         dataset = self.datasets.get(name)
 
-        if not dataset:
+        if dataset is None:
             raise DatasetNotFoundError(
                 name=name,
                 available_datasets=list(self.datasets.keys()),

@@ -59,7 +59,7 @@ datasets:
       format: "parquet"
     ingestion:
       frequency: "hourly"
-      mode: "snapshot"
+      mode: "snapshot" # TODO: à passer en incremental
 
   meteo_france_stations:
     description: "Liste des stations météorologiques de Météo France avec accès aux caractéristiques détaillées."

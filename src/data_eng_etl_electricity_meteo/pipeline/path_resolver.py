@@ -7,7 +7,7 @@ Two resolver types match the two dataset types:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.settings import settings
@@ -175,7 +175,7 @@ if __name__ == "__main__":
 
     # Remote datasets: landing → bronze → silver
     for _dataset in _catalog.get_remote_datasets():
-        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(datetime.now())
+        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
 
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 

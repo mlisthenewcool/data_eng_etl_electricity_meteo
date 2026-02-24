@@ -12,6 +12,9 @@ data/**/*
 !data/catalog.yaml
 !data/**/.gitkeep
 
+# local overrides (e.g. POSTGRES_HOST=localhost); see .env.example
+.env.local
+
 # see more details bellow
 .idea/
 
