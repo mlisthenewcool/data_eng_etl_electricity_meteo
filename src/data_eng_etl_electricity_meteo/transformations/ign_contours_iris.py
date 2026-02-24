@@ -12,9 +12,6 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 
 logger = get_logger("transform.ign_contours_iris")
 
-# from data_eng_etl_electricity_meteo.pipeline.validators
-# import validate_ign_contours_iris
-
 
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for IGN Contours IRIS.
@@ -37,6 +34,13 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     -------
     pl.DataFrame
         Filtered DataFrame with geometry as WKB, ready for bronze layer.
+
+    Raises
+    ------
+    duckdb.Error
+        On DuckDB spatial query failure (missing extension, corrupt GeoPackage, etc.).
+    OSError
+        If *landing_path* does not exist or cannot be copied to the temp location.
     """
     logger.debug(
         "Reading GeoPackage from landing", landing_path=landing_path, filename=landing_path.name
@@ -66,7 +70,6 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
             ST_AsWKB(geometrie) AS geom_wkb \
         FROM ST_read(?, layer = 'contours_iris')
         """
-            # logger.debug("Executing DuckDB spatial query", query=query)
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
             logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
         finally:
@@ -96,6 +99,13 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     -------
     pl.DataFrame
         Silver DataFrame with ``centroid_lat`` and ``centroid_lon`` columns.
+
+    Raises
+    ------
+    duckdb.Error
+        On DuckDB spatial query failure (missing extension, corrupt parquet, etc.).
+    OSError
+        If *latest_bronze_path* does not exist or is not readable.
     """
     logger.debug("Reading from bronze latest", bronze_path=latest_bronze_path)
 
@@ -107,14 +117,33 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
             conn.execute("INSTALL spatial;")
 
         conn.execute("LOAD spatial;")
+        conn.execute("SET threads = 1")
+        conn.execute("SET memory_limit = '1GB'")
 
-        # Compute centroids and transform to WGS84
-        # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154)
+        # Compute centroids and transform to WGS84.
+        # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154).
+        # The CTE computes ST_GeomFromWKB + ST_Centroid + ST_Transform once per row;
+        # the outer SELECT extracts X/Y from the already-transformed point.
         # Note: DuckDB's ST_Transform from Lambert 93 to WGS84 returns coordinates
-        # in (lat, lon) order instead of standard (lon, lat), so we use ST_X for lat
-        # and ST_Y for lon (counterintuitive but verified empirically)
+        # in (lat, lon) order instead of standard (lon, lat), so ST_X gives lat
+        # and ST_Y gives lon (counterintuitive but verified empirically).
         # noinspection SqlResolve
         query = """
+        WITH centroids AS (
+            SELECT
+                code_iris,
+                nom_iris,
+                code_insee,
+                nom_commune,
+                type_iris,
+                geom_wkb,
+                ST_Transform(
+                    ST_Centroid(ST_GeomFromWKB(geom_wkb)),
+                    'EPSG:2154',
+                    'EPSG:4326'
+                ) AS centroid_wgs84
+            FROM read_parquet(?)
+        )
         SELECT
             code_iris,
             nom_iris,
@@ -122,26 +151,15 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
             nom_commune,
             type_iris,
             geom_wkb,
-            ST_X(ST_Transform(
-                ST_Centroid(ST_GeomFromWKB(geom_wkb)),
-                'EPSG:2154',
-                'EPSG:4326'
-            )) AS centroid_lat,
-            ST_Y(ST_Transform(
-                ST_Centroid(ST_GeomFromWKB(geom_wkb)),
-                'EPSG:2154',
-                'EPSG:4326'
-            )) AS centroid_lon
-        FROM read_parquet(?)
+            ST_X(centroid_wgs84) AS centroid_lat,
+            ST_Y(centroid_wgs84) AS centroid_lon
+        FROM centroids
         """
 
         logger.debug("Computing centroids with DuckDB spatial extension")
         df = conn.execute(query, [str(latest_bronze_path)]).pl()
     finally:
         conn.close()
-
-    # TODO: Validate output before returning
-    # validate_ign_contours_iris(df)
 
     logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
     return df

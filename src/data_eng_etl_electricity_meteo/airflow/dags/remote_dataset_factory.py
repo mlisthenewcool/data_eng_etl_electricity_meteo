@@ -86,7 +86,7 @@ def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
     )
     def _dag() -> None:
         # ============================================================
-        # 2. INGEST WITH SHORT-CIRCUITS IF CONTENT IN UNCHANGED
+        # 2. INGEST WITH SHORT-CIRCUITS IF CONTENT IS UNCHANGED
         #   HTTP HEAD - short-circuit with ETag / Last-modified
         #   DOWNLOAD
         #   COMPARE HASH (SHA256)

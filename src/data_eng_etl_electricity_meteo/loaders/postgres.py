@@ -115,16 +115,18 @@ def load_to_silver(
     - ``incremental``: ``COPY`` into a temp staging table, then execute the
       ``INSERT ON CONFLICT`` upsert from the dataset's ``.sql`` file.
 
-    The caller is responsible for the connection lifecycle (open / close).
+    This function commits the transaction on success. The caller is responsible
+    for the connection lifecycle (open / close); on failure, the connection is
+    left in an aborted-transaction state and must be rolled back by the caller.
 
     Parameters
     ----------
-    dataset_name:
-        Dataset identifier. Must match a catalog key and a ``postgres/sql/``
-        file.
+    dataset_config:
+        Remote dataset configuration from the catalog. ``dataset_config.name``
+        must match a catalog key and a ``postgres/sql/`` file.
     conn:
         Open psycopg connection. Use ``open_standalone_connection()`` or
-        ``open_airflow_connection()`` to create one.
+        ``load_to_silver_from_hook()`` to create one.
 
     Returns
     -------
@@ -133,8 +135,6 @@ def load_to_silver(
 
     Raises
     ------
-    TypeError
-        If the dataset is derived (Gold), not remote.
     PostgresLoadError
         On any load failure: missing SQL file, unreadable parquet, missing
         upsert marker, or any ``psycopg`` database error.
@@ -161,6 +161,13 @@ def load_to_silver(
     except (pl.exceptions.PolarsError, OSError) as err:
         raise PostgresLoadError() from err
 
+    # Validate incremental pre-condition before touching the database.
+    if mode == IngestionMode.INCREMENTAL and upsert_sql is None:
+        raise PostgresLoadError() from ValueError(
+            f"Dataset '{dataset_config.name}' is incremental but its SQL file "
+            f"has no upsert section (missing '{_UPSERT_MARKER}' marker)."
+        )
+
     try:
         with conn.cursor() as cur:
             cur.execute(cast("LiteralString", ddl_sql))
@@ -169,14 +176,9 @@ def load_to_silver(
             if mode == IngestionMode.SNAPSHOT:
                 rows = _load_snapshot(cur, df, table)
             else:
-                if upsert_sql is None:
-                    raise ValueError(
-                        f"Dataset '{dataset_config.name}' is incremental but its SQL file "
-                        f"has no upsert section (missing '{_UPSERT_MARKER}' marker)."
-                    )
-                rows = _load_incremental(cur, df, dataset_config.name, table, upsert_sql)
+                rows = _load_incremental(cur, df, dataset_config.name, table, upsert_sql)  # type: ignore[arg-type]
 
-            conn.commit()
+        conn.commit()
     except (psycopg.Error, ValueError) as err:
         raise PostgresLoadError() from err
 
@@ -269,10 +271,16 @@ def load_to_silver_from_hook(
     # USE_PSYCOPG3=True → get_conn() returns a psycopg3 connection wrapped in
     # CompatConnection (Airflow's psycopg2/3 abstraction). Cast to the concrete
     # type so load_to_silver's signature stays free of Airflow types.
-    with hook.get_conn() as conn:
+    # Do NOT use the connection as a context manager here: load_to_silver()
+    # commits the transaction itself, so a second commit via __exit__ is
+    # redundant. We close the connection explicitly in the finally block.
+    conn = hook.get_conn()
+    try:
         return load_to_silver(
             dataset_config=dataset_config, conn=cast("psycopg.Connection[Any]", conn)
         )
+    finally:
+        conn.close()
 
 
 # =============================================================================
@@ -306,7 +314,7 @@ def _parse_sql_file(dataset_name: str) -> tuple[str, str | None]:
     if not sql_file.exists():
         raise FileNotFoundError(f"SQL file not found for dataset '{dataset_name}': {sql_file}")
 
-    content = sql_file.read_text()
+    content = sql_file.read_text(encoding="utf-8")
 
     if _UPSERT_MARKER in content:
         parts = content.split(_UPSERT_MARKER, maxsplit=1)
@@ -429,6 +437,11 @@ def _copy_df(cur: psycopg.Cursor[Any], df: pl.DataFrame, copy_sql: psql.Composed
         Pre-processed DataFrame (types already converted for COPY CSV).
     copy_sql:
         ``COPY … FROM STDIN (FORMAT CSV)`` statement as a psycopg ``Composed``.
+
+    Raises
+    ------
+    psycopg.Error
+        On any server-side COPY failure (type mismatch, constraint violation, etc.).
     """
     buf = io.BytesIO()
     df.write_csv(buf, include_header=False)
@@ -459,6 +472,11 @@ def _load_snapshot(
     -------
     int
         Number of rows loaded.
+
+    Raises
+    ------
+    psycopg.Error
+        On TRUNCATE or COPY failure.
     """
     table_id = psql.Identifier(*table.split(".", 1))
     cols = psql.SQL(", ").join(psql.Identifier(col) for col in df.columns)
@@ -504,6 +522,11 @@ def _load_incremental(
     -------
     int
         Number of rows affected by the INSERT ON CONFLICT (inserted + updated).
+
+    Raises
+    ------
+    psycopg.Error
+        On staging table creation, COPY, upsert, or cleanup failure.
     """
     table_id = psql.Identifier(*table.split(".", 1))
     staging_id = psql.Identifier(f"_staging_{dataset_name}")

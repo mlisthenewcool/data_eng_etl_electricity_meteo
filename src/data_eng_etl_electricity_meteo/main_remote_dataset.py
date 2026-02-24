@@ -161,7 +161,7 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
         err.log(logger.error)
         return -1
 
-    logger.info("Load to Postgres ok", metrics=metrics)
+    logger.info("Load to Postgres ok", **metrics.model_dump())
 
     return 0
 

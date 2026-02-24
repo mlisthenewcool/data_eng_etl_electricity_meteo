@@ -172,6 +172,12 @@ class RemoteDatasetPipeline:
         -------
         PipelineContext | None
             Initial pipeline context, or ``None`` if skipped.
+
+        Raises
+        ------
+        IngestStageError
+            On any HTTP failure (connect, timeout, status error) during the
+            HEAD check or the download.
         """
         logger.info("Ingesting", version=version)
 
@@ -245,17 +251,23 @@ class RemoteDatasetPipeline:
         PipelineContext | None
             Updated context with ``download.extraction_info`` populated,
             or ``None`` if the extracted content hash matches the previous run.
+
+        Raises
+        ------
+        ExtractStageError
+            On archive not found, missing inner file, integrity failure, or
+            if ``inner_file`` is ``None`` (should not happen — guaranteed by
+            ``RemoteSourceConfig`` validator).
         """
         archive_path = context.download.download_info.path
         landing_dir = archive_path.parent
 
-        # inner_file guaranteed by RemoteSourceConfig validator but ty complains
-        # NOTE: Local variable enables ty to narrow str | None → str after the check
+        # inner_file is guaranteed non-None by RemoteSourceConfig's validator for
+        # archive formats, but ty cannot prove it here. The check guards against
+        # any future regression and also narrows the type for the call below.
         inner_file = self.dataset.source.inner_file
         if inner_file is None:
-            raise ExtractStageError() from ValueError(
-                "inner_file is None (should be guaranteed by RemoteSourceConfig validator)"
-            )
+            raise ExtractStageError()
 
         try:
             extract_info = extract_7z(
@@ -325,6 +337,12 @@ class RemoteDatasetPipeline:
         -------
         PipelineContext
             Updated context with ``bronze`` metrics populated.
+
+        Raises
+        ------
+        BronzeStageError
+            On transform failure (DuckDB error), I/O error writing the
+            parquet, or failure updating the ``latest`` symlink.
         """
         bronze_path = self.resolver.bronze_path(context.version)
         bronze_path.parent.mkdir(parents=True, exist_ok=True)
@@ -384,6 +402,12 @@ class RemoteDatasetPipeline:
         -------
         PipelineContext
             Updated context with ``silver`` metrics populated.
+
+        Raises
+        ------
+        SilverStageError
+            On transform failure (DuckDB error, validation error) or I/O
+            error during silver file rotation or write.
         """
         logger.info("Transforming to silver", version=context.version)
 

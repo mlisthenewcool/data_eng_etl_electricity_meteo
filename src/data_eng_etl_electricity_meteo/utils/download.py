@@ -96,8 +96,6 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
             logger.debug("Extracted filename from URL path", filename=filename, url=url)
             return filename
 
-    # note: this is already logged by `download_to_file(...)`
-    # logger.warning("Could not extract filename", url=url)
     return None
 
 
@@ -134,10 +132,14 @@ def download_to_file(
 
     Raises
     ------
-    httpx.HTTPStatusError:
-        If server returns error status (4xx/5xx).
-    httpx.TimeoutException:
-        If request times out.
+    httpx.HTTPStatusError
+        If the server returns an error status (4xx/5xx).
+    httpx.TimeoutException
+        If the request times out (connect or read timeout).
+    httpx.ConnectError
+        If the host cannot be reached.
+    OSError
+        If the destination file cannot be written.
     """
     logger.info("Starting download", url=url, dest_dir=dest_dir)
 

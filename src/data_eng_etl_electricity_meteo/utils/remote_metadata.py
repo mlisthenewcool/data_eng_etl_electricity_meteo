@@ -46,6 +46,13 @@ class RemoteFileMetadata:
         ----------
         other:
             Previous metadata to compare against.
+
+        Returns
+        -------
+        ChangeDetectionResult
+            ``has_changed=True`` if a change is detected or metadata is
+            insufficient to confirm identity; ``False`` only when at least
+            one field matches conclusively.
         """
         if not self._has_any_field() or not other._has_any_field():
             return ChangeDetectionResult(True, "Missing metadata on current or previous state")

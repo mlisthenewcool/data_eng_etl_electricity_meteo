@@ -37,13 +37,20 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    landing_path
+    landing_path:
         Path to the parquet file from landing layer.
 
     Returns
     -------
     pl.DataFrame
         DataFrame ready for bronze layer.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read failure (corrupt file, schema mismatch, etc.).
+    OSError
+        If *landing_path* does not exist or is not readable.
     """
     logger.debug("Reading parquet from landing", landing_path=landing_path)
     return pl.read_parquet(landing_path)
@@ -52,24 +59,31 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     """Silver transformation for ODRE installations.
 
-    Selects relevant columns and adds business flags for energy type
-    classification.
+    Adds business flags for energy type classification.
 
     Transformations applied:
-    - Rename columns to snake_case (needed before business logic)
-    - Add est_renouvelable flag
-    - Add type_energie simplified classification
-    - Add est_actif flag (not disconnected)
+
+    - Rename columns to snake_case (needed before business logic).
+    - Add ``est_renouvelable`` flag based on ``code_filiere``.
+    - Add ``type_energie`` simplified classification via ``TYPE_ENERGIE_MAPPING``.
+    - Add ``est_actif`` flag (``True`` when ``date_deraccordement`` is null).
 
     Parameters
     ----------
-    latest_bronze_path
+    latest_bronze_path:
         Path to the latest bronze parquet file.
 
     Returns
     -------
     pl.DataFrame
         Normalized and enriched DataFrame.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read failure (corrupt file, schema mismatch, etc.).
+    OSError
+        If *latest_bronze_path* does not exist or is not readable.
     """
     logger.debug("Reading from bronze", latest_bronze_path=latest_bronze_path)
     df = pl.read_parquet(latest_bronze_path)

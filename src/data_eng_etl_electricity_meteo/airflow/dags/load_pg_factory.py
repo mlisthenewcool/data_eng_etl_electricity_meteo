@@ -14,9 +14,9 @@ Each generated DAG:
 - **Task**  : load silver parquet → PostgreSQL ``silver.{dataset}`` table
 - **Outlet**: silver PG Asset (``postgres://project/silver.{dataset}``)
 
-The load task uses ``open_standalone_connection()`` which reads credentials
-from environment variables and/or Docker secrets. To use the Airflow
-connection store instead, replace it with ``open_airflow_connection()``.
+The load task uses an Airflow ``PostgresHook`` (connection id ``project_postgres``)
+so credentials come from the Airflow connection store, not from
+``open_standalone_connection()``.
 """
 
 from collections.abc import Generator
@@ -62,8 +62,8 @@ def _create_dag(
 
     Parameters
     ----------
-    dataset_name:
-        Dataset identifier.
+    dataset_config:
+        Remote dataset configuration from the catalog.
     silver_file_asset:
         Inlet: the silver ``file://`` Asset produced by the ingestion DAG.
     silver_pg_asset:
@@ -93,7 +93,7 @@ def _create_dag(
         def load_task() -> Generator[Metadata]:
             """Load silver parquet into the PostgreSQL silver schema.
 
-            Uses an Airflow ``PostgresHook`` (psycopg2) — credentials come
+            Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come
             from the Airflow connection store, connection lifecycle is managed
             inside ``load_to_silver_from_hook``.
             """

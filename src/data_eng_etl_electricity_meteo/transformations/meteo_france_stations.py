@@ -49,13 +49,20 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    landing_path
+    landing_path:
         Path to the JSON file from landing layer.
 
     Returns
     -------
     pl.DataFrame
         DataFrame with raw station data.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read failure (malformed JSON, schema mismatch, etc.).
+    OSError
+        If *landing_path* does not exist or is not readable.
     """
     logger.debug("Reading JSON from landing", landing_path=landing_path)
     return pl.read_json(landing_path)
@@ -75,13 +82,20 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    latest_bronze_path
+    latest_bronze_path:
         Path to the latest bronze parquet file.
 
     Returns
     -------
     pl.DataFrame
         Flattened DataFrame with measurement capability flags.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read or transformation failure.
+    OSError
+        If *latest_bronze_path* does not exist or is not readable.
     """
     logger.debug("Reading from bronze", latest_bronze_path=latest_bronze_path)
     df = pl.read_parquet(latest_bronze_path)

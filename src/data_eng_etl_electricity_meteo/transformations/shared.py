@@ -11,7 +11,18 @@ logger = get_logger("transform.shared")
 
 
 def to_snake_case(name: str) -> str:
-    """Convert a CamelCase or mixed-case string to snake_case."""
+    """Convert a CamelCase or mixed-case string to snake_case.
+
+    Parameters
+    ----------
+    name:
+        Input string (CamelCase, mixed-case, space- or hyphen-separated).
+
+    Returns
+    -------
+    str
+        snake_case version of *name*.
+    """
     # Add underscore before uppercase letters preceded by lowercase/digit
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
     # Handle acronyms (e.g. EPCICommune -> EPCI_Commune)
@@ -25,10 +36,15 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
 
     Parameters
     ----------
-    df
+    df:
         DataFrame to validate.
-    dataset_name
+    dataset_name:
         Used in the exception for diagnostics.
+
+    Raises
+    ------
+    TransformValidationError
+        If *df* is empty.
     """
     if df.is_empty():
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
@@ -39,10 +55,15 @@ def validate_no_full_null_columns(df: pl.DataFrame, dataset_name: str) -> None:
 
     Parameters
     ----------
-    df
+    df:
         DataFrame to validate.
-    dataset_name
+    dataset_name:
         Used in the exception for diagnostics.
+
+    Raises
+    ------
+    TransformValidationError
+        If at least one column in *df* contains only null values.
     """
     full_null_cols = [col for col in df.columns if df[col].is_null().all()]
     if full_null_cols:
@@ -57,15 +78,20 @@ def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
 
     Parameters
     ----------
-    df
+    df:
         DataFrame returned by a dataset-specific silver transform.
-    dataset_name
+    dataset_name:
         Dataset identifier (for logging and error reporting).
 
     Returns
     -------
     pl.DataFrame
         DataFrame with standardized column names, validated.
+
+    Raises
+    ------
+    TransformValidationError
+        If the resulting DataFrame is empty after dropping all-null columns.
     """
     df = df.rename(to_snake_case)
 
@@ -78,6 +104,5 @@ def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
         df = df.drop(null_cols)
 
     validate_not_empty(df, dataset_name)
-    validate_no_full_null_columns(df, dataset_name)
     logger.debug("Common silver steps applied")
     return df

@@ -45,6 +45,11 @@ def _rotate(
         Path to the backup file.
     layer:
         Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+
+    Raises
+    ------
+    OSError
+        If the copy fails (permission error, disk full, etc.).
     """
     if current_path.exists():
         backup_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +92,11 @@ def _rollback(
     -------
     bool
         ``True`` if rollback succeeded, ``False`` if no backup exists.
+
+    Raises
+    ------
+    OSError
+        If the copy fails (permission error, disk full, etc.).
     """
     if not backup_path.exists():
         logger.warning(
@@ -184,7 +194,8 @@ class RemoteFileManager:
         list[Path]
             Paths of deleted version files.
         """
-        cutoff_time = datetime.now(tz=UTC) - timedelta(days=retention_days)
+        now = datetime.now(tz=UTC)
+        cutoff_time = now - timedelta(days=retention_days)
         deleted = []
 
         for version_path in self.resolver.list_bronze_versions():
@@ -197,8 +208,16 @@ class RemoteFileManager:
                     "Deleted old bronze version",
                     dataset_name=self.resolver.dataset_name,
                     version=version_path.stem,
-                    age_days=(datetime.now(tz=UTC) - file_mtime).days,
+                    age_days=(now - file_mtime).days,
                 )
+
+        if deleted:
+            logger.info(
+                "Bronze cleanup completed",
+                dataset_name=self.resolver.dataset_name,
+                deleted_count=len(deleted),
+                retention_days=retention_days,
+            )
 
         return deleted
 

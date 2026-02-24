@@ -20,11 +20,22 @@ class BaseProjectException(Exception):
 
         Value normalization (None filtering, Path conversion, etc.) is handled by the
         structlog processor chain.
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping of public instance attribute names to their values.
         """
         return {key: value for key, value in self.__dict__.items() if not key.startswith("_")}
 
     def log(self, log_method: _LogMethod) -> None:
-        """Log this exception with its structured attributes."""
+        """Log this exception with its structured attributes.
+
+        Parameters
+        ----------
+        log_method:
+            A structlog bound logger method (e.g. ``logger.error``).
+        """
         log_method(str(self), **self.to_dict())
 
 
@@ -138,7 +149,17 @@ class PipelineStageError(BaseProjectException):
         super().__init__(f"Pipeline failed at {stage} stage.")
 
     def log(self, log_method: _LogMethod) -> None:
-        """Log this exception and its cause with structured attributes."""
+        """Log this exception and its cause with structured attributes.
+
+        If the cause is a ``BaseProjectException``, its attributes are merged
+        into the log event. Otherwise, the cause type and message are logged
+        as ``cause_type`` / ``cause`` fields.
+
+        Parameters
+        ----------
+        log_method:
+            A structlog bound logger method (e.g. ``logger.critical``).
+        """
         cause = self.__cause__
         if cause is None:
             log_method(str(self), **self.to_dict())
