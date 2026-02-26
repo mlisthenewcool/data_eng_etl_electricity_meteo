@@ -6,15 +6,14 @@ import sys
 from datetime import UTC, datetime
 
 import psycopg
+import typer
 
-from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
+from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
-    DatasetNotFoundError,
-    DatasetTypeError,
+    DataCatalogError,
     ExtractStageError,
     IngestStageError,
-    InvalidCatalogError,
     PostgresLoadError,
     SilverStageError,
 )
@@ -28,18 +27,14 @@ from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteInges
 
 logger = get_logger("main")
 
-# _DATASET_NAME = "ign_contours_iris"
-# _DATASET_NAME = "odre_eco2mix_tr"
-_DATASET_NAME = "odre_installations"
+app = typer.Typer(add_completion=False)
 
 
-def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
+@app.command()
+def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     """Run the remote dataset pipeline for a single dataset.
 
-    Returns
-    -------
-    int
-        Exit code: 0 on success or skip, -1 on error.
+    DATASET_NAME is the catalog identifier (e.g. odre_installations).
     """
     start_datetime = datetime.now(tz=UTC)
 
@@ -48,9 +43,10 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
     # ============================================================
     try:
         catalog = DataCatalog.load(settings.data_catalog_file_path)
-    except InvalidCatalogError as error:
+        dataset_config = catalog.get_remote_dataset(dataset_name)
+    except DataCatalogError as error:
         error.log(logger.critical)
-        return -1
+        sys.exit(1)
 
     logger.debug(
         "Data catalog loaded",
@@ -58,15 +54,9 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
         gold_datasets=[dataset.name for dataset in catalog.get_gold_datasets()],
     )
 
-    try:
-        dataset_config = catalog.get_remote_dataset(_DATASET_NAME)
-    except (DatasetNotFoundError, DatasetTypeError) as error:
-        error.log(logger.critical)
-        return -1
-
     logger.debug(
         "Dataset config loaded",
-        dataset_name=_DATASET_NAME,
+        dataset_name=dataset_name,
         dataset_type=type(dataset_config).__name__,
         **dataset_config.model_dump(mode="json", exclude={"name"}),
     )
@@ -74,14 +64,6 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
     # ============================================================
     # 1) Prepare version and RemoteIngestionPipeline
     # ============================================================
-    if not isinstance(dataset_config, RemoteDatasetConfig):
-        logger.critical(
-            "Expected a remote dataset",
-            dataset_name=_DATASET_NAME,
-            actual_type=type(dataset_config).__name__,
-        )
-        return -1
-
     version = dataset_config.ingestion.frequency.format_datetime_as_version(start_datetime)
     manager = RemoteIngestionPipeline(dataset=dataset_config)
 
@@ -89,20 +71,20 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
     # 2) Load metadata from previous run (not-implemented yet)
     # ============================================================
     logger.warning("Load previous run metadata not yet implemented outside of Airflow")
-    previous_metadata = None
+    previous_snapshot = None
 
     # ============================================================
     # 3) Ingest stage
     # ============================================================
     try:
-        ingest_ctx = manager.ingest(version=version, previous_metadata=previous_metadata)
+        ingest_ctx = manager.ingest(version=version, previous_snapshot=previous_snapshot)
     except IngestStageError as error:
         error.log(logger.critical)
-        return -1
+        sys.exit(1)
 
     if ingest_ctx is None:
         logger.info("Pipeline skipped: content unchanged")
-        return 0
+        return
 
     # ============================================================
     # 4) (optional) Extract stage
@@ -110,18 +92,18 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
     if dataset_config.source.format.is_archive:
         try:
             extract_ctx = manager.extract_archive(
-                context=ingest_ctx, previous_metadata=previous_metadata
+                context=ingest_ctx, previous_snapshot=previous_snapshot
             )
         except ExtractStageError as error:
             error.log(logger.critical)
-            return -1
+            sys.exit(1)
 
         if extract_ctx is None:
             logger.info("Pipeline skipped: extracted content unchanged")
-            return 0
+            return
     else:
-        logger.info("Extraction skipped: format is not archive", dataset_name=_DATASET_NAME)
-        extract_ctx = None  # _extract_ctx is unbound in this branch : must be set explicitly
+        logger.info("Extraction skipped: format is not archive", dataset_name=dataset_name)
+        extract_ctx = None
 
     # ============================================================
     # 5) Bronze stage
@@ -130,7 +112,7 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
         bronze_ctx = manager.to_bronze(context=extract_ctx or ingest_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
-        return -1
+        sys.exit(1)
 
     # ============================================================
     # 6) Silver stage
@@ -139,7 +121,7 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
         _ = manager.to_silver(context=bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
-        return -1
+        sys.exit(1)
 
     # ============================================================
     # 7) Save successful run metadata
@@ -151,21 +133,22 @@ def main() -> int:  # noqa: PLR0911, PLR0912, PLR0915
     # ============================================================
     try:
         connection = open_standalone_connection()
-    except (OSError, psycopg.OperationalError) as err:
-        logger.error("Postgres connection failed", error=str(err))
-        return -1
+    except PostgresLoadError as err:
+        err.log(logger.critical)
+        sys.exit(1)
+    except psycopg.OperationalError as err:
+        logger.critical("Postgres connection failed", error=str(err))
+        sys.exit(1)
 
     try:
         with connection:
             metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
     except PostgresLoadError as err:
         err.log(logger.exception)
-        return -1
+        sys.exit(1)
 
     logger.info("Load to Postgres ok", **metrics.model_dump())
 
-    return 0
-
 
 if __name__ == "__main__":
-    sys.exit(main())
+    app()

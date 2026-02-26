@@ -165,24 +165,3 @@ def get_remote_file_metadata(
     )
 
     return metadata
-
-
-def has_remote_file_changed(
-    current: RemoteFileMetadata, previous: RemoteFileMetadata
-) -> ChangeDetectionResult:
-    """Compare two metadata snapshots to detect changes.
-
-    Parameters
-    ----------
-    current:
-        Newly fetched metadata.
-    previous:
-        Metadata from a previous execution.
-
-    Returns
-    -------
-    ChangeDetectionResult
-        Verdict indicating whether the remote file has changed.
-    """
-    # TODO: ajouter méthode If-None-Match (HTTP 304)
-    return current.compare_with(previous)

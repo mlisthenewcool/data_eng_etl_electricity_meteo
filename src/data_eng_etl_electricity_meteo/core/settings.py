@@ -70,9 +70,9 @@ class Settings(BaseSettings):
         Path("/run/secrets") if Path("/run/secrets").exists() else _ROOT_DIR / "secrets"
     )
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Pydantic Config + source chain
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     model_config = SettingsConfigDict(
         env_file=_ROOT_DIR / ".env",
         env_file_encoding="utf-8",
@@ -81,16 +81,16 @@ class Settings(BaseSettings):
         frozen=True,  # Immutable settings
     )
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # General config
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     logging_level: Annotated[
         LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
     ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Data config
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     bronze_retention_days: int = Field(
         default=365,  # 1 year
         description="Number of days to retain bronze layer versions",
@@ -98,9 +98,9 @@ class Settings(BaseSettings):
         le=365 * 3,  # Max 3 years
     )
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Postgres connection
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     postgres_host: str = Field(default="localhost", description="Postgres host")
     postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)
     postgres_db_name: str = Field(default="default_db_name", description="Postgres database name")
@@ -119,9 +119,9 @@ class Settings(BaseSettings):
         description="Postgres password",
     )
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Airflow config
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     @computed_field
     @cached_property
     def is_running_on_airflow(self) -> bool:
@@ -132,11 +132,11 @@ class Settings(BaseSettings):
         """
         return "AIRFLOW_HOME" in os.environ
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Paths (derived from _ROOT_DIR, not configurable via env)
     # NOTE: DirectoryPath (Pydantic) validates that the directory exists at
     # access time. Use plain Path for directories that may not exist yet.
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @computed_field
     @cached_property
@@ -163,9 +163,9 @@ class Settings(BaseSettings):
         """Path to Postgres' queries and configuration directory."""
         return self._ROOT_DIR / "postgres"
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Download Settings
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     download_chunk_size: int = Field(
         default=512 * 1024,  # 512 KB
         description="Chunk size for streaming downloads (bytes)",
@@ -205,9 +205,9 @@ class Settings(BaseSettings):
 
         return self
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Hash Settings
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     hash_algorithm: Literal["sha256", "sha512", "sha1", "md5"] = Field(
         default="sha256",
         description="Hashing algorithm for integrity checks (recommended: sha256)",

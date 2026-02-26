@@ -13,10 +13,7 @@ class MedallionLayer(StrEnum):
 
 
 class PipelineStage(StrEnum):
-    """Pipeline execution stages.
-
-    Extends medallion layers with ingestion, extraction, and loading.
-    """
+    """Pipeline execution stages covering ingestion, transformation, and loading."""
 
     INGEST = "ingest"
     EXTRACT = "extract"

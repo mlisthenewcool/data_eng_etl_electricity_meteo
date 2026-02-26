@@ -8,6 +8,11 @@ from data_eng_etl_electricity_meteo.core.logger import get_logger
 
 logger = get_logger("transform.meteo_france_stations")
 
+
+# ---------------------------------------------------------------------------
+# Domain constants (measurement parameters)
+# ---------------------------------------------------------------------------
+
 # Parameters relevant for solar energy production
 # Based on analysis in notebooks/03_meteo_france_info_stations.py
 PARAMS_SOLAIRES = [
@@ -42,6 +47,11 @@ PARAMS_EOLIENS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Bronze transformation
+# ---------------------------------------------------------------------------
+
+
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for Meteo France stations.
 
@@ -66,6 +76,11 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """
     logger.debug("Reading JSON from landing", landing_path=landing_path)
     return pl.read_json(landing_path)
+
+
+# ---------------------------------------------------------------------------
+# Silver transformation
+# ---------------------------------------------------------------------------
 
 
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:

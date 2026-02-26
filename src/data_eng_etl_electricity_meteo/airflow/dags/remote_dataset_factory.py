@@ -20,7 +20,10 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
-from data_eng_etl_electricity_meteo.pipeline.types import PipelineContext, PipelineRunSnapshot
+from data_eng_etl_electricity_meteo.pipeline.types import (
+    PipelineContext,
+    PipelineRunSnapshot,
+)
 
 if TYPE_CHECKING:
     from airflow.sdk.execution_time.context import InletEventsAccessors
@@ -103,13 +106,14 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
             3. Download content to landing layer.
             4. Compare SHA-256 hashes — short-circuit if identical.
             """
-            previous_metadata = (
+            raw_metadata = (
                 inlet_events[asset][-1].extra
                 if inlet_events and asset in inlet_events and len(inlet_events[asset]) > 0
                 else None
             )
+            previous_snapshot = PipelineRunSnapshot.from_metadata_dict(raw_metadata)
 
-            ingestion_result = manager.ingest(version=version, previous_metadata=previous_metadata)
+            ingestion_result = manager.ingest(version=version, previous_snapshot=previous_snapshot)
 
             if ingestion_result is None:
                 return False
@@ -126,14 +130,15 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
             ctx: XComArg, inlet_events: "InletEventsAccessors | None" = None
         ) -> XComArg | bool:
             """Extract archive; short-circuit if SHA256 is unchanged."""
-            previous_metadata = (
+            raw_metadata = (
                 inlet_events[asset][-1].extra
                 if inlet_events and asset in inlet_events and len(inlet_events[asset]) > 0
                 else None
             )
+            previous_snapshot = PipelineRunSnapshot.from_metadata_dict(raw_metadata)
 
             context = manager.extract_archive(
-                PipelineContext.model_validate(ctx), previous_metadata=previous_metadata
+                PipelineContext.model_validate(ctx), previous_snapshot=previous_snapshot
             )
 
             if context is None:
@@ -217,8 +222,10 @@ def _generate_all_dags() -> dict[str, DAG]:
         except TransformNotFoundError as error:
             error.log(factory_logger.warning)
         except ValueError:
+            # RemotePathResolver.__post_init__ raises ValueError on empty dataset_name;
+            # IngestionFrequency.airflow_schedule may raise on unsupported frequency.
             factory_logger.exception(
-                "Failed to create DAG.",
+                "Failed to create DAG",
                 dataset_name=dataset.name,
             )
 

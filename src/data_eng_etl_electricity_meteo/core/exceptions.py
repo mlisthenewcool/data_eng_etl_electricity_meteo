@@ -65,7 +65,7 @@ class FileNotFoundInArchiveError(ExtractionError):
         super().__init__("File not found in archive.")
 
 
-class FileIntegrityError(BaseProjectException):
+class FileIntegrityError(ExtractionError):
     """Raised when file validation (hash, size, etc.) fails."""
 
     def __init__(self, path: Path, reason: str) -> None:
@@ -112,6 +112,21 @@ class DatasetTypeError(DataCatalogError):
         self.expected = expected
         self.actual = actual
         super().__init__("Dataset has unexpected type.")
+
+
+# ---------------------------------------------------------------------------
+# Schema validation errors
+# ---------------------------------------------------------------------------
+
+
+class SchemaValidationError(BaseProjectException):
+    """Raised when DataFrame columns don't match the Postgres table schema."""
+
+    def __init__(self, table: str, extra_columns: list[str], missing_columns: list[str]) -> None:
+        self.table = table
+        self.extra_columns = extra_columns
+        self.missing_columns = missing_columns
+        super().__init__("Schema mismatch between Parquet and Postgres.")
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +182,7 @@ class PipelineStageError(BaseProjectException):
 
     def __init__(self, stage: PipelineStage) -> None:
         self.stage = stage
-        super().__init__("Pipeline stage failed.")
+        super().__init__(f"Pipeline stage '{stage}' failed.")
 
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes.
@@ -234,6 +249,17 @@ class PostgresLoadError(PipelineStageError):
         super().__init__(PipelineStage.LOAD_POSTGRES)
 
 
+class PostgresCredentialsError(PostgresLoadError):
+    """Raised when Postgres credentials are missing from env vars and Docker secrets."""
+
+    def __init__(self, missing_field: str, suggestion: str) -> None:
+        self.missing_field = missing_field
+        self.suggestion = suggestion
+        # Skip PostgresLoadError.__init__ to set a more specific message
+        PipelineStageError.__init__(self, PipelineStage.LOAD_POSTGRES)
+        self.args = ("Postgres credentials not configured.",)
+
+
 class GoldStageError(PipelineStageError):
     """Raised when the gold aggregation stage fails."""
 
@@ -263,9 +289,9 @@ if __name__ == "__main__":
     def _end() -> None:
         print("", file=sys.stderr)
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 1) IngestStageError — httpx causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("IngestStageError  <-  httpx.ConnectError")
     try:
         try:
@@ -304,14 +330,14 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 2) ExtractStageError — archive causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("ExtractStageError  <-  ArchiveNotFoundError")
     try:
         try:
             raise ArchiveNotFoundError(path=Path("/data/landing/archive.7z"))
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+        except ExtractionError as err:
             raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
@@ -324,7 +350,7 @@ if __name__ == "__main__":
                 target_filename="data.gpkg",
                 archive_path=Path("/data/landing/archive.7z"),
             )
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+        except ExtractionError as err:
             raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
@@ -337,15 +363,15 @@ if __name__ == "__main__":
                 path=Path("/data/landing/data.gpkg"),
                 reason="SHA-256 mismatch: expected abc123, got def456",
             )
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
+        except ExtractionError as err:
             raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 3) BronzeStageError — transform / duckdb / IO causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
@@ -378,9 +404,9 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 4) SilverStageError — transform / duckdb / IO causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:

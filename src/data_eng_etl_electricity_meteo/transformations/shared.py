@@ -50,29 +50,6 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
-def validate_no_full_null_columns(df: pl.DataFrame, dataset_name: str) -> None:
-    """Raise if any column is entirely null.
-
-    Parameters
-    ----------
-    df:
-        DataFrame to validate.
-    dataset_name:
-        Used in the exception for diagnostics.
-
-    Raises
-    ------
-    TransformValidationError
-        If at least one column in *df* contains only null values.
-    """
-    full_null_cols = [col for col in df.columns if df[col].is_null().all()]
-    if full_null_cols:
-        raise TransformValidationError(
-            dataset_name,
-            reason=f"Columns entirely null: {full_null_cols}",
-        )
-
-
 def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
     """Apply common silver-layer steps: snake_case rename + validations.
 

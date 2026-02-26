@@ -20,6 +20,7 @@ from typing import Any, Self
 
 from pydantic import ValidationError
 
+from data_eng_etl_electricity_meteo.core.data_catalog import IngestionMode
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
@@ -102,9 +103,9 @@ class SilverMetrics(StrictModel):
 
 
 class GoldMetrics(StrictModel):
-    """Metrics produced by the gold aggregation stage."""
+    """Metrics produced by the gold aggregation stage (dbt in Postgres)."""
 
-    file_size_mib: float
+    table: str
     row_count: int
     columns: list[str]
 
@@ -126,7 +127,7 @@ class LoadPostgresMetrics(StrictModel):
 
     dataset_name: str
     table: str
-    strategy: str
+    strategy: IngestionMode
     rows_loaded: int
 
 

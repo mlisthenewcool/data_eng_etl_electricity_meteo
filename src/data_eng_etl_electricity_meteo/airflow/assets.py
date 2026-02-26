@@ -23,6 +23,8 @@ from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 
+# TODO: add meaningful extras to Assets or remove them ?
+
 
 @cache
 def get_silver_file_asset(dataset_name: str) -> Asset:
@@ -83,5 +85,34 @@ def get_silver_pg_asset(dataset_name: str) -> Asset:
         name=f"{dataset_name}__silver_pg",
         uri=uri,
         group="silver_pg",
+        extra={"dataset_name": dataset_name},
+    )
+
+
+@cache
+def get_gold_pg_asset(dataset_name: str) -> Asset:
+    """Build an Airflow Asset for a dataset's Postgres gold table.
+
+    These Assets represent data produced by dbt in the ``gold`` schema of
+    the project Postgres database. They serve as outlets for the dbt DAG.
+
+    Parameters
+    ----------
+    dataset_name:
+        Dataset identifier (must match a catalog key).
+
+    Returns
+    -------
+    Asset
+        Airflow Asset with a ``postgres://`` URI identifying the gold table.
+    """
+    uri = (
+        f"postgres://{settings.postgres_host}:{settings.postgres_port}"
+        f"/{settings.postgres_db_name}/gold/{dataset_name}"
+    )
+    return Asset(
+        name=f"{dataset_name}__gold_pg",
+        uri=uri,
+        group="gold_pg",
         extra={"dataset_name": dataset_name},
     )

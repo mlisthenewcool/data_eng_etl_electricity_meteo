@@ -13,6 +13,11 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 logger = get_logger("transform.ign_contours_iris")
 
 
+# ---------------------------------------------------------------------------
+# Bronze transformation
+# ---------------------------------------------------------------------------
+
+
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for IGN Contours IRIS.
 
@@ -53,8 +58,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         shutil.copy2(landing_path, tmp_gpkg)
         logger.debug("Copied GeoPackage to temp file", tmp_path=tmp_gpkg)
 
-        conn = duckdb.connect(":memory:")
-        try:
+        with duckdb.connect(":memory:") as conn:
             # Spatial extension is installed with Docker when running on Airflow
             if not settings.is_running_on_airflow:
                 conn.execute("INSTALL spatial;")
@@ -72,9 +76,12 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         """
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
             logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
-        finally:
-            conn.close()
     return df
+
+
+# ---------------------------------------------------------------------------
+# Silver transformation
+# ---------------------------------------------------------------------------
 
 
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
@@ -110,8 +117,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     logger.debug("Reading from bronze latest", bronze_path=latest_bronze_path)
 
     # Use DuckDB for spatial operations on the WKB geometry
-    conn = duckdb.connect(":memory:")
-    try:
+    with duckdb.connect(":memory:") as conn:
         # Spatial extension is installed with Docker when running on Airflow
         if not settings.is_running_on_airflow:
             conn.execute("INSTALL spatial;")
@@ -158,8 +164,6 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
 
         logger.debug("Computing centroids with DuckDB spatial extension")
         df = conn.execute(query, [str(latest_bronze_path)]).pl()
-    finally:
-        conn.close()
 
     logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
     return df

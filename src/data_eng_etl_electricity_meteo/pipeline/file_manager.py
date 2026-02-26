@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
@@ -26,7 +27,7 @@ def _rotate(
     dataset_name: str,
     current_path: Path,
     backup_path: Path,
-    layer: str,
+    layer: MedallionLayer,
 ) -> None:
     """Copy ``current`` → ``backup``. No-op if current doesn't exist.
 
@@ -39,7 +40,7 @@ def _rotate(
     backup_path:
         Path to the backup file.
     layer:
-        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+        Medallion layer (e.g. ``MedallionLayer.SILVER``).
 
     Raises
     ------
@@ -68,7 +69,7 @@ def _rollback(
     dataset_name: str,
     current_path: Path,
     backup_path: Path,
-    layer: str,
+    layer: MedallionLayer,
 ) -> bool:
     """Restore ``backup`` → ``current``.
 
@@ -81,7 +82,7 @@ def _rollback(
     backup_path:
         Path to the backup file.
     layer:
-        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+        Medallion layer (e.g. ``MedallionLayer.SILVER``).
 
     Returns
     -------
@@ -225,7 +226,7 @@ class RemoteFileManager:
             self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
-            "silver",
+            MedallionLayer.SILVER,
         )
 
     def rollback_silver(self) -> bool:
@@ -240,5 +241,5 @@ class RemoteFileManager:
             self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
-            "silver",
+            MedallionLayer.SILVER,
         )

@@ -117,16 +117,17 @@ class TestFlattenAndNormalize:
 # _visual_len
 # ---------------------------------------------------------------------------
 
-
+# fmt: off
 @pytest.mark.parametrize(
     argnames="s, expected",
     argvalues=[
-        pytest.param("hello", 5, id="plain_string"),
+        pytest.param("hello",                5, id="plain_string"),
         pytest.param("\033[32mhello\033[0m", 5, id="ansi_colored_string"),
-        pytest.param("", 0, id="empty_string"),
-        pytest.param("\033[1m\033[0m", 0, id="only_ansi_codes"),
+        pytest.param("",                     0, id="empty_string"),
+        pytest.param("\033[1m\033[0m",       0, id="only_ansi_codes"),
     ],
 )
+# fmt: on
 def test_visual_len(s: str, expected: int) -> None:
     assert _visual_len(s) == expected
 

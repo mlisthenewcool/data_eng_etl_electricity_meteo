@@ -97,13 +97,13 @@ class TestDatasetDiscriminator:
     """
 
     def test_dict_with_url_in_source_is_remote(self) -> None:
-        v: dict[str, dict[str, str]] = {
+        v: dict[str, object] = {
             "source": {"url": "https://example.com/data.parquet", "provider": "RTE"}
         }
         assert _dataset_discriminator(v) == "remote"
 
     def test_dict_without_url_is_gold(self) -> None:
-        v = {"source": {"depends_on": ["other"]}}
+        v: dict[str, object] = {"source": {"depends_on": ["other"]}}
         assert _dataset_discriminator(v) == "derived"
 
 

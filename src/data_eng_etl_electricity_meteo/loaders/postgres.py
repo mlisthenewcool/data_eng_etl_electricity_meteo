@@ -60,7 +60,11 @@ from data_eng_etl_electricity_meteo.core.data_catalog import (
     IngestionMode,
     RemoteDatasetConfig,
 )
-from data_eng_etl_electricity_meteo.core.exceptions import PostgresLoadError
+from data_eng_etl_electricity_meteo.core.exceptions import (
+    PostgresCredentialsError,
+    PostgresLoadError,
+    SchemaValidationError,
+)
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
@@ -138,8 +142,8 @@ def load_silver_to_postgres(
     # Validate incremental pre-condition before touching the database.
     if mode == IngestionMode.INCREMENTAL and upsert_sql is None:
         raise PostgresLoadError() from ValueError(
-            f"Dataset '{dataset_config.name}' is incremental but its SQL file "
-            f"has no upsert section (missing '{_UPSERT_MARKER}' marker)."
+            f"Missing '{_UPSERT_MARKER}' section in SQL file for incremental dataset "
+            f"'{dataset_config.name}'"
         )
 
     try:
@@ -150,16 +154,19 @@ def load_silver_to_postgres(
             if mode == IngestionMode.SNAPSHOT:
                 rows = _load_snapshot(cur, df, table)
             else:
-                rows = _load_incremental(cur, df, dataset_config.name, table, upsert_sql)  # type: ignore[arg-type]
+                assert upsert_sql is not None  # validated above: INCREMENTAL requires upsert
+                rows = _load_incremental(cur, df, dataset_config.name, table, upsert_sql)
 
         conn.commit()
-    except (psycopg.Error, ValueError) as err:
+    except SchemaValidationError as err:
+        raise PostgresLoadError() from err
+    except psycopg.Error as err:
         raise PostgresLoadError() from err
 
     metrics = LoadPostgresMetrics(
         dataset_name=dataset_config.name,
         table=table,
-        strategy=str(mode),
+        strategy=mode,
         rows_loaded=rows,
     )
 
@@ -167,7 +174,7 @@ def load_silver_to_postgres(
         "Postgres load completed",
         dataset=dataset_config.name,
         table=table,
-        strategy=str(mode),
+        strategy=mode,
         rows_loaded=rows,
     )
 
@@ -189,20 +196,24 @@ def open_standalone_connection() -> psycopg.Connection[Any]:
 
     Raises
     ------
-    OSError
+    PostgresCredentialsError
         If credentials are missing from both env vars and Docker secrets.
     psycopg.OperationalError
         If the connection cannot be established.
     """
     if settings.postgres_user is None:
-        raise OSError(
-            "Postgres user not configured. "
-            "Set POSTGRES_USER env var or provide a 'postgres_root_username' Docker secret."
+        raise PostgresCredentialsError(
+            missing_field="postgres_user",
+            suggestion=(
+                "Set POSTGRES_USER env var or provide a 'postgres_root_username' Docker secret."
+            ),
         )
     if settings.postgres_password is None:
-        raise OSError(
-            "Postgres password not configured. "
-            "Set POSTGRES_PASSWORD env var or provide a 'postgres_root_password' Docker secret."
+        raise PostgresCredentialsError(
+            missing_field="postgres_password",
+            suggestion=(
+                "Set POSTGRES_PASSWORD env var or provide a 'postgres_root_password' Docker secret."
+            ),
         )
 
     return psycopg.connect(
@@ -326,7 +337,7 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) ->
 
     Raises
     ------
-    ValueError
+    SchemaValidationError
         If there is any column mismatch between the DataFrame and the
         Postgres table, with the full sorted diff included in the message.
     """
@@ -338,15 +349,11 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) ->
     extra = df_cols - pg_cols  # in Parquet, absent from PG → COPY would fail
     missing = pg_cols - df_cols  # in PG, absent from Parquet → COPY inserts NULL/DEFAULT
 
-    problems = []
-    if extra:
-        problems.append(f"Parquet has extra columns not in PG: {sorted(extra)}")
-    if missing:
-        problems.append(f"PG table has columns absent from Parquet: {sorted(missing)}")
-    if problems:
-        raise ValueError(
-            f"Schema mismatch for '{table}': {'. '.join(problems)}. "
-            "Update the Silver transformation or the SQL schema."
+    if extra or missing:
+        raise SchemaValidationError(
+            table=table,
+            extra_columns=sorted(extra),
+            missing_columns=sorted(missing),
         )
 
 
@@ -527,8 +534,8 @@ def _load_incremental(
 
     cur.execute(cast("LiteralString", upsert_sql))
 
-    # rowcount reflects rows affected by INSERT ON CONFLICT (inserted + updated)
-    rows = cur.rowcount if cur.rowcount >= 0 else len(df)
+    # rowcount is always >= 0 after execute() on a DML statement in psycopg3
+    rows = cur.rowcount
 
     cur.execute(psql.SQL("DROP TABLE IF EXISTS {staging}").format(staging=staging_id))
 

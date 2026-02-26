@@ -9,6 +9,11 @@ from data_eng_etl_electricity_meteo.core.logger import get_logger
 logger = get_logger("transform.odre_eco2mix_cons_def")
 
 
+# ---------------------------------------------------------------------------
+# Bronze transformation
+# ---------------------------------------------------------------------------
+
+
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for ODRE eco2mix_cons_def.
 
@@ -33,6 +38,11 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """
     logger.debug("Apply bronze transformations", landing_path=landing_path)
     return pl.read_parquet(landing_path)
+
+
+# ---------------------------------------------------------------------------
+# Silver transformation
+# ---------------------------------------------------------------------------
 
 
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:

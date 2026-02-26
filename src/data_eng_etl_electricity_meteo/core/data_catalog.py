@@ -120,8 +120,10 @@ class IngestionFrequency(StrEnum):
         Returns
         -------
         str
-            Hourly: ``%Y%m%dT%H%M%S`` / ``%Y-%m-%d-T-%H-%M-%S``.
-            Others: ``%Y%m%d`` / ``%Y-%m-%d``.
+            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+)
+            or ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
+            ``no_dash=True``: ``%Y%m%d`` (daily+)
+            or ``%Y%m%dT%H%M%S`` (hourly).
         """
         if self == IngestionFrequency.HOURLY:
             return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
@@ -182,6 +184,10 @@ class RemoteSourceConfig(StrictModel):
 
 class GoldSourceConfig(StrictModel):
     """Source configuration for Gold datasets.
+
+    ``depends_on`` is the single source of truth for Gold dependencies.
+    The future dbt ``sources.yml`` will be generated from the catalog,
+    not maintained separately.
 
     Attributes
     ----------
@@ -271,14 +277,13 @@ class GoldDatasetConfig(StrictModel):
     source: GoldSourceConfig
 
 
-def _dataset_discriminator(v: Any) -> str:
+def _dataset_discriminator(
+    v: dict[str, object] | RemoteDatasetConfig | GoldDatasetConfig,
+) -> str:
     """Discriminate between remote and gold datasets.
 
     Handles both raw ``dict`` (deserialization) and model instances
     (serialization), as required by Pydantic.
-
-    ``v`` is typed ``Any`` because Pydantic's ``Discriminator`` callable
-    receives the raw input before validation — any type is possible.
     """
     if isinstance(v, dict):
         source = v.get("source", {})

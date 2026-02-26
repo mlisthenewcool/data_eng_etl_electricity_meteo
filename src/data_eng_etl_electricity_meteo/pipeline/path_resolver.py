@@ -41,18 +41,18 @@ class _BasePathResolver:
 class RemotePathResolver(_BasePathResolver):
     """Path construction for remote datasets: landing → bronze → silver."""
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Landing Layer (Temporary)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
         return self.base_dir / "landing" / self.dataset_name
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Bronze Layer (Versioned History)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def _bronze_dir(self) -> Path:
@@ -118,9 +118,9 @@ class RemotePathResolver(_BasePathResolver):
 
         return sorted(versions, key=lambda p: p.name, reverse=True)
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Silver Layer (Current + Backup)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def _silver_dir(self) -> Path:

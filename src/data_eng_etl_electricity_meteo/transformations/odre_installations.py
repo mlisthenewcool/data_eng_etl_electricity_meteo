@@ -9,7 +9,12 @@ from data_eng_etl_electricity_meteo.transformations.shared import to_snake_case
 
 logger = get_logger("transform.odre_installations")
 
-# TODO: colonne id_peps nulle pour les installations aggrégées
+
+# ---------------------------------------------------------------------------
+# Domain constants
+# ---------------------------------------------------------------------------
+
+# TODO: id_peps column is null for aggregated installations
 # TODO: df.with_columns(pl.coalesce(["id_peps"], pl.concat_str([...], separator="_")))
 
 # Renewable energy filieres
@@ -28,6 +33,11 @@ TYPE_ENERGIE_MAPPING = {
     "STOCK": "stockage",
     "AUTRE": "autre",
 }
+
+
+# ---------------------------------------------------------------------------
+# Bronze transformation
+# ---------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
@@ -54,6 +64,11 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """
     logger.debug("Reading parquet from landing", landing_path=landing_path)
     return pl.read_parquet(landing_path)
+
+
+# ---------------------------------------------------------------------------
+# Silver transformation
+# ---------------------------------------------------------------------------
 
 
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
