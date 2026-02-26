@@ -1,10 +1,22 @@
 """Centralized application settings (Pydantic). Override via environment variables."""
 
+import os
+import sys
 from enum import StrEnum
+from functools import cached_property
 from pathlib import Path
-from typing import ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import AliasChoices, DirectoryPath, Field, SecretStr, computed_field, model_validator
+from pydantic import (
+    AliasChoices,
+    BeforeValidator,
+    DirectoryPath,
+    Field,
+    SecretStr,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -14,42 +26,67 @@ from pydantic_settings import (
 
 
 class LogLevel(StrEnum):
-    """Standard logging levels."""
+    """Standard logging levels (lowercase to match structlog's naming convention)."""
 
-    DEBUG = "DEBUG"
-    INFO = "INFO"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
-    CRITICAL = "CRITICAL"
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
 
 
 class Settings(BaseSettings):
     """Immutable application settings loaded from env vars and Docker secrets.
 
-    Credential resolution (``postgres_user`` / ``postgres_password``) follows
-    pydantic-settings' standard source priority chain:
+    Frozen (immutable) after instantiation. All computed fields are cached on
+    first access via ``@cached_property``.
 
-    1. Environment variables (``POSTGRES_USER`` / ``POSTGRES_PASSWORD``).
-    2. Docker secrets files in ``_SECRETS_DIR``
-       (``postgres_root_username`` / ``postgres_root_password``).
+    Source priority chain (highest to lowest):
 
-    This means the loader always reads ``settings.postgres_user`` and
-    ``settings.postgres_password`` uniformly, regardless of environment.
+    1. Values passed at instantiation (useful for tests).
+    2. Environment variables.
+    3. ``.env`` file (``_ROOT_DIR / ".env"``).
+    4. Docker secrets files in ``_SECRETS_DIR``.
+
+    Notes
+    -----
+    Credential resolution (``postgres_user`` / ``postgres_password``) uses
+    ``AliasChoices`` so both env-var names and Docker secret filenames are
+    accepted transparently.
+
+    Computed path fields typed as ``DirectoryPath`` (``data_dir_path``,
+    ``postgres_dir_path``) validate that the target directory exists at
+    instantiation time. Instantiation will fail if those directories are absent.
     """
+
+    # Project root resolved at class-definition time (before Pydantic
+    # processes Field() defaults). Used by _SECRETS_DIR and model_config.
+    _ROOT_DIR: ClassVar[Path] = Path(__file__).resolve().parents[3]
 
     # Secrets directory resolved at class-definition time:
     # - Docker : /run/secrets  (Docker secrets mount)
-    # - Local  : {project_root}/secrets/  (local copies without .txt extension)
+    # - Local  : {project_root}/secrets/
     _SECRETS_DIR: ClassVar[Path] = (
-        Path("/run/secrets")
-        if Path("/run/secrets").exists()
-        else Path(__file__).resolve().parents[3] / "secrets"
+        Path("/run/secrets") if Path("/run/secrets").exists() else _ROOT_DIR / "secrets"
+    )
+
+    # =========================================================================
+    # Pydantic Config + source chain
+    # =========================================================================
+    model_config = SettingsConfigDict(
+        env_file=_ROOT_DIR / ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,  # env vars are defined in capitals
+        extra="ignore",  # 'forbid' crashes because of PYTHONPATH
+        frozen=True,  # Immutable settings
     )
 
     # =========================================================================
     # General config
     # =========================================================================
-    logging_level: LogLevel = Field(default=LogLevel.INFO, description="The logger verbosity level")
+    logging_level: Annotated[
+        LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
+    ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
 
     # =========================================================================
     # Data config
@@ -62,11 +99,11 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # PostgreSQL connection
+    # Postgres connection
     # =========================================================================
-    postgres_host: str = Field(default="localhost", description="PostgreSQL host")
-    postgres_port: int = Field(default=5432, description="PostgreSQL port", gt=0, le=65535)
-    project_db_name: str = Field(default="project", description="Project database name")
+    postgres_host: str = Field(default="localhost", description="Postgres host")
+    postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)
+    postgres_db_name: str = Field(default="default_db_name", description="Postgres database name")
 
     # AliasChoices accepts both the env-var name and the Docker secrets filename.
     # Local dev : set POSTGRES_USER / POSTGRES_PASSWORD env vars.
@@ -74,57 +111,57 @@ class Settings(BaseSettings):
     postgres_user: str | None = Field(
         default=None,
         validation_alias=AliasChoices("postgres_user", "postgres_root_username"),
-        description="PostgreSQL user.",
+        description="Postgres user",
     )
     postgres_password: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("postgres_password", "postgres_root_password"),
-        description="PostgreSQL password.",
+        description="Postgres password",
     )
 
     # =========================================================================
     # Airflow config
     # =========================================================================
-    airflow_home: Path = Field(
-        default=Path("/opt/airflow"),
-        # validation_alias="AIRFLOW_HOME",  # the variable doesn't have the ENV prefix
-        description="The Airflow home directory. Uses standard AIRFLOW_HOME env var",
-    )
-
     @computed_field
-    @property
+    @cached_property
     def is_running_on_airflow(self) -> bool:
-        """Check if running inside Airflow by detecting airflow.cfg in AIRFLOW_HOME."""
-        # TODO: est-ce aussi valable en mode 'worker' ou 'scheduler' ?
-        #   remplacer par les env vars AIRFLOW_CONFIG ou AIRFLOW_HOME par exemple
-        return (self.airflow_home / "airflow.cfg").exists()
+        """Detect Airflow by checking the ``AIRFLOW_HOME`` environment variable.
+
+        ``AIRFLOW_HOME`` is always set by Airflow in every context (standalone,
+        scheduler, worker, task subprocess).
+        """
+        return "AIRFLOW_HOME" in os.environ
 
     # =========================================================================
-    # Paths (computed from root_dir, not configurable via env)
+    # Paths (derived from _ROOT_DIR, not configurable via env)
+    # NOTE: DirectoryPath (Pydantic) validates that the directory exists at
+    # access time. Use plain Path for directories that may not exist yet.
     # =========================================================================
-    root_dir: Path = Field(
-        default=Path(__file__).resolve().parents[3],
-        description="Project root directory (computed, not configurable)",
-        exclude=True,  # Don't expose in env vars
-    )
 
     @computed_field
-    @property
+    @cached_property
     def data_dir_path(self) -> DirectoryPath:
         """Data directory (computed from root_dir)."""
-        return self.root_dir / "data"
+        return self._ROOT_DIR / "data"
 
     @computed_field
-    @property
+    @cached_property
     def data_catalog_file_path(self) -> Path:
         """Path to data catalog YAML file."""
         return self.data_dir_path / "catalog.yaml"
 
+    # TODO: Re-enable once the state directory is created as part of project setup.
+    # @computed_field
+    # @cached_property
+    # def data_state_dir_path(self) -> DirectoryPath:
+    #     """Path to pipeline state directory."""
+    #     return self.data_dir_path / "_state"
+
     @computed_field
-    @property
-    def data_state_dir_path(self) -> DirectoryPath:
-        """Path to pipeline state directory."""
-        return self.data_dir_path / "_state"
+    @cached_property
+    def postgres_dir_path(self) -> DirectoryPath:
+        """Path to Postgres' queries and configuration directory."""
+        return self._ROOT_DIR / "postgres"
 
     # =========================================================================
     # Download Settings
@@ -183,18 +220,6 @@ class Settings(BaseSettings):
         le=1024 * 1024,  # Max 1 MB
     )
 
-    # =========================================================================
-    # Pydantic Config + source chain
-    # =========================================================================
-    model_config = SettingsConfigDict(
-        # env_prefix="ENV_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,  # env vars are defined in capitals
-        extra="ignore",  # 'forbid' crashes because of PYTHONPATH
-        frozen=True,  # Immutable settings
-    )
-
     @classmethod
     def settings_customise_sources(
         cls,
@@ -226,5 +251,23 @@ class Settings(BaseSettings):
         )
 
 
-# Singleton instance
-settings = Settings()
+def _load_settings() -> Settings:
+    """Instantiate settings, aborting with a clear message on validation error.
+
+    Uses ``print(stderr)`` instead of structlog because the project logger
+    depends on ``settings.logging_level`` (circular), and calling
+    ``structlog.configure()`` here would overwrite Airflow's own config.
+    """
+    try:
+        return Settings()
+    except ValidationError as exc:
+        print("FATAL — Invalid settings (Pydantic validation errors)", file=sys.stderr)
+        for error in exc.errors():
+            field = error["loc"][-1]
+            msg = error["msg"]
+            value = error.get("input")
+            print(f"\t* {field}={value!r} — {msg}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+settings = _load_settings()

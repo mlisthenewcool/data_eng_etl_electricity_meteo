@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Protocol
 
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer, PipelineStage
+from data_eng_etl_electricity_meteo.core.enums import MedallionLayer, PipelineStage
 
 
 class _LogMethod(Protocol):
@@ -42,6 +42,8 @@ class BaseProjectException(Exception):
 # ---------------------------------------------------------------------------
 # Archive errors
 # ---------------------------------------------------------------------------
+
+
 class ExtractionError(BaseProjectException):
     """Base exception for archive extraction failures."""
 
@@ -75,6 +77,8 @@ class FileIntegrityError(BaseProjectException):
 # ---------------------------------------------------------------------------
 # Data catalog errors
 # ---------------------------------------------------------------------------
+
+
 class DataCatalogError(BaseProjectException):
     """Base exception for data catalog related failures."""
 
@@ -100,9 +104,21 @@ class DatasetNotFoundError(DataCatalogError):
         super().__init__("Dataset does not exist in data catalog.")
 
 
+class DatasetTypeError(DataCatalogError):
+    """Raised when a dataset exists but has an unexpected type."""
+
+    def __init__(self, name: str, expected: str, actual: str) -> None:
+        self.name = name
+        self.expected = expected
+        self.actual = actual
+        super().__init__("Dataset has unexpected type.")
+
+
 # ---------------------------------------------------------------------------
 # Airflow context errors
 # ---------------------------------------------------------------------------
+
+
 class AirflowContextError(BaseProjectException):
     """Raised when an operation requires a specific Airflow context."""
 
@@ -114,12 +130,15 @@ class AirflowContextError(BaseProjectException):
     ) -> None:
         self.operation = operation
         self.expected_context = expected_context
-        super().__init__(f"Invalid Airflow context: {suggestion}.")
+        self.suggestion = suggestion
+        super().__init__("Invalid Airflow context.")
 
 
 # ---------------------------------------------------------------------------
 # Transformation errors
 # ---------------------------------------------------------------------------
+
+
 class TransformNotFoundError(BaseProjectException):
     """Raised when no transformation is registered for a dataset/layer pair."""
 
@@ -141,12 +160,14 @@ class TransformValidationError(BaseProjectException):
 # ---------------------------------------------------------------------------
 # Pipeline stage errors
 # ---------------------------------------------------------------------------
+
+
 class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
     def __init__(self, stage: PipelineStage) -> None:
         self.stage = stage
-        super().__init__(f"Pipeline failed at {stage} stage.")
+        super().__init__("Pipeline stage failed.")
 
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes.
@@ -207,15 +228,24 @@ class SilverStageError(PipelineStageError):
 
 
 class PostgresLoadError(PipelineStageError):
-    """Raised when loading silver Parquet into PostgreSQL fails."""
+    """Raised when loading silver Parquet into Postgres fails."""
 
     def __init__(self) -> None:
         super().__init__(PipelineStage.LOAD_POSTGRES)
 
 
+class GoldStageError(PipelineStageError):
+    """Raised when the gold aggregation stage fails."""
+
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.GOLD)
+
+
 # ---------------------------------------------------------------------------
 # Visual smoke test
 # ---------------------------------------------------------------------------
+
+
 if __name__ == "__main__":
     import sys
 

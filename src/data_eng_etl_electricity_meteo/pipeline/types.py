@@ -27,15 +27,15 @@ from data_eng_etl_electricity_meteo.utils.remote_metadata import RemoteFileMetad
 
 logger = get_logger("pipeline")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Stage-specific metrics
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class ExtractionInfo(StrictModel):
     """Archive extraction details for pipeline traceability.
 
-    Created by ``RemoteDatasetPipeline.extract_archive`` from the
+    Created by ``RemoteIngestionPipeline.extract_archive`` from the
     ``ExtractedFileInfo`` returned by ``extract_7z`` plus archive context.
 
     Attributes
@@ -102,16 +102,37 @@ class SilverMetrics(StrictModel):
 
 
 class GoldMetrics(StrictModel):
-    """Metrics produced by the gold aggregation stage (derived datasets)."""
+    """Metrics produced by the gold aggregation stage."""
 
     file_size_mib: float
     row_count: int
     columns: list[str]
 
 
-# =============================================================================
+class LoadPostgresMetrics(StrictModel):
+    """Metrics produced by a silver → Postgres load operation.
+
+    Attributes
+    ----------
+    dataset_name:
+        Dataset identifier.
+    table:
+        Schema-qualified table name (e.g. ``silver.odre_installations``).
+    strategy:
+        Loading strategy used: ``"snapshot"`` or ``"incremental"``.
+    rows_loaded:
+        Number of rows written (for incremental: rows inserted + updated).
+    """
+
+    dataset_name: str
+    table: str
+    strategy: str
+    rows_loaded: int
+
+
+# ---------------------------------------------------------------------------
 # Ingestion decision
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class IngestionDecision(StrictModel):
@@ -133,9 +154,9 @@ class IngestionDecision(StrictModel):
     remote_metadata: RemoteFileMetadata
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Pipeline context (accumulates across stages via XCom)
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class PipelineContext(StrictModel):
@@ -163,9 +184,9 @@ class PipelineContext(StrictModel):
     silver: SilverMetrics | None = None
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Pipeline run snapshot (nested view for observability / metadata store)
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class DownloadSnapshot(StrictModel):

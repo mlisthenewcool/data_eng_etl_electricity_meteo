@@ -1,6 +1,6 @@
 """Airflow-aware progress reporters for download and extraction stages.
 
-Used by ``RemoteDatasetPipeline`` to inject structured log progress into
+Used by ``RemoteIngestionPipeline`` to inject structured log progress into
 Airflow task logs instead of tqdm bars.
 
 Pass these classes (not instances) as the ``progress`` factory argument of

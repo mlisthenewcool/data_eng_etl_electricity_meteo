@@ -1,0 +1,27 @@
+datasets:
+  electricity_mix:
+    description: "Electricity production data from RTE"
+    source:
+      provider: "RTE"
+      url: "https://example.com/electricity.parquet"
+      format: "parquet"
+    ingestion:
+      frequency: "daily"
+      mode: "snapshot"
+
+  french_communes:
+    description: "French communes geographic data from IGN"
+    source:
+      provider: "IGN"
+      url: "https://example.com/communes.7z"
+      format: "7z"
+      inner_file: "communes.gpkg"
+    ingestion:
+      frequency: "yearly"
+      mode: "snapshot"
+
+  energy_weather:
+    description: "Combined energy and weather gold dataset"
+    source:
+      depends_on:
+        - electricity_mix

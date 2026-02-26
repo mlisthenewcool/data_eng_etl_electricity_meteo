@@ -1,6 +1,6 @@
-r"""PostgreSQL silver-layer loader.
+r"""Postgres silver-layer loader.
 
-Loads silver ``.parquet`` files into the PostgreSQL ``silver`` schema.
+Loads silver ``.parquet`` files into the Postgres ``silver`` schema.
 
 Loading strategies (read from the data catalog's ``ingestion.mode``):
 
@@ -10,18 +10,18 @@ Loading strategies (read from the data catalog's ``ingestion.mode``):
 
 COPY strategy
 -------------
-Data is sent to PostgreSQL via ``COPY … FROM STDIN (FORMAT CSV)`` using
+Data is sent to Postgres via ``COPY … FROM STDIN (FORMAT CSV)`` using
 polars' Rust CSV writer — no Python row loop. The full DataFrame is serialised
 to a ``BytesIO`` buffer by ``_prepare_for_copy`` + ``write_csv``, then streamed
 to psycopg in ``_COPY_BUFFER_SIZE``-byte chunks.
 
-Two column types require pre-processing before ``write_csv`` because PostgreSQL
+Two column types require pre-processing before ``write_csv`` because Postgres
 COPY CSV expects a specific text representation that differs from Polars'
 default CSV output:
 
 - ``pl.Binary`` → BYTEA hex notation: ``\xdeadbeef`` (vectorized via
   ``bin.encode("hex")`` + ``pl.concat_str``).
-- ``pl.List(*)`` → PostgreSQL array literal: ``{elem1,elem2}`` (vectorized via
+- ``pl.List(*)`` → Postgres array literal: ``{elem1,elem2}`` (vectorized via
   ``list.join(",")`` wrapped in curly braces). Assumes element values contain
   no commas or double-quotes — true for the parameter-name arrays in this
   project.
@@ -30,11 +30,11 @@ Two loading functions cover the two usage modes:
 
 - **Standalone** (scripts, tests): ``open_standalone_connection()`` opens a
   psycopg (v3) connection from ``settings`` (env vars) and Docker secrets.
-  Pass it to ``load_to_silver()``.
-- **Airflow**: ``load_to_silver_from_hook()`` wraps an Airflow
+  Pass it to ``load_silver_to_postgres()``.
+- **Airflow**: ``load_silver_to_postgres_from_hook()`` wraps an Airflow
   ``PostgresHook``; since ``USE_PSYCOPG3=True`` when psycopg3 + SQLAlchemy
   2.x are installed, ``hook.get_conn()`` returns a psycopg3 connection and
-  delegates directly to ``load_to_silver()`` — single code path.
+  delegates directly to ``load_silver_to_postgres()`` — single code path.
 
 SQL files
 ---------
@@ -62,9 +62,9 @@ from data_eng_etl_electricity_meteo.core.data_catalog import (
 )
 from data_eng_etl_electricity_meteo.core.exceptions import PostgresLoadError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
+from data_eng_etl_electricity_meteo.pipeline.types import LoadPostgresMetrics
 
 logger = get_logger("loaders.postgres")
 
@@ -73,41 +73,15 @@ _UPSERT_MARKER = "-- BEGIN UPSERT"
 _COPY_BUFFER_SIZE = 65_536  # bytes per write() call — 64 KB I/O chunks to psycopg
 
 
-# =============================================================================
-# Metrics
-# =============================================================================
-
-
-class PostgresLoadMetrics(StrictModel):
-    """Metrics produced by a silver → PostgreSQL load operation.
-
-    Attributes
-    ----------
-    dataset_name:
-        Dataset identifier.
-    table:
-        Schema-qualified table name (e.g. ``silver.odre_installations``).
-    strategy:
-        Loading strategy used: ``"snapshot"`` or ``"incremental"``.
-    rows_loaded:
-        Number of rows written (for incremental: rows inserted + updated).
-    """
-
-    dataset_name: str
-    table: str
-    strategy: str
-    rows_loaded: int
-
-
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Public API
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
-def load_to_silver(
+def load_silver_to_postgres(
     dataset_config: RemoteDatasetConfig, conn: psycopg.Connection[Any]
-) -> PostgresLoadMetrics:
-    """Load a silver ``.parquet`` file into the PostgreSQL silver schema.
+) -> LoadPostgresMetrics:
+    """Load a silver ``.parquet`` file into the Postgres silver schema.
 
     Reads ``ingestion.mode`` from the data catalog to select the strategy:
 
@@ -126,11 +100,11 @@ def load_to_silver(
         must match a catalog key and a ``postgres/sql/`` file.
     conn:
         Open psycopg connection. Use ``open_standalone_connection()`` or
-        ``load_to_silver_from_hook()`` to create one.
+        ``load_silver_to_postgres_from_hook()`` to create one.
 
     Returns
     -------
-    PostgresLoadMetrics
+    LoadPostgresMetrics
         Load result: table, strategy, row count.
 
     Raises
@@ -144,7 +118,7 @@ def load_to_silver(
     table = f"{_SILVER_SCHEMA}.{dataset_config.name}"
 
     logger.info(
-        "Starting PostgreSQL load",
+        "Starting Postgres load",
         dataset=dataset_config.name,
         table=table,
         strategy=mode,
@@ -182,7 +156,7 @@ def load_to_silver(
     except (psycopg.Error, ValueError) as err:
         raise PostgresLoadError() from err
 
-    metrics = PostgresLoadMetrics(
+    metrics = LoadPostgresMetrics(
         dataset_name=dataset_config.name,
         table=table,
         strategy=str(mode),
@@ -190,7 +164,7 @@ def load_to_silver(
     )
 
     logger.info(
-        "PostgreSQL load completed",
+        "Postgres load completed",
         dataset=dataset_config.name,
         table=table,
         strategy=str(mode),
@@ -222,33 +196,33 @@ def open_standalone_connection() -> psycopg.Connection[Any]:
     """
     if settings.postgres_user is None:
         raise OSError(
-            "PostgreSQL user not configured. "
+            "Postgres user not configured. "
             "Set POSTGRES_USER env var or provide a 'postgres_root_username' Docker secret."
         )
     if settings.postgres_password is None:
         raise OSError(
-            "PostgreSQL password not configured. "
+            "Postgres password not configured. "
             "Set POSTGRES_PASSWORD env var or provide a 'postgres_root_password' Docker secret."
         )
 
     return psycopg.connect(
         host=settings.postgres_host,
         port=settings.postgres_port,
-        dbname=settings.project_db_name,
+        dbname=settings.postgres_db_name,
         user=settings.postgres_user,
         password=settings.postgres_password.get_secret_value(),
     )
 
 
-def load_to_silver_from_hook(
+def load_silver_to_postgres_from_hook(
     dataset_config: RemoteDatasetConfig, hook: "PostgresHook"
-) -> PostgresLoadMetrics:
-    """Load a silver ``.parquet`` into PostgreSQL via an Airflow ``PostgresHook``.
+) -> LoadPostgresMetrics:
+    """Load a silver ``.parquet`` into Postgres via an Airflow ``PostgresHook``.
 
     ``PostgresHook.get_conn()`` returns a psycopg3 connection when
     ``USE_PSYCOPG3`` is ``True`` — which is guaranteed when psycopg3 and
     SQLAlchemy 2.x are both installed (always the case in this project).
-    The connection is passed directly to ``load_to_silver``, keeping a single
+    The connection is passed directly to ``load_silver_to_postgres``, keeping a single
     code path for all environments.
 
     Parameters
@@ -260,32 +234,33 @@ def load_to_silver_from_hook(
 
     Returns
     -------
-    PostgresLoadMetrics
+    LoadPostgresMetrics
         Load result: table, strategy, row count.
 
     Raises
     ------
     PostgresLoadError
-        On any load failure (propagated from ``load_to_silver``).
+        On any load failure (propagated from ``load_silver_to_postgres``).
     """
     # USE_PSYCOPG3=True → get_conn() returns a psycopg3 connection wrapped in
     # CompatConnection (Airflow's psycopg2/3 abstraction). Cast to the concrete
-    # type so load_to_silver's signature stays free of Airflow types.
-    # Do NOT use the connection as a context manager here: load_to_silver()
+    # type so load_silver_to_postgres's signature stays free of Airflow types.
+    # Do NOT use the connection as a context manager here: load_silver_to_postgres()
     # commits the transaction itself, so a second commit via __exit__ is
     # redundant. We close the connection explicitly in the finally block.
     conn = hook.get_conn()
     try:
-        return load_to_silver(
-            dataset_config=dataset_config, conn=cast("psycopg.Connection[Any]", conn)
+        return load_silver_to_postgres(
+            dataset_config=dataset_config,
+            conn=cast("psycopg.Connection[Any]", cast("object", conn)),
         )
     finally:
         conn.close()
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Internal helpers
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 def _parse_sql_file(dataset_name: str) -> tuple[str, str | None]:
@@ -310,7 +285,7 @@ def _parse_sql_file(dataset_name: str) -> tuple[str, str | None]:
     FileNotFoundError
         If the SQL file does not exist.
     """
-    sql_file = settings.root_dir / "postgres" / "sql" / f"{dataset_name}.sql"
+    sql_file = settings.postgres_dir_path / "sql" / f"{dataset_name}.sql"
     if not sql_file.exists():
         raise FileNotFoundError(f"SQL file not found for dataset '{dataset_name}': {sql_file}")
 
@@ -324,7 +299,7 @@ def _parse_sql_file(dataset_name: str) -> tuple[str, str | None]:
 
 
 def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) -> None:
-    r"""Compare DataFrame columns against the live PostgreSQL table schema.
+    r"""Compare DataFrame columns against the live Postgres table schema.
 
     Runs after the DDL (``CREATE TABLE IF NOT EXISTS``) so the table is
     guaranteed to exist. Uses ``SELECT * LIMIT 0`` — a no-data query that
@@ -334,7 +309,7 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) ->
 
     - **Extra columns in Parquet** (absent from PG table): raised as
       ``ValueError`` — the COPY would fail anyway, but with a cryptic
-      PostgreSQL message. The explicit diff makes the schema drift actionable.
+      Postgres message. The explicit diff makes the schema drift actionable.
     - **Missing columns in Parquet** (present in PG, absent from Parquet):
       raised as ``ValueError`` — COPY would silently insert ``NULL`` or the
       column ``DEFAULT``, masking a schema drift between the Silver
@@ -353,7 +328,7 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) ->
     ------
     ValueError
         If there is any column mismatch between the DataFrame and the
-        PostgreSQL table, with the full sorted diff included in the message.
+        Postgres table, with the full sorted diff included in the message.
     """
     table_id = psql.Identifier(*table.split(".", 1))
     cur.execute(psql.SQL("SELECT * FROM {table} LIMIT 0").format(table=table_id))
@@ -376,12 +351,12 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, table: str) ->
 
 
 def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
-    r"""Pre-process columns that PostgreSQL COPY CSV cannot receive verbatim.
+    r"""Pre-process columns that Postgres COPY CSV cannot receive verbatim.
 
     Applies two vectorized transformations (no Python loop):
 
     - ``pl.Binary``  → BYTEA hex notation ``\xdeadbeef``.
-    - ``pl.List(*)`` → PostgreSQL array literal ``{elem1,elem2}``.
+    - ``pl.List(*)`` → Postgres array literal ``{elem1,elem2}``.
       Null lists are preserved as CSV null (empty field → PG ``NULL``).
 
     All other types are left untouched; ``write_csv`` handles them correctly

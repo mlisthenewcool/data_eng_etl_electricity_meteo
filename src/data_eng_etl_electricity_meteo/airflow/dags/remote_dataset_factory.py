@@ -11,26 +11,25 @@ from typing import TYPE_CHECKING, Any
 
 from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, task
 
-from data_eng_etl_electricity_meteo.airflow.assets import get_asset
+from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
 from data_eng_etl_electricity_meteo.core.exceptions import (
     InvalidCatalogError,
     TransformNotFoundError,
 )
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.remote_dataset_manager import RemoteDatasetPipeline
-from data_eng_etl_electricity_meteo.pipeline.stage_types import PipelineContext, PipelineRunSnapshot
+from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
+from data_eng_etl_electricity_meteo.pipeline.types import PipelineContext, PipelineRunSnapshot
 
 if TYPE_CHECKING:
     from airflow.sdk.execution_time.context import InletEventsAccessors
 
 factory_logger = get_logger("dag_factory")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Production defaults - TODO, move to settings
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 DEFAULT_ARGS: dict[str, Any] = {
     "owner": "data-engineering",
@@ -57,7 +56,7 @@ TASK_BRONZE_TIMEOUT = timedelta(minutes=3)
 TASK_SILVER_TIMEOUT = timedelta(minutes=10)
 
 
-def _create_dag(manager: RemoteDatasetPipeline, asset: Asset) -> DAG:
+def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
     """Create a production-ready DAG for a dataset.
 
     Parameters
@@ -210,8 +209,8 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_remote_datasets():
         try:
-            asset = get_asset(dataset.name, MedallionLayer.SILVER)
-            manager = RemoteDatasetPipeline(dataset=dataset)
+            asset = get_silver_file_asset(dataset.name)
+            manager = RemoteIngestionPipeline(dataset=dataset)
             pipelines[dataset.name] = _create_dag(manager, asset)
             factory_logger.info("Created dataset DAG", dag_id=f"ingest_{dataset.name}")
         # TODO: catch les exceptions au bon endroit

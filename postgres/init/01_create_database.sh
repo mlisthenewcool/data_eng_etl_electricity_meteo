@@ -9,12 +9,12 @@ set -euo pipefail
 export PGUSER="${POSTGRES_USER}"
 export PGDATABASE="${POSTGRES_DB}"  # connect to airflow DB to inspect pg_database catalog
 
-DB_EXISTS=$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = '${PROJECT_DB_NAME}'")
+DB_EXISTS=$(psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = '${POSTGRES_DB_NAME}'")
 
 if [ "${DB_EXISTS}" != "1" ]; then
-    echo "Creating database '${PROJECT_DB_NAME}' ..."
-    psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${PROJECT_DB_NAME}\";"
-    echo "Database '${PROJECT_DB_NAME}' created."
+    echo "Creating database '${POSTGRES_DB_NAME}' ..."
+    psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${POSTGRES_DB_NAME}\";"
+    echo "Database '${POSTGRES_DB_NAME}' created."
 else
-    echo "Database '${PROJECT_DB_NAME}' already exists. Skipping."
+    echo "Database '${POSTGRES_DB_NAME}' already exists. Skipping."
 fi

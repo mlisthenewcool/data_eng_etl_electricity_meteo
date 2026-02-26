@@ -1,12 +1,12 @@
 # --- Notes
-# PostgreSQL 17 is the latest supported version by Airflow.
+# Postgres 17 is the latest supported version by Airflow.
 
 services:
   postgres_service:
     container_name: postgres_container
     image: postgres:17
     restart: always
-    shm_size: 256mb # Shared memory increase for heavy PostgreSQL operations
+    shm_size: 256mb # Shared memory increase for heavy Postgres operations
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
     volumes:
@@ -16,7 +16,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_root_password
       POSTGRES_USER_FILE: /run/secrets/postgres_root_username
       POSTGRES_DB: "${AIRFLOW_DB_NAME}"
-      PROJECT_DB_NAME: "${PROJECT_DB_NAME}" # used by custom init script (postgres/init/...)
+      POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}" # used by custom init script (postgres/init/...)
     healthcheck:
       # Check both databases are ready
       test:
@@ -24,7 +24,7 @@ services:
         - >
           USER=$$(cat /run/secrets/postgres_root_username);
           pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} &&
-          pg_isready -U $$USER -d ${PROJECT_DB_NAME}
+          pg_isready -U $$USER -d ${POSTGRES_DB_NAME}
       interval: 10s
       timeout: 5s
       retries: 5
@@ -86,7 +86,7 @@ services:
       # Project database connection (read by pydantic Settings → loaders/postgres.py)
       POSTGRES_HOST: "${POSTGRES_HOST}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
-      PROJECT_DB_NAME: "${PROJECT_DB_NAME}"
+      POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}"
 
       # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD is).
       # AIRFLOW_CONN_PROJECT_POSTGRES is instead exported in the command below,
@@ -112,7 +112,7 @@ services:
       - bash
       - -c
       - |
-        export AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${PROJECT_DB_NAME}"
+        export AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB_NAME}"
         exec airflow standalone
     secrets:
       - postgres_root_password

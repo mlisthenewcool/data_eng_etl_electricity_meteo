@@ -1,4 +1,4 @@
-"""Medallion architecture layer type and pipeline stage type."""
+"""Medallion architecture layers and pipeline execution stages."""
 
 from enum import StrEnum
 
@@ -13,10 +13,14 @@ class MedallionLayer(StrEnum):
 
 
 class PipelineStage(StrEnum):
-    """Pipeline operation stages (superset of medallion layers)."""
+    """Pipeline execution stages.
+
+    Extends medallion layers with ingestion, extraction, and loading.
+    """
 
     INGEST = "ingest"
     EXTRACT = "extract"
     BRONZE = "bronze"
     SILVER = "silver"
     LOAD_POSTGRES = "load_postgres"
+    GOLD = "gold"

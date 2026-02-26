@@ -1,9 +1,7 @@
 """File operations for medallion architecture (symlinks, rotation, rollback, cleanup).
 
-Two manager types match the two dataset types:
-
-- ``RemoteFileManager``  → bronze symlinks, bronze cleanup, silver rotation/rollback
-- ``DerivedFileManager`` → gold rotation/rollback
+``RemoteFileManager`` handles bronze symlinks, bronze cleanup, and silver
+rotation/rollback. Gold datasets live in Postgres (via dbt), not on disk.
 """
 
 import os
@@ -14,10 +12,7 @@ from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
-    DerivedPathResolver,
-    RemotePathResolver,
-)
+from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 
 logger = get_logger("file_manager")
 
@@ -246,43 +241,4 @@ class RemoteFileManager:
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
             "silver",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Derived datasets (gold)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class DerivedFileManager:
-    """File operations for derived datasets: gold rotation/rollback."""
-
-    resolver: DerivedPathResolver
-
-    def rotate_gold(self) -> None:
-        """Copy ``current.parquet`` → ``backup.parquet``.
-
-        Call **before** writing new current. No-op if current doesn't exist.
-        """
-        _rotate(
-            self.resolver.dataset_name,
-            self.resolver.gold_current_path,
-            self.resolver.gold_backup_path,
-            "gold",
-        )
-
-    def rollback_gold(self) -> bool:
-        """Restore ``backup.parquet`` → ``current.parquet``.
-
-        Returns
-        -------
-        bool
-            ``True`` if rollback succeeded, ``False`` if no backup exists.
-        """
-        return _rollback(
-            self.resolver.dataset_name,
-            self.resolver.gold_current_path,
-            self.resolver.gold_backup_path,
-            "gold",
         )

@@ -40,7 +40,7 @@ from data_eng_etl_electricity_meteo.pipeline.progress import (
     AirflowDownloadProgress,
     AirflowExtractProgress,
 )
-from data_eng_etl_electricity_meteo.pipeline.stage_types import (
+from data_eng_etl_electricity_meteo.pipeline.types import (
     BronzeMetrics,
     DownloadMetrics,
     ExtractionInfo,
@@ -65,7 +65,7 @@ logger = get_logger("pipeline")
 
 
 @dataclass
-class RemoteDatasetPipeline:
+class RemoteIngestionPipeline:
     """Pipeline manager for a single remote dataset.
 
     Orchestrates: ingest → (extract) → to_bronze → to_silver.

@@ -1,8 +1,8 @@
 # Implémentation dbt dans Airflow
 
 Plan d'implémentation pour intégrer dbt-core dans le pipeline Airflow existant.
-L'objectif est de transformer les données silver (PostgreSQL) en données gold
-(PostgreSQL) via des modèles dbt orchestrés par Airflow.
+L'objectif est de transformer les données silver (Postgres) en données gold
+(Postgres) via des modèles dbt orchestrés par Airflow.
 
 ## Architecture cible
 
@@ -28,12 +28,12 @@ Trois niveaux de DAGs communiquent via le mécanisme d'Assets Airflow :
 Les DAGs `ingest_*` produisent des Assets silver fichier en outlet. Déjà en place
 dans `remote_dataset_factory.py`.
 
-### Niveau 2 — Load PostgreSQL (à implémenter)
+### Niveau 2 — Load Postgres (à implémenter)
 
 Un DAG par dataset, généré par un `load_pg_factory.py`. Chaque DAG :
 
 - **Inlet** : Asset silver fichier (`odre_installations__silver`, etc.)
-- **Action** : charge le parquet silver dans la table PostgreSQL correspondante
+- **Action** : charge le parquet silver dans la table Postgres correspondante
 - **Outlet** : Asset silver PG (`odre_installations__silver_pg`, etc.)
 
 Le DAG se déclenche automatiquement quand l'Asset silver fichier est mis à jour.
@@ -84,7 +84,7 @@ Options :
   `docker-compose.yaml`
 - Ou installer l'extension manuellement dans le script d'init
 
-### Schémas PostgreSQL
+### Schémas Postgres
 
 Créer les schémas `silver` et `gold` dans la base `project` via un script d'init
 (`postgres/init/`) :
@@ -147,7 +147,7 @@ volumes:
 ```text
 dbt/
 ├── dbt_project.yml
-├── profiles.yml              # connexion PostgreSQL via env vars
+├── profiles.yml              # connexion Postgres via env vars
 ├── models/
 │   ├── staging/              # vues 1:1 sur les tables silver PG
 │   │   ├── _staging.yml      # schema + tests (unique, not_null, ...)
@@ -173,14 +173,14 @@ data_eng:
       type: postgres
       host: postgres_service    # nom du service Docker Compose
       port: 5432
-      dbname: "{{ env_var('PROJECT_DB_NAME') }}"
+      dbname: "{{ env_var('POSTGRES_DB_NAME') }}"
       user: "{{ env_var('POSTGRES_USER') }}"
       password: "{{ env_var('POSTGRES_PASSWORD') }}"
       schema: gold
       threads: 2
 ```
 
-Note : les secrets PostgreSQL sont actuellement gérés via Docker secrets
+Note : les secrets Postgres sont actuellement gérés via Docker secrets
 (`/run/secrets/...`). Il faudra soit passer les credentials en variables
 d'environnement pour dbt, soit lire les fichiers secrets dans un wrapper script.
 
@@ -193,7 +193,8 @@ Renommage éventuel, casting de types, filtrage de colonnes inutiles.
 -- models/staging/stg_odre_installations.sql
 {{ config(materialized='view', schema='silver') }}
 
-select * from {{ source('silver', 'odre_installations') }}
+select *
+from {{ source('silver', 'odre_installations') }}
 ```
 
 #### Couche marts (gold)
@@ -224,26 +225,29 @@ Assets silver PG :
 @task(task_id="dbt_run")
 def dbt_run():
     subprocess.run(
-        ["dbt", "run", "--project-dir", "/opt/airflow/dbt", "--profiles-dir", "/opt/airflow/dbt"],
+        ["dbt", "run", "--project-dir", "/opt/airflow/dbt", "--profiles-dir",
+         "/opt/airflow/dbt"],
         check=True,
     )
+
 
 @task(task_id="dbt_test")
 def dbt_test():
     subprocess.run(
-        ["dbt", "test", "--project-dir", "/opt/airflow/dbt", "--profiles-dir", "/opt/airflow/dbt"],
+        ["dbt", "test", "--project-dir", "/opt/airflow/dbt", "--profiles-dir",
+         "/opt/airflow/dbt"],
         check=True,
     )
 ```
 
 ### Fichiers à créer/modifier
 
-| Fichier | Action | Description |
-|---------|--------|-------------|
-| `airflow.Dockerfile` | Modifier | Ajouter `dbt-core dbt-postgres` |
-| `docker-compose.yaml` | Modifier | Ajouter bind mount `./dbt:/opt/airflow/dbt`, image PostGIS |
-| `postgres/init/02_create_schemas.sql` | Créer | Schémas `silver` et `gold` |
-| `dbt/` | Créer | Projet dbt complet (profiles, models, tests) |
-| `airflow/dags/load_pg_factory.py` | Créer | DAG factory pour le load silver → PG |
-| `airflow/dags/dbt_transform_dag.py` | Créer | DAG pour `dbt run` + `dbt test` |
-| `airflow/assets.py` | Modifier | Ajouter factory pour Assets silver PG |
+| Fichier                               | Action   | Description                                                |
+|---------------------------------------|----------|------------------------------------------------------------|
+| `airflow.Dockerfile`                  | Modifier | Ajouter `dbt-core dbt-postgres`                            |
+| `docker-compose.yaml`                 | Modifier | Ajouter bind mount `./dbt:/opt/airflow/dbt`, image PostGIS |
+| `postgres/init/02_create_schemas.sql` | Créer    | Schémas `silver` et `gold`                                 |
+| `dbt/`                                | Créer    | Projet dbt complet (profiles, models, tests)               |
+| `airflow/dags/load_pg_factory.py`     | Créer    | DAG factory pour le load silver → PG                       |
+| `airflow/dags/dbt_transform_dag.py`   | Créer    | DAG pour `dbt run` + `dbt test`                            |
+| `airflow/assets.py`                   | Modifier | Ajouter factory pour Assets silver PG                      |

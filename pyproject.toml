@@ -9,11 +9,11 @@ dependencies = [
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.7",
     "polars>=1.38.1",
-    "psycopg[c]>=3.3.2",
+    "psycopg[c]>=3.3.3",
     "py7zr>=1.1.0",
     "pyarrow>=23.0.1",
     "pydantic>=2.12.5",
-    "pydantic-settings>=2.13.0",
+    "pydantic-settings>=2.13.1",
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
     "tqdm>=4.67.3",
@@ -21,13 +21,13 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "apache-airflow-providers-postgres>=6.0.0",
+    "apache-airflow-providers-postgres>=6.5.4",
     "apache-airflow-task-sdk>=1.1.7",
     "marimo>=0.20.2",
     "prek>=0.3.3",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.1",
+    "ruff>=0.15.2",
     "ty>=0.0.18",
 ]
 
@@ -43,15 +43,15 @@ extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = [
-    "I",   # isort
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "PL",  # pylint
-    "D",   # pydocstyle (docstrings)
+    "I", # isort
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # pyflakes
+    "PL", # pylint
+    "D", # pydocstyle (docstrings)
     "NPY", # numpy-specific
-    "UP",  # pyupgrade
-    "TC",  # flake8-type-checking
+    "UP", # pyupgrade
+    "TC", # flake8-type-checking
 ]
 
 # "D105", # Missing docstring in magic method (__post_init__, etc.)
@@ -61,6 +61,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
+"tests/**/*.py" = ["D1", "PLR2004"]
 
 [tool.ruff.lint.pydocstyle]
 #convention = "google"

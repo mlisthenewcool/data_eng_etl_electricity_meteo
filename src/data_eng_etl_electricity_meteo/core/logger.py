@@ -15,7 +15,7 @@ tty
 plain
     Identical to *tty* but without colors — suitable when stderr is
     redirected to a file or piped to another process.
-JSON
+json
     Machine-readable JSON lines (UTC timestamps), serialized with
     *orjson* for speed.
 """
@@ -38,15 +38,30 @@ OutputMode = Literal["airflow", "tty", "plain", "json"]
 
 
 # ---------------------------------------------------------------------------
-# Processors — normalize and flatten log values
+# Constants
 # ---------------------------------------------------------------------------
+
+
+_RESET = "\033[0m"
+_DIM = "\033[2m"
+_CYAN = "\033[36m"
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+_EVENT_PAD = 50
+
+# Structlog-managed keys that must be preserved as-is by normalization processors.
 _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
 
 
-def _normalize_value(value: object) -> str | int | float | None:
-    """Convert a value to a log-friendly primitive.
+# ---------------------------------------------------------------------------
+# Shared helper — scalar value normalization
+# ---------------------------------------------------------------------------
 
-    Returns ``None`` to signal the key should be dropped.
+
+def _normalize_value(value: object) -> str | int | float:
+    """Convert a non-``None`` value to a log-friendly primitive.
+
+    ``None`` inputs are not accepted — callers handle ``None`` explicitly
+    before calling this function (drop it or preserve it as a JSON null).
 
     Notes
     -----
@@ -55,8 +70,6 @@ def _normalize_value(value: object) -> str | int | float | None:
     silently swallow ``False``.  The ``bool`` branch must precede ``int``
     because ``bool`` is a subclass of ``int`` in Python.
     """
-    if value is None:
-        return None
     if isinstance(value, bool):
         return str(value)
     if isinstance(value, (str, int, float)):
@@ -68,88 +81,96 @@ def _normalize_value(value: object) -> str | int | float | None:
     return repr(value)
 
 
-def _normalize_and_flatten(
-    _logger: WrappedLogger,
-    _method: str,
-    event_dict: EventDict,
-) -> EventDict:
-    """Normalize values and flatten nested dicts into dotted keys.
-
-    - Drops ``None`` values.
-    - Converts ``Path`` and ``Enum`` to strings.
-    - Flattens nested dicts: ``source={'provider': 'IGN'}``
-      becomes ``source.provider=IGN``.
-    """
-    flat: EventDict = {}
-    for key, value in event_dict.items():
-        if key in _STRUCTLOG_INTERNAL_KEYS:
-            flat[key] = value
-        elif isinstance(value, dict):
-            flat |= _flatten_dict(key, value)
-        else:
-            normalized = _normalize_value(value)
-            if normalized is not None:
-                flat[key] = normalized
-    return flat
+# ---------------------------------------------------------------------------
+# Console processors (tty / plain)
+# ---------------------------------------------------------------------------
 
 
 def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
-    """Recursively flatten *mapping* into dotted keys."""
+    """Recursively flatten *mapping* into dotted-key entries.
+
+    When *prefix* is empty, top-level keys are used as-is; otherwise each key
+    is prepended with ``prefix.``.  ``None`` leaves are dropped.  Scalar values
+    are returned as-is — normalization is the caller's responsibility.
+    """
     result: EventDict = {}
     for key, value in mapping.items():
-        dotted = f"{prefix}.{key}"
+        dotted = f"{prefix}.{key}" if prefix else key
         if isinstance(value, dict):
             result |= _flatten_dict(dotted, value)
-        else:
-            normalized = _normalize_value(value)
-            if normalized is not None:
-                result[dotted] = normalized
+        elif value is not None:
+            result[dotted] = value
     return result
 
 
-# ---------------------------------------------------------------------------
-# Processors — console styling (tty / plain)
-# ---------------------------------------------------------------------------
-_RESET = "\033[0m"
-_CYAN = "\033[36m"
-_EVENT_PAD = 50
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+def _flatten_and_normalize(
+    _logger: WrappedLogger,
+    _method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Flatten nested dicts into dotted keys and normalize scalar values.
+
+    Console modes (tty / plain) only — **not** for Airflow, which requires
+    nested dict structures to be preserved (see ``_normalize_types``).
+
+    - Structlog internal keys (``event``, ``level``, etc.) are passed through as-is.
+    - Nested dicts are flattened: ``{'source': {'provider': 'IGN'}}``
+      becomes ``source.provider=IGN``.
+    - ``None`` values are dropped; ``Path``, ``Enum``, and ``bool`` are
+      converted to strings.
+    """
+    internal: EventDict = {}
+    external: EventDict = {}
+    for k, v in event_dict.items():
+        (internal if k in _STRUCTLOG_INTERNAL_KEYS else external)[k] = v
+    flattened = _flatten_dict("", external)
+    return {**internal, **{k: _normalize_value(v) for k, v in flattened.items()}}
 
 
 def _visual_len(s: str) -> int:
-    """Return the visual length of a string, ignoring ANSI escape codes."""
+    """Return the printable length of *s*, excluding ANSI escape codes."""
     return len(_ANSI_ESCAPE.sub("", s))
 
 
 def _build_level_styles() -> dict[str, str]:
-    """Build level styles from structlog defaults with project overrides.
+    """Build the level → ANSI color mapping for console rendering.
 
-    The returned dict is the single source of truth for level-based
-    coloring: it is shared between ``ConsoleRenderer`` (level badge)
-    and ``_colorize_event`` (event text).
+    Returns structlog's default styles with project overrides.  The
+    returned dict is the single source of truth for level-based coloring:
+    it is shared between ``ConsoleRenderer`` (level badge) and
+    ``_colorize_event`` (event text).
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of lowercase level names to ANSI escape sequences.
+        An empty string means "no color" (inherits terminal default).
     """
     styles = structlog.dev.ConsoleRenderer.get_default_level_styles(colors=True)
-    styles["debug"] = "\033[2m"  # dim
-    styles["info"] = ""  # default (white)
+    styles["debug"] = _DIM
+    styles["info"] = ""  # no color — inherits terminal default (white)
     return styles
 
 
 def _colorize_event(
     level_styles: dict[str, str],
 ) -> structlog.types.Processor:
-    """Return a processor that colorizes the event by level."""
+    """Return a processor that wraps the event string with the level's ANSI color.
 
-    def processor(
-        _logger: WrappedLogger,
-        _method: str,
-        event_dict: EventDict,
-    ) -> EventDict:
-        level: str = event_dict.get("level", "")
-        color = level_styles.get(level)
-        if color is not None and "event" in event_dict:
-            event_dict["event"] = (
-                f"{color}{event_dict['event']}{_RESET}" if color else event_dict["event"]
-            )
+    Levels absent from *level_styles* or whose style is an empty string
+    (e.g. ``"info"``) are left uncolored.
+
+    Parameters
+    ----------
+    level_styles
+        Mapping of lowercase level names to ANSI escape sequences, as
+        returned by ``_build_level_styles``.
+    """
+
+    def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+        color = level_styles.get(event_dict.get("level", ""))
+        if color:
+            event_dict["event"] = f"{color}{event_dict['event']}{_RESET}"
         return event_dict
 
     return processor
@@ -161,42 +182,57 @@ def _prepend_logger_name(
 ) -> structlog.types.Processor:
     """Return a processor that prefixes the event with ``[logger_name]``.
 
-    Inserted **after** ``_colorize_event`` so the name stays uncolored
-    while the event text keeps its level color.  When *pad_to* is set,
-    padding is applied to the full visual length of ``[name] event``
-    (ANSI escape codes are excluded from the length calculation).
+    Must be inserted **after** ``_colorize_event`` so the name stays
+    uncolored while the event text keeps its level color.
+
+    When *pad_to* is set, the combined ``[name] event`` string is
+    right-padded to *pad_to* visible characters (ANSI codes excluded
+    from the length calculation).
+
+    Parameters
+    ----------
+    use_colors
+        Render the logger name in cyan when ``True``.
+    pad_to
+        Target visual width for the ``[name] event`` prefix.  ``0``
+        disables padding.
     """
 
-    def processor(
-        _logger: WrappedLogger,
-        _method: str,
-        event_dict: EventDict,
-    ) -> EventDict:
+    def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
         name = event_dict.pop("logger_name", None)
         prefix = (
             f"[{_CYAN}{name}{_RESET}]" if (name and use_colors) else (f"[{name}]" if name else "")
         )
         full = f"{prefix} {event_dict['event']}" if prefix else event_dict["event"]
         if pad_to:
-            vlen = _visual_len(full)
-            if vlen < pad_to:
-                full += " " * (pad_to - vlen)
+            visual_len = _visual_len(full)
+            if visual_len < pad_to:
+                full += " " * (pad_to - visual_len)
         event_dict["event"] = full
         return event_dict
 
     return processor
 
 
-# ---------------------------------------------------------------------------
-# Rich traceback helper
-# ---------------------------------------------------------------------------
 def _rich_traceback(
     use_colors: bool = True,
     width: int | None = None,
     show_locals: bool = False,
     word_wrap: bool = False,
 ) -> structlog.dev.RichTracebackFormatter:
-    """Create a ``RichTracebackFormatter`` with customized rendering."""
+    """Create a ``RichTracebackFormatter`` with project-specific defaults.
+
+    Parameters
+    ----------
+    use_colors
+        Use truecolor ANSI output.  ``False`` falls back to auto-detection.
+    width
+        Maximum render width in characters.  ``None`` uses the terminal width.
+    show_locals
+        Include local variables in each stack frame.
+    word_wrap
+        Wrap long lines within the traceback.
+    """
     return structlog.dev.RichTracebackFormatter(
         width=width,
         show_locals=show_locals,
@@ -206,11 +242,82 @@ def _rich_traceback(
 
 
 # ---------------------------------------------------------------------------
+# Airflow processors
+# ---------------------------------------------------------------------------
+
+
+def _walk(value: object) -> object:
+    """Recursively convert non-JSON-serializable leaves, preserving container structure.
+
+    ``None`` is returned as-is and stored unconditionally by the caller
+    (``_normalize_types``), preserving JSON nulls.
+
+    Containers are recursed into rather than repr'd, because Airflow's UI
+    expects them intact (e.g. ``ExceptionDictTransformer`` output).
+    Tuples are converted to lists — JSON has no tuple type and both
+    serialize identically.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {k: _walk(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_walk(v) for v in value]
+    return _normalize_value(value)
+
+
+def _normalize_types(
+    _logger: WrappedLogger,
+    _method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Lightly normalize scalar types for Airflow's JSON log pipeline.
+
+    Unlike ``_flatten_and_normalize``, this processor preserves the full
+    dict/list structure and ``None`` values — Airflow's
+    ``ExceptionDictTransformer`` produces nested structures
+    (``[{"type": …, "frames": […]}]``) that the UI expects intact.
+    Only scalar leaves (``Path``, ``Enum``, ``bool``) are converted to
+    JSON-serializable primitives.
+    """
+    return {key: _walk(value) for key, value in event_dict.items()}
+
+
+def _setup_airflow_logger() -> None:
+    """Insert ``_normalize_types`` into Airflow 3's existing structlog chain.
+
+    Airflow 3 task subprocesses send structured JSON logs to the supervisor
+    via a dedicated pipe (``NamedBytesLogger``).  The supervisor writes them
+    to the log file; the UI renders that JSON.
+
+    The existing chain must **not** be flattened — Airflow's
+    ``ExceptionDictTransformer`` produces nested structures
+    (``[{"type": …, "frames": […]}]``) that the UI expects intact.
+    Only scalar type conversion (``Path`` → ``str``, ``Enum`` → value)
+    is injected here via ``_normalize_types``.
+
+    This function is idempotent: calling it multiple times leaves the
+    processor chain unchanged after the first insertion.
+    """
+    config = structlog.get_config()
+    processors = list(config.get("processors", []))
+    if processors and _normalize_types not in processors:
+        processors.insert(-1, _normalize_types)  # insert before the final renderer
+        structlog.configure(processors=processors)
+
+
+# ---------------------------------------------------------------------------
 # Environment detection
 # ---------------------------------------------------------------------------
+
+
 @cache
 def _detect_output_mode() -> OutputMode:
-    """Choose the best output mode for the current environment."""
+    """Infer the best output mode for the current execution environment.
+
+    Result is cached after the first call — reconfiguring structlog at runtime
+    does not re-trigger detection.
+    """
     if settings.is_running_on_airflow:
         return "airflow"
     if sys.stderr.isatty():
@@ -219,104 +326,53 @@ def _detect_output_mode() -> OutputMode:
 
 
 # ---------------------------------------------------------------------------
-# Airflow-specific configuration
+# Global configuration
 # ---------------------------------------------------------------------------
-def _normalize_types(
-    _logger: WrappedLogger,
-    _method: str,
-    event_dict: EventDict,
-) -> EventDict:
-    """Convert non-JSON-serializable types to primitives.
-
-    Unlike ``_normalize_and_flatten``, this processor preserves the
-    structure of dicts, lists, and ``None`` values — only scalar leaves
-    are converted.  This is critical in Airflow's JSON pipeline where
-    ``ExceptionDictTransformer`` produces nested dicts that the UI
-    expects as-is.
-    """
-    return {key: _walk(value) for key, value in event_dict.items()}
 
 
-def _walk(value: object) -> object:
-    """Recursively convert non-JSON-serializable leaves.
-
-    Delegates scalar conversion to ``_normalize_value`` and additionally
-    handles containers (``dict``, ``list``, ``tuple``) by recursing into
-    them — preserving the nested structure that Airflow's UI expects.
-    ``None`` is preserved (unlike ``_normalize_and_flatten`` which drops it).
-    """
-    if value is None:
-        return value
-    if isinstance(value, dict):
-        return {k: _walk(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_walk(v) for v in value]
-    return _normalize_value(value)
-
-
-def _setup_airflow_logger() -> None:
-    """Insert a lightweight type-normalizer into Airflow 3's structlog chain.
-
-    Airflow 3 task subprocesses send structured JSON logs to the
-    supervisor via a dedicated pipe (``NamedBytesLogger``).  The
-    supervisor writes them to the log file; the UI renders that JSON.
-
-    The processor chain must **not** flatten dicts or drop ``None``
-    values — Airflow's ``ExceptionDictTransformer`` produces nested
-    structures (``[{"type": …, "frames": […]}]``) that the UI expects
-    intact.  Only scalar type conversion (``Path`` → ``str``, ``Enum``
-    → value) is safe here.
-
-    ``_normalize_and_flatten`` is used for console/tty modes only.
-    """
-    config = structlog.get_config()
-    processors = list(config.get("processors", []))
-    if processors:
-        processors.insert(-1, _normalize_types)
-        structlog.configure(processors=processors)
-
-
-# ---------------------------------------------------------------------------
-# Global configuration (called once at first import)
-# ---------------------------------------------------------------------------
 def _setup_logger(
     output: OutputMode | None = None,
     level: LogLevel = settings.logging_level,
 ) -> None:
     """Configure structlog globally.
 
+    Called once at module import.  Can be called again to reconfigure
+    structlog (e.g. in tests).
+
     Parameters
     ----------
     output
-        Logging output mode. ``None`` triggers auto-detection.
+        Output mode.  ``None`` triggers auto-detection via ``_detect_output_mode``.
     level
-        Minimum severity level.
+        Minimum severity level.  Defaults to ``settings.logging_level``
+        evaluated at import time.
     """
     if output is None:
         output = _detect_output_mode()
 
-    # --- Airflow delegates to its own config ---
+    # Airflow already has its own structlog chain; only inject our processor.
     if output == "airflow":
         _setup_airflow_logger()
         return
 
-    # --- Shared processors (tty / plain / json) ---
+    # Shared processors for all non-Airflow modes.
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.UnicodeDecoder(),
+        structlog.processors.StackInfoRenderer(),  # renders stack_info= kwarg if present
+        structlog.processors.UnicodeDecoder(),  # decodes bytes values to str
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=True),
     ]
 
-    # --- Console modes (tty / plain) ---
     if output in ("tty", "plain"):
         use_colors = output == "tty"
-        level_styles = _build_level_styles() if use_colors else None
 
-        console_chain: list[structlog.types.Processor] = [_normalize_and_flatten]
-        if use_colors and level_styles:
+        console_chain: list[structlog.types.Processor] = [_flatten_and_normalize]
+        if use_colors:
+            level_styles = _build_level_styles()
             console_chain.append(_colorize_event(level_styles))
+        else:
+            level_styles = None
         console_chain.append(
             _prepend_logger_name(use_colors, pad_to=_EVENT_PAD if use_colors else 0)
         )
@@ -328,15 +384,15 @@ def _setup_logger(
                 pad_event_to=0 if use_colors else _EVENT_PAD,
                 exception_formatter=_rich_traceback(
                     use_colors=use_colors,
-                    show_locals=use_colors,
-                    word_wrap=use_colors,
+                    width=None,
+                    show_locals=False,
+                    word_wrap=True,
                 ),
             ),
         )
         processors = shared_processors + console_chain
         logger_factory = structlog.PrintLoggerFactory(file=sys.stderr)
 
-    # --- JSON mode ---
     elif output == "json":
         processors = shared_processors + [
             structlog.processors.format_exc_info,
@@ -356,28 +412,28 @@ def _setup_logger(
     )
 
 
-# ---------------------------------------------------------------------------
-# Module initialization
-# ---------------------------------------------------------------------------
+# Configure structlog at module import time.
 _setup_logger()
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
 def get_logger(name: str | None = None) -> BoundLogger:
     """Return a named structlog logger.
 
     Parameters
     ----------
     name
-        Logger name.  Appears as ``[name]`` in console output.
+        Logger name displayed as ``[name]`` in console output.
         ``None`` returns an unnamed default logger.
 
     Returns
     -------
     BoundLogger
-        A bound logger instance.
+        A structlog bound logger instance.
     """
     if name is None:
         return structlog.get_logger()
@@ -391,26 +447,33 @@ def get_logger(name: str | None = None) -> BoundLogger:
 # ---------------------------------------------------------------------------
 # Manual smoke test
 # ---------------------------------------------------------------------------
+
+
 if __name__ == "__main__":
     from pydantic import BaseModel
 
-    class X(BaseModel):
-        """Dummy class used for logging demonstration."""
+    class Point(BaseModel):
+        """Dummy model used for logging demonstration."""
 
         x: float
         y: float
 
-    _x = X(x=1, y=2)
-    _logger = get_logger("demo")
+    obj = Point(x=1, y=2)
+    obj_dump = obj.model_dump()
+    logger = get_logger("demo")
 
-    _logger.debug("debug text", extra_data={"k": 3}, x=_x)
-    _logger.info("info text", extra_data={"k": 3}, x=_x)
-    _logger.warning("warning text", extra_data={"k": 3}, x=_x)
-    _logger.error("error text", extra_data={"k": 3}, x=_x)
-    _logger.critical("critical text", extra_data={"k": 3}, x=_x)
-
-    _logger.exception("exception text (without)", extra_data={"k": 3}, x=_x)
+    logger.debug("debug text", extra_data={"k": 3}, point=obj_dump)
+    logger.info("info text (pydantic without .model_dump())", point=obj)
+    logger.info("info text", extra_data={"k": 3}, point=obj_dump)
+    logger.warning("warning text", extra_data={"k": 3}, point=obj_dump)
+    logger.error("error text", extra_data={"k": 3}, point=obj_dump)
+    logger.critical("critical text", extra_data={"k": 3}, point=obj_dump)
+    logger.exception(
+        "exception text (called outside exception)", extra_data={"k": 3}, point=obj_dump
+    )
     try:
         _ = 1 / 0
     except ZeroDivisionError:
-        _logger.exception("exception text (with)", extra_data={"k": 3}, x=_x)
+        logger.exception(
+            "exception text (called within exception)", extra_data={"k": 3}, point=obj_dump
+        )

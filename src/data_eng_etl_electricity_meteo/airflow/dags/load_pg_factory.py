@@ -1,4 +1,4 @@
-"""DAG factory for loading silver parquet files into PostgreSQL.
+"""DAG factory for loading silver parquet files into Postgres.
 
 Generates one Airflow DAG per remote dataset declared in the data catalog.
 Each DAG is triggered automatically when the upstream silver file Asset is
@@ -11,7 +11,7 @@ Pipeline position::
 
 Each generated DAG:
 - **Inlet** : silver file Asset (``file://`` URI to ``current.parquet``)
-- **Task**  : load silver parquet → PostgreSQL ``silver.{dataset}`` table
+- **Task**  : load silver parquet → Postgres ``silver.{dataset}`` table
 - **Outlet**: silver PG Asset (``postgres://project/silver.{dataset}``)
 
 The load task uses an Airflow ``PostgresHook`` (connection id ``project_postgres``)
@@ -25,19 +25,18 @@ from typing import Any
 
 from airflow.sdk import DAG, Asset, Metadata, dag, task
 
-from data_eng_etl_electricity_meteo.airflow.assets import get_asset, get_silver_pg_asset
+from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset, get_silver_pg_asset
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.loaders.postgres import load_to_silver_from_hook
+from data_eng_etl_electricity_meteo.loaders.postgres import load_silver_to_postgres_from_hook
 
 logger = get_logger("dag_factory.load_pg")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Production defaults (mirror remote_dataset_factory.py)
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 DEFAULT_ARGS: dict[str, Any] = {
     "owner": "data-engineering",
@@ -67,7 +66,7 @@ def _create_dag(
     silver_file_asset:
         Inlet: the silver ``file://`` Asset produced by the ingestion DAG.
     silver_pg_asset:
-        Outlet: the silver PostgreSQL Asset emitted after a successful load.
+        Outlet: the silver Postgres Asset emitted after a successful load.
 
     Returns
     -------
@@ -81,7 +80,7 @@ def _create_dag(
         start_date=datetime(2026, 1, 24),
         catchup=False,
         default_args=DEFAULT_ARGS,
-        tags=["load", "postgresql", "silver"],
+        tags=["load", "Postgres", "silver"],
         doc_md=__doc__,
     )
     def _dag() -> None:
@@ -91,17 +90,17 @@ def _create_dag(
             outlets=[silver_pg_asset],
         )
         def load_task() -> Generator[Metadata]:
-            """Load silver parquet into the PostgreSQL silver schema.
+            """Load silver parquet into the Postgres silver schema.
 
             Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come
             from the Airflow connection store, connection lifecycle is managed
-            inside ``load_to_silver_from_hook``.
+            inside ``load_silver_to_postgres_from_hook``.
             """
             # Lazy import: airflow providers only available inside the container.
             from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
 
             hook = PostgresHook("project_postgres")
-            metrics = load_to_silver_from_hook(dataset_config=dataset_config, hook=hook)
+            metrics = load_silver_to_postgres_from_hook(dataset_config=dataset_config, hook=hook)
 
             yield Metadata(
                 asset=silver_pg_asset,
@@ -135,7 +134,7 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset_config in catalog.get_remote_datasets():
         try:
-            silver_file_asset = get_asset(dataset_config.name, MedallionLayer.SILVER)
+            silver_file_asset = get_silver_file_asset(dataset_config.name)
             silver_pg_asset = get_silver_pg_asset(dataset_config.name)
             dags[dataset_config.name] = _create_dag(
                 dataset_config, silver_file_asset, silver_pg_asset
