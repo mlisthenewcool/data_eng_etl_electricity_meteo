@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Protocol
 
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
+from data_eng_etl_electricity_meteo.core.enums import MedallionLayer, PipelineStage
 
 
 class _LogMethod(Protocol):
@@ -20,17 +20,30 @@ class BaseProjectException(Exception):
 
         Value normalization (None filtering, Path conversion, etc.) is handled by the
         structlog processor chain.
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping of public instance attribute names to their values.
         """
         return {key: value for key, value in self.__dict__.items() if not key.startswith("_")}
 
     def log(self, log_method: _LogMethod) -> None:
-        """Log this exception with its structured attributes."""
+        """Log this exception with its structured attributes.
+
+        Parameters
+        ----------
+        log_method:
+            A structlog bound logger method (e.g. ``logger.error``).
+        """
         log_method(str(self), **self.to_dict())
 
 
 # ---------------------------------------------------------------------------
 # Archive errors
 # ---------------------------------------------------------------------------
+
+
 class ExtractionError(BaseProjectException):
     """Base exception for archive extraction failures."""
 
@@ -52,7 +65,7 @@ class FileNotFoundInArchiveError(ExtractionError):
         super().__init__("File not found in archive.")
 
 
-class FileIntegrityError(BaseProjectException):
+class FileIntegrityError(ExtractionError):
     """Raised when file validation (hash, size, etc.) fails."""
 
     def __init__(self, path: Path, reason: str) -> None:
@@ -64,6 +77,8 @@ class FileIntegrityError(BaseProjectException):
 # ---------------------------------------------------------------------------
 # Data catalog errors
 # ---------------------------------------------------------------------------
+
+
 class DataCatalogError(BaseProjectException):
     """Base exception for data catalog related failures."""
 
@@ -89,9 +104,36 @@ class DatasetNotFoundError(DataCatalogError):
         super().__init__("Dataset does not exist in data catalog.")
 
 
+class DatasetTypeError(DataCatalogError):
+    """Raised when a dataset exists but has an unexpected type."""
+
+    def __init__(self, name: str, expected: str, actual: str) -> None:
+        self.name = name
+        self.expected = expected
+        self.actual = actual
+        super().__init__("Dataset has unexpected type.")
+
+
+# ---------------------------------------------------------------------------
+# Schema validation errors
+# ---------------------------------------------------------------------------
+
+
+class SchemaValidationError(BaseProjectException):
+    """Raised when DataFrame columns don't match the Postgres table schema."""
+
+    def __init__(self, table: str, extra_columns: list[str], missing_columns: list[str]) -> None:
+        self.table = table
+        self.extra_columns = extra_columns
+        self.missing_columns = missing_columns
+        super().__init__("Schema mismatch between Parquet and Postgres.")
+
+
 # ---------------------------------------------------------------------------
 # Airflow context errors
 # ---------------------------------------------------------------------------
+
+
 class AirflowContextError(BaseProjectException):
     """Raised when an operation requires a specific Airflow context."""
 
@@ -103,12 +145,15 @@ class AirflowContextError(BaseProjectException):
     ) -> None:
         self.operation = operation
         self.expected_context = expected_context
-        super().__init__(f"Invalid Airflow context: {suggestion}.")
+        self.suggestion = suggestion
+        super().__init__("Invalid Airflow context.")
 
 
 # ---------------------------------------------------------------------------
 # Transformation errors
 # ---------------------------------------------------------------------------
+
+
 class TransformNotFoundError(BaseProjectException):
     """Raised when no transformation is registered for a dataset/layer pair."""
 
@@ -130,16 +175,27 @@ class TransformValidationError(BaseProjectException):
 # ---------------------------------------------------------------------------
 # Pipeline stage errors
 # ---------------------------------------------------------------------------
+
+
 class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
-    def __init__(self, dataset_name: str, stage: MedallionLayer) -> None:
-        self.dataset_name = dataset_name
+    def __init__(self, stage: PipelineStage) -> None:
         self.stage = stage
-        super().__init__(f"Pipeline failed at {stage} stage.")
+        super().__init__(f"Pipeline stage '{stage}' failed.")
 
     def log(self, log_method: _LogMethod) -> None:
-        """Log this exception and its cause with structured attributes."""
+        """Log this exception and its cause with structured attributes.
+
+        If the cause is a ``BaseProjectException``, its attributes are merged
+        into the log event. Otherwise, the cause type and message are logged
+        as ``cause_type`` / ``cause`` fields.
+
+        Parameters
+        ----------
+        log_method:
+            A structlog bound logger method (e.g. ``logger.critical``).
+        """
         cause = self.__cause__
         if cause is None:
             log_method(str(self), **self.to_dict())
@@ -161,34 +217,61 @@ class PipelineStageError(BaseProjectException):
 class IngestStageError(PipelineStageError):
     """Raised when the ingest (download) stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.LANDING)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.INGEST)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.LANDING)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.EXTRACT)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.BRONZE)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.BRONZE)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
-    def __init__(self, dataset_name: str) -> None:
-        super().__init__(dataset_name, MedallionLayer.SILVER)
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.SILVER)
+
+
+class PostgresLoadError(PipelineStageError):
+    """Raised when loading silver Parquet into Postgres fails."""
+
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.LOAD_POSTGRES)
+
+
+class PostgresCredentialsError(PostgresLoadError):
+    """Raised when Postgres credentials are missing from env vars and Docker secrets."""
+
+    def __init__(self, missing_field: str, suggestion: str) -> None:
+        self.missing_field = missing_field
+        self.suggestion = suggestion
+        # Skip PostgresLoadError.__init__ to set a more specific message
+        PipelineStageError.__init__(self, PipelineStage.LOAD_POSTGRES)
+        self.args = ("Postgres credentials not configured.",)
+
+
+class GoldStageError(PipelineStageError):
+    """Raised when the gold aggregation stage fails."""
+
+    def __init__(self) -> None:
+        super().__init__(PipelineStage.GOLD)
 
 
 # ---------------------------------------------------------------------------
 # Visual smoke test
 # ---------------------------------------------------------------------------
+
+
 if __name__ == "__main__":
     import sys
 
@@ -206,9 +289,9 @@ if __name__ == "__main__":
     def _end() -> None:
         print("", file=sys.stderr)
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 1) IngestStageError — httpx causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("IngestStageError  <-  httpx.ConnectError")
     try:
         try:
@@ -217,7 +300,7 @@ if __name__ == "__main__":
                 request=httpx.Request("HEAD", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
@@ -230,7 +313,7 @@ if __name__ == "__main__":
                 request=httpx.Request("GET", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
@@ -242,20 +325,20 @@ if __name__ == "__main__":
             _response = httpx.Response(status_code=503, request=_request)
             raise httpx.HTTPStatusError("Server Error", request=_request, response=_response)
         except httpx.HTTPError as err:
-            raise IngestStageError(_DATASET) from err
+            raise IngestStageError() from err
     except IngestStageError as error:
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 2) ExtractStageError — archive causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("ExtractStageError  <-  ArchiveNotFoundError")
     try:
         try:
             raise ArchiveNotFoundError(path=Path("/data/landing/archive.7z"))
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+        except ExtractionError as err:
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
@@ -267,8 +350,8 @@ if __name__ == "__main__":
                 target_filename="data.gpkg",
                 archive_path=Path("/data/landing/archive.7z"),
             )
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+        except ExtractionError as err:
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
@@ -280,21 +363,21 @@ if __name__ == "__main__":
                 path=Path("/data/landing/data.gpkg"),
                 reason="SHA-256 mismatch: expected abc123, got def456",
             )
-        except (ArchiveNotFoundError, FileNotFoundInArchiveError, FileIntegrityError) as err:
-            raise ExtractStageError(_DATASET) from err
+        except ExtractionError as err:
+            raise ExtractStageError() from err
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 3) BronzeStageError — transform / duckdb / IO causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
             raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.BRONZE)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
@@ -306,7 +389,7 @@ if __name__ == "__main__":
                 "Could not open file '/data/bronze/v1.parquet': Permission denied"
             )
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
@@ -316,20 +399,20 @@ if __name__ == "__main__":
         try:
             raise OSError("[Errno 28] No space left on device: '/data/bronze/v1.parquet'")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise BronzeStageError(_DATASET) from err
+            raise BronzeStageError() from err
     except BronzeStageError as error:
         error.log(_logger.critical)
     _end()
 
-    # ============================================================
+    # ---------------------------------------------------------------------------
     # 4) SilverStageError — transform / duckdb / IO causes
-    # ============================================================
+    # ---------------------------------------------------------------------------
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:
             raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.SILVER)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)
     _end()
@@ -339,7 +422,7 @@ if __name__ == "__main__":
         try:
             raise duckdb.ConversionException("Could not cast VARCHAR to INTEGER")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)
     _end()
@@ -349,6 +432,6 @@ if __name__ == "__main__":
         try:
             raise PermissionError("[Errno 13] Permission denied: '/data/silver/current.parquet'")
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
-            raise SilverStageError(_DATASET) from err
+            raise SilverStageError() from err
     except SilverStageError as error:
         error.log(_logger.critical)

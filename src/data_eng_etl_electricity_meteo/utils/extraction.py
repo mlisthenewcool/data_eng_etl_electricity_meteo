@@ -18,6 +18,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+from data_eng_etl_electricity_meteo.utils.progress import TqdmExtractCallback
 
 logger = get_logger("extraction")
 
@@ -29,32 +30,6 @@ class ExtractedFileInfo:
     path: Path
     file_hash: str
     size_mib: float
-
-
-class _TqdmExtractCallback(ExtractCallback):
-    """Bridge between py7zr extraction and tqdm progress bar."""
-
-    def __init__(self, pbar: tqdm):
-        self.pbar = pbar
-
-    def report_start(self, processing_file_path: str, processing_bytes: str) -> None:
-        """No-op: required by ``ExtractCallback`` protocol."""
-
-    def report_end(self, processing_file_path: str, wrote_bytes: str) -> None:
-        """No-op: required by ``ExtractCallback`` protocol."""
-
-    def report_update(self, decompressed_bytes: str) -> None:
-        """Update the progress bar with decompressed bytes."""
-        self.pbar.update(int(decompressed_bytes))
-
-    def report_start_preparation(self) -> None:
-        """No-op: required by ``ExtractCallback`` protocol."""
-
-    def report_warning(self, message: str) -> None:
-        """No-op: required by ``ExtractCallback`` protocol."""
-
-    def report_postprocess(self) -> None:
-        """No-op: required by ``ExtractCallback`` protocol."""
 
 
 def _validate_sqlite_header(path: Path) -> None:
@@ -152,11 +127,11 @@ def extract_7z(
             uncompressed_size = target_info.uncompressed
 
             # Extract to temp directory with progress
-            _owned_pbar: tqdm | None = None
+            owned_pbar: tqdm | None = None
             if progress is not None:
-                _callback: ExtractCallback = progress(uncompressed_size)
+                callback: ExtractCallback = progress(uncompressed_size)
             else:
-                _owned_pbar = tqdm(
+                owned_pbar = tqdm(
                     total=uncompressed_size,
                     unit="B",
                     unit_scale=True,
@@ -164,15 +139,15 @@ def extract_7z(
                     leave=False,
                     file=sys.stderr,
                 )
-                _callback = _TqdmExtractCallback(_owned_pbar)
+                callback = TqdmExtractCallback(owned_pbar)
 
             try:
                 archive.extract(
-                    path=tmp_dir_path, targets=[target_internal_path], callback=_callback
+                    path=tmp_dir_path, targets=[target_internal_path], callback=callback
                 )
             finally:
-                if _owned_pbar is not None:
-                    _owned_pbar.close()
+                if owned_pbar is not None:
+                    owned_pbar.close()
 
             extracted_file = tmp_dir_path / target_internal_path
 

@@ -10,7 +10,6 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -19,8 +18,14 @@ from tqdm import tqdm
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+from data_eng_etl_electricity_meteo.utils.progress import DownloadProgressReporter
 
 logger = get_logger("download")
+
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -32,21 +37,9 @@ class HttpDownloadInfo:
     size_mib: float
 
 
-class DownloadProgressReporter(Protocol):
-    """Reports byte-count updates during a streaming download.
-
-    Implementations receive the total expected bytes at construction time
-    (``0`` when ``Content-Length`` is absent) and individual chunk sizes
-    via :meth:`update`.
-    """
-
-    def update(self, n: int) -> None:
-        """Accumulate *n* downloaded bytes."""
-        ...
-
-    def close(self) -> None:
-        """Release any resources held by the reporter."""
-        ...
+# ---------------------------------------------------------------------------
+# Filename extraction
+# ---------------------------------------------------------------------------
 
 
 def _extract_filename(response: httpx.Response, url: str) -> str | None:
@@ -96,16 +89,17 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
             logger.debug("Extracted filename from URL path", filename=filename, url=url)
             return filename
 
-    # note: this is already logged by `download_to_file(...)`
-    # logger.warning("Could not extract filename", url=url)
     return None
 
 
-# TODO: ajouter ces paramètres à la fonction qui sont hardcodé depuis settings
-#  download_timeout_total
-#  download_timeout_connect
-#  download_timeout_sock_read
-#  download_chunk_size
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+# TODO: accept timeout and chunk_size as function parameters instead of
+#  reading directly from settings (download_timeout_total,
+#  download_timeout_connect, download_timeout_sock_read, download_chunk_size)
 def download_to_file(
     url: str,
     dest_dir: Path,
@@ -134,14 +128,18 @@ def download_to_file(
 
     Raises
     ------
-    httpx.HTTPStatusError:
-        If server returns error status (4xx/5xx).
-    httpx.TimeoutException:
-        If request times out.
+    httpx.HTTPStatusError
+        If the server returns an error status (4xx/5xx).
+    httpx.TimeoutException
+        If the request times out (connect or read timeout).
+    httpx.ConnectError
+        If the host cannot be reached.
+    OSError
+        If the destination file cannot be written.
     """
     logger.info("Starting download", url=url, dest_dir=dest_dir)
 
-    # TODO, documenter & ajouter arguments write/pool
+    # TODO: document and expose write/pool timeout parameters
     timeout = httpx.Timeout(
         timeout=settings.download_timeout_total,
         connect=settings.download_timeout_connect,
@@ -172,7 +170,7 @@ def download_to_file(
 
             hasher = FileHasher()
 
-            _reporter: DownloadProgressReporter = (
+            reporter: DownloadProgressReporter = (
                 progress(content_length)
                 if progress is not None
                 else tqdm(
@@ -194,9 +192,9 @@ def download_to_file(
                         hasher.update(chunk)
                         chunk_len = len(chunk)
                         downloaded_bytes += chunk_len
-                        _reporter.update(chunk_len)
+                        reporter.update(chunk_len)
             finally:
-                _reporter.close()
+                reporter.close()
 
             file_hash = hasher.hexdigest
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)

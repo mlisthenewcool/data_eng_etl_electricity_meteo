@@ -1,13 +1,11 @@
 """Path resolution for the medallion architecture layers.
 
-Two resolver types match the two dataset types:
-
-- ``RemotePathResolver``  → landing / bronze / silver (remote HTTP datasets)
-- ``DerivedPathResolver`` → gold (derived datasets built from silver sources)
+``RemotePathResolver`` handles landing / bronze / silver paths for remote
+HTTP datasets. Gold datasets live in Postgres (via dbt), not on disk.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from data_eng_etl_electricity_meteo.core.settings import settings
@@ -43,18 +41,18 @@ class _BasePathResolver:
 class RemotePathResolver(_BasePathResolver):
     """Path construction for remote datasets: landing → bronze → silver."""
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Landing Layer (Temporary)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
         return self.base_dir / "landing" / self.dataset_name
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Bronze Layer (Versioned History)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def _bronze_dir(self) -> Path:
@@ -120,9 +118,9 @@ class RemotePathResolver(_BasePathResolver):
 
         return sorted(versions, key=lambda p: p.name, reverse=True)
 
-    # =========================================================================
+    # ---------------------------------------------------------------------------
     # Silver Layer (Current + Backup)
-    # =========================================================================
+    # ---------------------------------------------------------------------------
 
     @property
     def _silver_dir(self) -> Path:
@@ -137,25 +135,6 @@ class RemotePathResolver(_BasePathResolver):
     def silver_backup_path(self) -> Path:
         """Previous silver version (N-1) for fast rollback."""
         return self._silver_dir / "backup.parquet"
-
-
-@dataclass(frozen=True)
-class DerivedPathResolver(_BasePathResolver):
-    """Path construction for derived datasets: gold only."""
-
-    @property
-    def _gold_dir(self) -> Path:
-        return self.base_dir / "gold" / self.dataset_name
-
-    @property
-    def gold_current_path(self) -> Path:
-        """Active gold version (analytical table from joined Silver sources)."""
-        return self._gold_dir / "current.parquet"
-
-    @property
-    def gold_backup_path(self) -> Path:
-        """Previous gold version (N-1) for fast rollback."""
-        return self._gold_dir / "backup.parquet"
 
 
 if __name__ == "__main__":
@@ -173,9 +152,8 @@ if __name__ == "__main__":
         error.log(logger.critical)
         sys.exit(-1)
 
-    # Remote datasets: landing → bronze → silver
     for _dataset in _catalog.get_remote_datasets():
-        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(datetime.now())
+        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
 
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 
@@ -189,15 +167,4 @@ if __name__ == "__main__":
             bronze_latest_version=_resolver.bronze_latest_version(),
             silver_backup_path=_resolver.silver_backup_path,
             silver_current_path=_resolver.silver_current_path,
-        )
-
-    # Derived datasets: gold only
-    for _dataset in _catalog.get_derived_datasets():
-        _resolver = DerivedPathResolver(dataset_name=_dataset.name)
-
-        logger.debug(
-            "Derived dataset paths",
-            dataset_name=_dataset.name,
-            gold_current_path=_resolver.gold_current_path,
-            gold_backup_path=_resolver.gold_backup_path,
         )

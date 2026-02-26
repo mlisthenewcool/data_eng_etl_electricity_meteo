@@ -9,12 +9,12 @@ DataCatalog
             │   ├── name, description
             │   ├── source: RemoteSourceConfig (url, provider, format)
             │   └── ingestion: IngestionPolicy (frequency, mode)
-            └── DerivedDatasetConfig (Gold, built from Silver)
+            └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
-                └── source: DerivedSourceConfig (depends_on)
+                └── source: GoldSourceConfig (depends_on)
 
-Path resolution is handled by ``RemotePathResolver`` / ``DerivedPathResolver``,
-see ``path_resolver.py``.
+Path resolution is handled by ``RemotePathResolver``, see ``path_resolver.py``.
+Gold datasets live in Postgres (via dbt), not on disk.
 """
 
 from datetime import datetime
@@ -28,6 +28,7 @@ from pydantic import Discriminator, HttpUrl, Tag, ValidationError, model_validat
 from data_eng_etl_electricity_meteo.core.exceptions import (
     AirflowContextError,
     DatasetNotFoundError,
+    DatasetTypeError,
     InvalidCatalogError,
 )
 from data_eng_etl_electricity_meteo.core.pydantic_base import StrictModel, format_pydantic_errors
@@ -50,9 +51,6 @@ class SourceFormat(StrEnum):
 class IngestionFrequency(StrEnum):
     """Data update frequency, coupled with its Airflow schedule expression.
 
-    Each member stores ``(value, airflow_schedule)`` so that adding a new
-    frequency always requires defining its schedule.
-
     Examples
     --------
     >>> freq = IngestionFrequency.DAILY
@@ -62,28 +60,17 @@ class IngestionFrequency(StrEnum):
     '@daily'
     """
 
-    # Each member is defined as (value, airflow_schedule)
-    # The tuple is unpacked in __new__ to set both attributes
-    HOURLY = ("hourly", "@hourly")
-    DAILY = ("daily", "@daily")
-    WEEKLY = ("weekly", "@weekly")
-    MONTHLY = ("monthly", "@monthly")
-    YEARLY = ("yearly", "@yearly")
-    NEVER = ("never", None)
-
-    def __new__(cls, value: str, airflow_schedule: str | None):
-        """Create enum member storing *value* and *airflow_schedule*."""
-        obj = str.__new__(cls, value)
-        obj._value_ = value
-        # Store schedule in private attribute (dynamic attribute on enum)
-        obj._airflow_schedule = airflow_schedule
-        return obj
+    HOURLY = "hourly"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+    NEVER = "never"
 
     @property
     def airflow_schedule(self) -> str | None:
         """Airflow cron preset (e.g. ``@daily``) or ``None``."""
-        # Use getattr to satisfy type checkers (set dynamically in __new__)
-        return getattr(self, "_airflow_schedule", None)
+        return _AIRFLOW_SCHEDULES[self]
 
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
         """Return the Airflow Jinja template for versioning.
@@ -115,7 +102,7 @@ class IngestionFrequency(StrEnum):
 
         if self == IngestionFrequency.HOURLY:
             # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
-            #  ou "{{ ts_nodash[:11] }}"
+            #  or "{{ ts_nodash[:11] }}"
             return "{{ ts_nodash }}" if no_dash else "{{ ts }}"
 
         return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
@@ -133,19 +120,31 @@ class IngestionFrequency(StrEnum):
         Returns
         -------
         str
-            Hourly: ``%Y%m%dT%H%M%S`` / ``%Y-%m-%d-T-%H-%M-%S``.
-            Others: ``%Y%m%d`` / ``%Y-%m-%d``.
+            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+)
+            or ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
+            ``no_dash=True``: ``%Y%m%d`` (daily+)
+            or ``%Y%m%dT%H%M%S`` (hourly).
         """
         if self == IngestionFrequency.HOURLY:
             return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
 
-        # Daily/Weekly/Monthly/Yearly/Never
+        # All non-hourly frequencies are date-only — no time component needed.
         return dt.strftime("%Y%m%d" if no_dash else "%Y-%m-%d")
 
 
-# =============================================================================
+_AIRFLOW_SCHEDULES: dict[IngestionFrequency, str | None] = {
+    IngestionFrequency.HOURLY: "@hourly",
+    IngestionFrequency.DAILY: "@daily",
+    IngestionFrequency.WEEKLY: "@weekly",
+    IngestionFrequency.MONTHLY: "@monthly",
+    IngestionFrequency.YEARLY: "@yearly",
+    IngestionFrequency.NEVER: None,
+}
+
+
+# ---------------------------------------------------------------------------
 # Source configs (split by dataset type)
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class RemoteSourceConfig(StrictModel):
@@ -183,8 +182,12 @@ class RemoteSourceConfig(StrictModel):
         return str(self.url)
 
 
-class DerivedSourceConfig(StrictModel):
-    """Source configuration for derived (Gold) datasets.
+class GoldSourceConfig(StrictModel):
+    """Source configuration for Gold datasets.
+
+    ``depends_on`` is the single source of truth for Gold dependencies.
+    The future dbt ``sources.yml`` will be generated from the catalog,
+    not maintained separately.
 
     Attributes
     ----------
@@ -202,9 +205,9 @@ class DerivedSourceConfig(StrictModel):
         return self
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Ingestion policy
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class IngestionMode(StrEnum):
@@ -230,9 +233,9 @@ class IngestionPolicy(StrictModel):
     # incremental_key: str  # TODO: required if mode=INCREMENTAL
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Dataset configs (split by dataset type) + discriminated union
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class RemoteDatasetConfig(StrictModel):
@@ -256,8 +259,8 @@ class RemoteDatasetConfig(StrictModel):
     ingestion: IngestionPolicy
 
 
-class DerivedDatasetConfig(StrictModel):
-    """Derived (Gold) dataset entry built from Silver sources.
+class GoldDatasetConfig(StrictModel):
+    """Gold dataset entry built from Silver sources.
 
     Attributes
     ----------
@@ -266,16 +269,18 @@ class DerivedDatasetConfig(StrictModel):
     description:
         Human-readable description.
     source:
-        Derived source (depends_on).
+        Gold source (depends_on).
     """
 
     name: str
     description: str
-    source: DerivedSourceConfig
+    source: GoldSourceConfig
 
 
-def _dataset_discriminator(v: Any) -> str:
-    """Discriminate between remote and derived datasets.
+def _dataset_discriminator(
+    v: dict[str, object] | RemoteDatasetConfig | GoldDatasetConfig,
+) -> str:
+    """Discriminate between remote and gold datasets.
 
     Handles both raw ``dict`` (deserialization) and model instances
     (serialization), as required by Pydantic.
@@ -291,14 +296,14 @@ def _dataset_discriminator(v: Any) -> str:
 
 
 type DatasetConfig = Annotated[
-    Annotated[RemoteDatasetConfig, Tag("remote")] | Annotated[DerivedDatasetConfig, Tag("derived")],
+    Annotated[RemoteDatasetConfig, Tag("remote")] | Annotated[GoldDatasetConfig, Tag("derived")],
     Discriminator(_dataset_discriminator),
 ]
 
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Catalog
-# =============================================================================
+# ---------------------------------------------------------------------------
 
 
 class DataCatalog(StrictModel):
@@ -314,7 +319,7 @@ class DataCatalog(StrictModel):
 
     @model_validator(mode="before")
     @classmethod
-    def inject_names_into_datasets(cls, data: dict) -> dict:
+    def inject_names_into_datasets(cls, data: Any) -> Any:
         """Inject the YAML key into the 'name' field of each dataset."""
         if isinstance(data, dict) and "datasets" in data:
             for name, config in data["datasets"].items():
@@ -362,14 +367,16 @@ class DataCatalog(StrictModel):
                 reason=f"error parsing YAML: {yaml_error}",
             ) from yaml_error
         except ValidationError as pydantic_errors:
+            # Suppress pydantic internals from traceback (raise ... from None);
+            # details are captured in validation_errors.
             raise InvalidCatalogError(
                 path=path,
                 reason="Pydantic validation errors",
                 validation_errors=format_pydantic_errors(pydantic_errors),
             ) from None
 
-    def get_dataset(self, name: str) -> RemoteDatasetConfig | DerivedDatasetConfig:
-        """Retrieve a dataset by name.
+    def get_remote_dataset(self, name: str) -> RemoteDatasetConfig:
+        """Retrieve a remote dataset by name.
 
         Parameters
         ----------
@@ -378,68 +385,93 @@ class DataCatalog(StrictModel):
 
         Returns
         -------
-        RemoteDatasetConfig | DerivedDatasetConfig
+        RemoteDatasetConfig
 
         Raises
         ------
         DatasetNotFoundError
             If *name* is not in the catalog.
+        DatasetTypeError
+            If *name* refers to a gold dataset.
         """
         dataset = self.datasets.get(name)
-
-        if not dataset:
-            raise DatasetNotFoundError(
-                name=name,
-                available_datasets=list(self.datasets.keys()),
+        if dataset is None:
+            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+        if not isinstance(dataset, RemoteDatasetConfig):
+            raise DatasetTypeError(
+                name=name, expected="RemoteDatasetConfig", actual=type(dataset).__name__
             )
+        return dataset
 
+    def get_gold_dataset(self, name: str) -> GoldDatasetConfig:
+        """Retrieve a gold dataset by name.
+
+        Parameters
+        ----------
+        name:
+            Dataset identifier.
+
+        Returns
+        -------
+        GoldDatasetConfig
+
+        Raises
+        ------
+        DatasetNotFoundError
+            If *name* is not in the catalog.
+        DatasetTypeError
+            If *name* refers to a remote dataset.
+        """
+        dataset = self.datasets.get(name)
+        if dataset is None:
+            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+        if not isinstance(dataset, GoldDatasetConfig):
+            raise DatasetTypeError(
+                name=name, expected="GoldDatasetConfig", actual=type(dataset).__name__
+            )
         return dataset
 
     def get_remote_datasets(self) -> list[RemoteDatasetConfig]:
         """Return all remote (HTTP) datasets."""
         return [d for d in self.datasets.values() if isinstance(d, RemoteDatasetConfig)]
 
-    def get_derived_datasets(self) -> list[DerivedDatasetConfig]:
-        """Return all derived (Gold) datasets."""
-        return [d for d in self.datasets.values() if isinstance(d, DerivedDatasetConfig)]
+    def get_gold_datasets(self) -> list[GoldDatasetConfig]:
+        """Return all gold datasets."""
+        return [d for d in self.datasets.values() if isinstance(d, GoldDatasetConfig)]
 
     @model_validator(mode="after")
-    def validate_derived_dependencies_exist(self) -> Self:
+    def validate_gold_dependencies_exist(self) -> Self:
         """Ensure ``depends_on`` entries exist and are remote datasets."""
-        for dataset in self.get_derived_datasets():
+        for dataset in self.get_gold_datasets():
             for dep_name in dataset.source.depends_on:
                 if dep_name not in self.datasets:
                     raise ValueError(
                         f"Dataset '{dataset.name}' depends on "
-                        f"'{dep_name}' which is not defined "
-                        f"in the catalog"
+                        f"'{dep_name}' which is not defined in the catalog"
                     )
 
                 dep = self.datasets[dep_name]
                 if not isinstance(dep, RemoteDatasetConfig):
                     raise ValueError(
-                        f"Dataset '{dataset.name}' depends on "
-                        f"'{dep_name}' which is itself derived. "
-                        f"Gold datasets can only depend on "
-                        f"Silver datasets (from remote sources)."
+                        f"Dataset '{dataset.name}' depends on '{dep_name}'"
+                        " which is itself a gold dataset."
+                        " Gold datasets can only depend on Silver datasets."
                     )
         return self
 
 
 if __name__ == "__main__":
-    import sys
-
     from data_eng_etl_electricity_meteo.core.logger import get_logger
 
-    logger = get_logger("data_catalog")
+    _logger = get_logger("data_catalog")
 
     try:
-        catalog = DataCatalog.load(settings.data_catalog_file_path)
+        _catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as error:
-        error.log(log_method=logger.critical)
-        sys.exit(-1)
+        error.log(_logger.critical)
+        raise SystemExit(1)
 
-    logger.info("Catalog loaded", dataset_count=len(catalog.datasets))
+    _logger.info("Catalog loaded", dataset_count=len(_catalog.datasets))
 
-    for _name, _dataset in catalog.datasets.items():
-        logger.info("Dataset entry", dataset_name=_name, **_dataset.model_dump(exclude={"name"}))
+    for _name, _dataset in _catalog.datasets.items():
+        _logger.info("Dataset entry", dataset_name=_name, **_dataset.model_dump(exclude={"name"}))

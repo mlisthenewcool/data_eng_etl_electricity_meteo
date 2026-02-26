@@ -1,9 +1,11 @@
 """Explicit registry of dataset transformations.
 
-Each dataset must register its bronze, silver, and/or gold transform
-functions here. This is the single source of truth for available
-transformations — adding a dataset to the catalog without registering
-its transforms will fail fast in ``RemoteDatasetPipeline.__post_init__``.
+Each dataset must register its bronze and silver transform functions here.
+This is the single source of truth for available transformations — adding
+a dataset to the catalog without registering its transforms will fail fast
+in ``RemoteIngestionPipeline.__post_init__``.
+
+Gold transformations are handled by dbt in Postgres, not in Python.
 """
 
 from collections.abc import Callable
@@ -11,8 +13,8 @@ from pathlib import Path
 
 import polars as pl
 
+from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.exceptions import TransformNotFoundError
-from data_eng_etl_electricity_meteo.core.layers import MedallionLayer
 from data_eng_etl_electricity_meteo.transformations.shared import apply_common_silver
 
 # ---------------------------------------------------------------------------
@@ -21,7 +23,6 @@ from data_eng_etl_electricity_meteo.transformations.shared import apply_common_s
 
 BronzeTransformFunc = Callable[[Path], pl.DataFrame]
 SilverTransformFunc = Callable[[Path], pl.DataFrame]
-GoldTransformFunc = Callable[..., pl.DataFrame]
 
 # ---------------------------------------------------------------------------
 # Registries
@@ -50,8 +51,6 @@ SILVER_TRANSFORMS: dict[str, SilverTransformFunc] = {
     "odre_eco2mix_tr": odre_eco2mix_tr.transform_silver,
     "odre_installations": odre_installations.transform_silver,
 }
-
-GOLD_TRANSFORMS: dict[str, GoldTransformFunc] = {}
 
 # ---------------------------------------------------------------------------
 # Lookup functions
@@ -114,27 +113,3 @@ def get_silver_transform(dataset_name: str) -> SilverTransformFunc:
         return apply_common_silver(df, dataset_name)
 
     return wrapped
-
-
-def get_gold_transform(dataset_name: str) -> GoldTransformFunc:
-    """Retrieve the gold transform for a dataset.
-
-    Parameters
-    ----------
-    dataset_name:
-        Dataset identifier (must match a key in ``GOLD_TRANSFORMS``).
-
-    Returns
-    -------
-    GoldTransformFunc
-        Transform function: silver sources → gold DataFrame.
-
-    Raises
-    ------
-    TransformNotFoundError
-        If no gold transform is registered for *dataset_name*.
-    """
-    try:
-        return GOLD_TRANSFORMS[dataset_name]
-    except KeyError:
-        raise TransformNotFoundError(dataset_name=dataset_name, layer=MedallionLayer.GOLD) from None

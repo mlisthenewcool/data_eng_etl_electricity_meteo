@@ -9,28 +9,51 @@ from data_eng_etl_electricity_meteo.core.logger import get_logger
 logger = get_logger("transform.odre_eco2mix_cons_def")
 
 
+# ---------------------------------------------------------------------------
+# Bronze transformation
+# ---------------------------------------------------------------------------
+
+
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for ODRE eco2mix_cons_def.
+
+    Simply reads parquet from landing as-is.
 
     Parameters
     ----------
     landing_path:
-        Path to the parquet file from landing layer
+        Path to the parquet file from landing layer.
 
     Returns
     -------
     pl.DataFrame
-        DataFrame ready for bronze layer
+        DataFrame ready for bronze layer.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read failure (corrupt file, schema mismatch, etc.).
+    OSError
+        If *landing_path* does not exist or is not readable.
     """
     logger.debug("Apply bronze transformations", landing_path=landing_path)
     return pl.read_parquet(landing_path)
 
 
+# ---------------------------------------------------------------------------
+# Silver transformation
+# ---------------------------------------------------------------------------
+
+
 def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     """Silver transformation for ODRE eco2mix_cons_def.
 
-    Selects only the columns defined in the schema, dropping any spurious
-    columns from the source (e.g., column_30 from the ODRE API).
+    Deduplicates on the composite primary key ``(code_insee_region, date_heure)``,
+    keeping the last occurrence. This handles DST transitions where the ODRE API
+    may return duplicate timestamps with updated values.
+
+    Note: extra columns from the source (e.g. ``column_30``) are dropped by
+    the ``apply_common_silver`` wrapper in the transform registry, not here.
 
     Parameters
     ----------
@@ -40,7 +63,14 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     Returns
     -------
     pl.DataFrame
-        Silver layer DataFrame with exact schema.
+        Deduplicated DataFrame ready for the silver layer.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read or operation failure.
+    OSError
+        If *latest_bronze_path* does not exist or is not readable.
     """
     logger.debug("Apply silver transformations", latest_bronze_path=latest_bronze_path)
     df = pl.read_parquet(latest_bronze_path)

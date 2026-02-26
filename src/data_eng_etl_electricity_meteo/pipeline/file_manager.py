@@ -1,9 +1,7 @@
 """File operations for medallion architecture (symlinks, rotation, rollback, cleanup).
 
-Two manager types match the two dataset types:
-
-- ``RemoteFileManager``  → bronze symlinks, bronze cleanup, silver rotation/rollback
-- ``DerivedFileManager`` → gold rotation/rollback
+``RemoteFileManager`` handles bronze symlinks, bronze cleanup, and silver
+rotation/rollback. Gold datasets live in Postgres (via dbt), not on disk.
 """
 
 import os
@@ -12,12 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
-    DerivedPathResolver,
-    RemotePathResolver,
-)
+from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 
 logger = get_logger("file_manager")
 
@@ -31,7 +27,7 @@ def _rotate(
     dataset_name: str,
     current_path: Path,
     backup_path: Path,
-    layer: str,
+    layer: MedallionLayer,
 ) -> None:
     """Copy ``current`` → ``backup``. No-op if current doesn't exist.
 
@@ -44,7 +40,12 @@ def _rotate(
     backup_path:
         Path to the backup file.
     layer:
-        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+        Medallion layer (e.g. ``MedallionLayer.SILVER``).
+
+    Raises
+    ------
+    OSError
+        If the copy fails (permission error, disk full, etc.).
     """
     if current_path.exists():
         backup_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +69,7 @@ def _rollback(
     dataset_name: str,
     current_path: Path,
     backup_path: Path,
-    layer: str,
+    layer: MedallionLayer,
 ) -> bool:
     """Restore ``backup`` → ``current``.
 
@@ -81,12 +82,17 @@ def _rollback(
     backup_path:
         Path to the backup file.
     layer:
-        Layer name for log messages (e.g. ``"silver"``, ``"gold"``).
+        Medallion layer (e.g. ``MedallionLayer.SILVER``).
 
     Returns
     -------
     bool
         ``True`` if rollback succeeded, ``False`` if no backup exists.
+
+    Raises
+    ------
+    OSError
+        If the copy fails (permission error, disk full, etc.).
     """
     if not backup_path.exists():
         logger.warning(
@@ -184,7 +190,8 @@ class RemoteFileManager:
         list[Path]
             Paths of deleted version files.
         """
-        cutoff_time = datetime.now(tz=UTC) - timedelta(days=retention_days)
+        now = datetime.now(tz=UTC)
+        cutoff_time = now - timedelta(days=retention_days)
         deleted = []
 
         for version_path in self.resolver.list_bronze_versions():
@@ -197,8 +204,16 @@ class RemoteFileManager:
                     "Deleted old bronze version",
                     dataset_name=self.resolver.dataset_name,
                     version=version_path.stem,
-                    age_days=(datetime.now(tz=UTC) - file_mtime).days,
+                    age_days=(now - file_mtime).days,
                 )
+
+        if deleted:
+            logger.info(
+                "Bronze cleanup completed",
+                dataset_name=self.resolver.dataset_name,
+                deleted_count=len(deleted),
+                retention_days=retention_days,
+            )
 
         return deleted
 
@@ -211,7 +226,7 @@ class RemoteFileManager:
             self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
-            "silver",
+            MedallionLayer.SILVER,
         )
 
     def rollback_silver(self) -> bool:
@@ -226,44 +241,5 @@ class RemoteFileManager:
             self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
-            "silver",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Derived datasets (gold)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class DerivedFileManager:
-    """File operations for derived datasets: gold rotation/rollback."""
-
-    resolver: DerivedPathResolver
-
-    def rotate_gold(self) -> None:
-        """Copy ``current.parquet`` → ``backup.parquet``.
-
-        Call **before** writing new current. No-op if current doesn't exist.
-        """
-        _rotate(
-            self.resolver.dataset_name,
-            self.resolver.gold_current_path,
-            self.resolver.gold_backup_path,
-            "gold",
-        )
-
-    def rollback_gold(self) -> bool:
-        """Restore ``backup.parquet`` → ``current.parquet``.
-
-        Returns
-        -------
-        bool
-            ``True`` if rollback succeeded, ``False`` if no backup exists.
-        """
-        return _rollback(
-            self.resolver.dataset_name,
-            self.resolver.gold_current_path,
-            self.resolver.gold_backup_path,
-            "gold",
+            MedallionLayer.SILVER,
         )

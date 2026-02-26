@@ -46,6 +46,13 @@ class RemoteFileMetadata:
         ----------
         other:
             Previous metadata to compare against.
+
+        Returns
+        -------
+        ChangeDetectionResult
+            ``has_changed=True`` if a change is detected or metadata is
+            insufficient to confirm identity; ``False`` only when at least
+            one field matches conclusively.
         """
         if not self._has_any_field() or not other._has_any_field():
             return ChangeDetectionResult(True, "Missing metadata on current or previous state")
@@ -158,24 +165,3 @@ def get_remote_file_metadata(
     )
 
     return metadata
-
-
-def has_remote_file_changed(
-    current: RemoteFileMetadata, previous: RemoteFileMetadata
-) -> ChangeDetectionResult:
-    """Compare two metadata snapshots to detect changes.
-
-    Parameters
-    ----------
-    current:
-        Newly fetched metadata.
-    previous:
-        Metadata from a previous execution.
-
-    Returns
-    -------
-    ChangeDetectionResult
-        Verdict indicating whether the remote file has changed.
-    """
-    # TODO: ajouter méthode If-None-Match (HTTP 304)
-    return current.compare_with(previous)
