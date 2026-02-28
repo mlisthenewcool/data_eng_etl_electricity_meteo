@@ -5,7 +5,6 @@ from pathlib import Path
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.transformations.shared import to_snake_case
 
 logger = get_logger("transform.odre_installations")
 
@@ -71,46 +70,31 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for ODRE installations.
 
     Adds business flags for energy type classification.
 
     Transformations applied:
 
-    - Rename columns to snake_case (needed before business logic).
     - Add ``est_renouvelable`` flag based on ``code_filiere``.
     - Add ``type_energie`` simplified classification via ``TYPE_ENERGIE_MAPPING``.
     - Add ``est_actif`` flag (``True`` when ``date_deraccordement`` is null).
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df:
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
     pl.DataFrame
-        Normalized and enriched DataFrame.
-
-    Raises
-    ------
-    polars.exceptions.PolarsError
-        On any Polars read failure (corrupt file, schema mismatch, etc.).
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
+        Enriched DataFrame with energy type flags.
     """
-    logger.debug("Reading from bronze", latest_bronze_path=latest_bronze_path)
-    df = pl.read_parquet(latest_bronze_path)
-
     logger.debug("Applying transformations", n_rows=len(df), n_cols=len(df.columns))
 
-    # Rename to snake_case early: business logic below references snake_case names.
-    # The registry wrapper will re-apply to_snake_case, which is a no-op.
-    df_renamed = df.rename(to_snake_case)
-
     # Add business flags
-    df_with_flags = df_renamed.with_columns(
+    df_with_flags = df.with_columns(
         pl.col("code_filiere").is_in(FILIERES_RENOUVELABLES).alias("est_renouvelable"),
         pl.col("code_filiere")
         .replace_strict(TYPE_ENERGIE_MAPPING, default="autre")

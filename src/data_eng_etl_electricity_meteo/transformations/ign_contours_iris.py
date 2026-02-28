@@ -59,7 +59,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         logger.debug("Copied GeoPackage to temp file", tmp_path=tmp_gpkg)
 
         with duckdb.connect(":memory:") as conn:
-            # Spatial extension is installed with Docker when running on Airflow
+            # INSTALL is idempotent (fast cache check if already present).
+            # On Airflow the extension is pre-installed in the Docker image.
             if not settings.is_running_on_airflow:
                 conn.execute("INSTALL spatial;")
 
@@ -84,7 +85,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for IGN Contours IRIS.
 
     Enriches IRIS contours with centroid coordinates in WGS84.
@@ -99,8 +100,8 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df:
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
@@ -110,21 +111,21 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     Raises
     ------
     duckdb.Error
-        On DuckDB spatial query failure (missing extension, corrupt parquet, etc.).
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
+        On DuckDB spatial query failure (missing extension, etc.).
     """
-    logger.debug("Reading from bronze latest", bronze_path=latest_bronze_path)
-
     # Use DuckDB for spatial operations on the WKB geometry
     with duckdb.connect(":memory:") as conn:
-        # Spatial extension is installed with Docker when running on Airflow
+        # INSTALL is idempotent (fast cache check if already present).
+        # On Airflow the extension is pre-installed in the Docker image.
         if not settings.is_running_on_airflow:
             conn.execute("INSTALL spatial;")
 
         conn.execute("LOAD spatial;")
         conn.execute("SET threads = 1")
         conn.execute("SET memory_limit = '1GB'")
+
+        # Register the pre-processed DataFrame so DuckDB can query it directly
+        conn.register("bronze_data", df)
 
         # Compute centroids and transform to WGS84.
         # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154).
@@ -148,7 +149,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
                     'EPSG:2154',
                     'EPSG:4326'
                 ) AS centroid_wgs84
-            FROM read_parquet(?)
+            FROM bronze_data
         )
         SELECT
             code_iris,
@@ -163,7 +164,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
         """
 
         logger.debug("Computing centroids with DuckDB spatial extension")
-        df = conn.execute(query, [str(latest_bronze_path)]).pl()
+        result = conn.execute(query).pl()
 
-    logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
-    return df
+    logger.debug("Silver transformation completed", row_count=len(result), columns=result.columns)
+    return result

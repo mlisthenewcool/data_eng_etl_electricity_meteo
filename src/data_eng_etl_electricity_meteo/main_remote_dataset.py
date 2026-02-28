@@ -12,17 +12,15 @@ from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
     DataCatalogError,
+    DownloadStageError,
     ExtractStageError,
-    IngestStageError,
     PostgresLoadError,
     SilverStageError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.loaders.postgres import (
-    load_silver_to_postgres,
-    open_standalone_connection,
-)
+from data_eng_etl_electricity_meteo.loaders.pg_connection import open_standalone_connection
+from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 
 logger = get_logger("main")
@@ -38,9 +36,9 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     """
     start_datetime = datetime.now(tz=UTC)
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 0) Load catalog and dataset configuration
-    # ============================================================
+    # ------------------------------------------------------------
     try:
         catalog = DataCatalog.load(settings.data_catalog_file_path)
         dataset_config = catalog.get_remote_dataset(dataset_name)
@@ -61,38 +59,38 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         **dataset_config.model_dump(mode="json", exclude={"name"}),
     )
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 1) Prepare version and RemoteIngestionPipeline
-    # ============================================================
+    # ------------------------------------------------------------
     version = dataset_config.ingestion.frequency.format_datetime_as_version(start_datetime)
     manager = RemoteIngestionPipeline(dataset=dataset_config)
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 2) Load metadata from previous run (not-implemented yet)
-    # ============================================================
+    # ------------------------------------------------------------
     logger.warning("Load previous run metadata not yet implemented outside of Airflow")
     previous_snapshot = None
 
-    # ============================================================
-    # 3) Ingest stage
-    # ============================================================
+    # ------------------------------------------------------------
+    # 3) Download stage
+    # ------------------------------------------------------------
     try:
-        ingest_ctx = manager.ingest(version=version, previous_snapshot=previous_snapshot)
-    except IngestStageError as error:
+        download_ctx = manager.download(version=version, previous_snapshot=previous_snapshot)
+    except DownloadStageError as error:
         error.log(logger.critical)
         sys.exit(1)
 
-    if ingest_ctx is None:
+    if download_ctx is None:
         logger.info("Pipeline skipped: content unchanged")
         return
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 4) (optional) Extract stage
-    # ============================================================
+    # ------------------------------------------------------------
     if dataset_config.source.format.is_archive:
         try:
             extract_ctx = manager.extract_archive(
-                context=ingest_ctx, previous_snapshot=previous_snapshot
+                context=download_ctx, previous_snapshot=previous_snapshot
             )
         except ExtractStageError as error:
             error.log(logger.critical)
@@ -105,32 +103,32 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         logger.info("Extraction skipped: format is not archive", dataset_name=dataset_name)
         extract_ctx = None
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 5) Bronze stage
-    # ============================================================
+    # ------------------------------------------------------------
     try:
-        bronze_ctx = manager.to_bronze(context=extract_ctx or ingest_ctx)
+        bronze_ctx = manager.to_bronze(context=extract_ctx or download_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
         sys.exit(1)
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 6) Silver stage
-    # ============================================================
+    # ------------------------------------------------------------
     try:
         _ = manager.to_silver(context=bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
         sys.exit(1)
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 7) Save successful run metadata
-    # ============================================================
+    # ------------------------------------------------------------
     logger.warning("Save run metadata not yet implemented outside of Airflow")
 
-    # ============================================================
+    # ------------------------------------------------------------
     # 8) Load data to Postgres
-    # ============================================================
+    # ------------------------------------------------------------
     try:
         connection = open_standalone_connection()
     except PostgresLoadError as err:
@@ -141,11 +139,12 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         sys.exit(1)
 
     try:
-        with connection:
-            metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
+        metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
     except PostgresLoadError as err:
         err.log(logger.exception)
         sys.exit(1)
+    finally:
+        connection.close()
 
     logger.info("Load to Postgres ok", **metrics.model_dump())
 

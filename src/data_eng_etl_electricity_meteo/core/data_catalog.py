@@ -8,7 +8,8 @@ DataCatalog
             ├── RemoteDatasetConfig (HTTP source)
             │   ├── name, description
             │   ├── source: RemoteSourceConfig (url, provider, format)
-            │   └── ingestion: IngestionPolicy (frequency, mode)
+            │   ├── ingestion: IngestionPolicy (frequency, mode)
+            │   └── postgres: PostgresConfig (table name)
             └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
                 └── source: GoldSourceConfig (depends_on)
@@ -210,6 +211,18 @@ class GoldSourceConfig(StrictModel):
 # ---------------------------------------------------------------------------
 
 
+class PostgresConfig(StrictModel):
+    """Postgres loading configuration for a dataset.
+
+    Attributes
+    ----------
+    table:
+        Target table name without schema prefix (e.g. ``"dim_installations"``).
+    """
+
+    table: str
+
+
 class IngestionMode(StrEnum):
     """Ingestion mode (``snapshot`` or ``incremental``)."""
 
@@ -251,12 +264,15 @@ class RemoteDatasetConfig(StrictModel):
         Remote source (url, provider, format).
     ingestion:
         Ingestion frequency and mode.
+    postgres:
+        Postgres loading configuration (target table name).
     """
 
     name: str
     description: str
     source: RemoteSourceConfig
     ingestion: IngestionPolicy
+    postgres: PostgresConfig
 
 
 class GoldDatasetConfig(StrictModel):

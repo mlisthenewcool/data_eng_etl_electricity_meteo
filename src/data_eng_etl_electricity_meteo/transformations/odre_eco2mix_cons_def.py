@@ -45,36 +45,26 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for ODRE eco2mix_cons_def.
 
     Deduplicates on the composite primary key ``(code_insee_region, date_heure)``,
     keeping the last occurrence. This handles DST transitions where the ODRE API
     may return duplicate timestamps with updated values.
 
-    Note: extra columns from the source (e.g. ``column_30``) are dropped by
-    the ``apply_common_silver`` wrapper in the transform registry, not here.
+    Note: extra all-null columns from the source (e.g. ``column_30``) are dropped
+    by ``prepare_silver`` before this function is called.
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df:
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
     pl.DataFrame
         Deduplicated DataFrame ready for the silver layer.
-
-    Raises
-    ------
-    polars.exceptions.PolarsError
-        On any Polars read or operation failure.
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
     """
-    logger.debug("Apply silver transformations", latest_bronze_path=latest_bronze_path)
-    df = pl.read_parquet(latest_bronze_path)
-
     # Select only expected columns in the correct order
     # This drops any extra columns (like column_30) from the source
     # TODO: df = df.select(list(SCHEMA_ODRE_ECO2MIX_CONS_DEF.names()))

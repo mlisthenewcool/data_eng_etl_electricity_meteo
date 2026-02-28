@@ -180,9 +180,9 @@ class TransformValidationError(BaseProjectException):
 class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
-    def __init__(self, stage: PipelineStage) -> None:
+    def __init__(self, stage: PipelineStage, message: str | None = None) -> None:
         self.stage = stage
-        super().__init__(f"Pipeline stage '{stage}' failed.")
+        super().__init__(message or f"Pipeline stage '{stage}' failed.")
 
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes.
@@ -214,11 +214,11 @@ class PipelineStageError(BaseProjectException):
             )
 
 
-class IngestStageError(PipelineStageError):
-    """Raised when the ingest (download) stage fails."""
+class DownloadStageError(PipelineStageError):
+    """Raised when the download stage fails."""
 
     def __init__(self) -> None:
-        super().__init__(PipelineStage.INGEST)
+        super().__init__(PipelineStage.DOWNLOAD)
 
 
 class ExtractStageError(PipelineStageError):
@@ -245,8 +245,8 @@ class SilverStageError(PipelineStageError):
 class PostgresLoadError(PipelineStageError):
     """Raised when loading silver Parquet into Postgres fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.LOAD_POSTGRES)
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(PipelineStage.LOAD_POSTGRES, message=message)
 
 
 class PostgresCredentialsError(PostgresLoadError):
@@ -255,9 +255,7 @@ class PostgresCredentialsError(PostgresLoadError):
     def __init__(self, missing_field: str, suggestion: str) -> None:
         self.missing_field = missing_field
         self.suggestion = suggestion
-        # Skip PostgresLoadError.__init__ to set a more specific message
-        PipelineStageError.__init__(self, PipelineStage.LOAD_POSTGRES)
-        self.args = ("Postgres credentials not configured.",)
+        super().__init__(message="Postgres credentials not configured.")
 
 
 class GoldStageError(PipelineStageError):
@@ -290,9 +288,9 @@ if __name__ == "__main__":
         print("", file=sys.stderr)
 
     # ---------------------------------------------------------------------------
-    # 1) IngestStageError — httpx causes
+    # 1) DownloadStageError — httpx causes
     # ---------------------------------------------------------------------------
-    _section("IngestStageError  <-  httpx.ConnectError")
+    _section("DownloadStageError  <-  httpx.ConnectError")
     try:
         try:
             raise httpx.ConnectError(
@@ -300,12 +298,12 @@ if __name__ == "__main__":
                 request=httpx.Request("HEAD", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError() from err
-    except IngestStageError as error:
+            raise DownloadStageError() from err
+    except DownloadStageError as error:
         error.log(_logger.critical)
     _end()
 
-    _section("IngestStageError  <-  httpx.TimeoutException")
+    _section("DownloadStageError  <-  httpx.TimeoutException")
     try:
         try:
             raise httpx.ReadTimeout(
@@ -313,20 +311,20 @@ if __name__ == "__main__":
                 request=httpx.Request("GET", "https://data.example.fr/big_archive.7z"),
             )
         except httpx.HTTPError as err:
-            raise IngestStageError() from err
-    except IngestStageError as error:
+            raise DownloadStageError() from err
+    except DownloadStageError as error:
         error.log(_logger.critical)
     _end()
 
-    _section("IngestStageError  <-  httpx.HTTPStatusError")
+    _section("DownloadStageError  <-  httpx.HTTPStatusError")
     try:
         try:
             _request = httpx.Request("GET", "https://data.example.fr/big_archive.7z")
             _response = httpx.Response(status_code=503, request=_request)
             raise httpx.HTTPStatusError("Server Error", request=_request, response=_response)
         except httpx.HTTPError as err:
-            raise IngestStageError() from err
-    except IngestStageError as error:
+            raise DownloadStageError() from err
+    except DownloadStageError as error:
         error.log(_logger.critical)
     _end()
 

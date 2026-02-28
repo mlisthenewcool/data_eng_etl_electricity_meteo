@@ -15,7 +15,7 @@ class MedallionLayer(StrEnum):
 class PipelineStage(StrEnum):
     """Pipeline execution stages covering ingestion, transformation, and loading."""
 
-    INGEST = "ingest"
+    DOWNLOAD = "download"
     EXTRACT = "extract"
     BRONZE = "bronze"
     SILVER = "silver"

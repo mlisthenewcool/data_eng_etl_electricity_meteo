@@ -6,7 +6,7 @@ updated (i.e. when the corresponding ingestion DAG produces new data).
 
 Pipeline position::
 
-    [ingest_*]  →  silver file Asset  →  [load_pg_*]  →  silver PG Asset  →  [dbt]
+    [*_ingest]  →  silver file Asset  →  [*_load_pg]  →  silver PG Asset  →  [dbt]
        ETL                                  LOAD                               ELT
 
 Each generated DAG:
@@ -20,33 +20,20 @@ so credentials come from the Airflow connection store, not from
 """
 
 from collections.abc import Generator
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import timedelta
 
 from airflow.sdk import DAG, Asset, Metadata, dag, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset, get_silver_pg_asset
+from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.loaders.postgres import load_silver_to_postgres_from_hook
+from data_eng_etl_electricity_meteo.loaders.pg_connection import open_airflow_hook_connection
+from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
 
 logger = get_logger("dag_factory.load_pg")
-
-# ---------------------------------------------------------------------------
-# Production defaults (mirror remote_dataset_factory.py)
-# ---------------------------------------------------------------------------
-
-DEFAULT_ARGS: dict[str, Any] = {
-    "owner": "data-engineering",
-    "retries": 2,
-    "retry_delay": timedelta(seconds=5),
-    "retry_exponential_backoff": True,
-    "max_retry_delay": timedelta(minutes=10),
-    "execution_timeout": timedelta(minutes=30),
-    "depends_on_past": False,
-}
 
 TASK_LOAD = "load_silver_to_postgres"
 TASK_LOAD_TIMEOUT = timedelta(minutes=20)
@@ -75,12 +62,12 @@ def _create_dag(
     """
 
     @dag(
-        dag_id=f"load_pg_{dataset_config.name}",
+        dag_id=f"{dataset_config.name}_load_pg",
         schedule=silver_file_asset,  # triggered by the ingestion DAG's outlet
-        start_date=datetime(2026, 1, 24),
+        start_date=START_DATE,
         catchup=False,
         default_args=DEFAULT_ARGS,
-        tags=["load", "Postgres", "silver"],
+        tags=["load", "postgres", "silver"],
         doc_md=__doc__,
     )
     def _dag() -> None:
@@ -93,14 +80,16 @@ def _create_dag(
             """Load silver parquet into the Postgres silver schema.
 
             Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come
-            from the Airflow connection store, connection lifecycle is managed
-            inside ``load_silver_to_postgres_from_hook``.
+            from the Airflow connection store.
             """
             # Lazy import: airflow providers only available inside the container.
             from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
 
-            hook = PostgresHook("project_postgres")
-            metrics = load_silver_to_postgres_from_hook(dataset_config=dataset_config, hook=hook)
+            conn = open_airflow_hook_connection(PostgresHook("project_postgres"))
+            try:
+                metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=conn)
+            finally:
+                conn.close()
 
             yield Metadata(
                 asset=silver_pg_asset,
@@ -139,7 +128,7 @@ def _generate_all_dags() -> dict[str, DAG]:
             dags[dataset_config.name] = _create_dag(
                 dataset_config, silver_file_asset, silver_pg_asset
             )
-            logger.info("Created load DAG", dag_id=f"load_pg_{dataset_config.name}")
+            logger.info("Created load DAG", dag_id=f"{dataset_config.name}_load_pg")
         except ValueError:
             logger.exception("Failed to create load DAG", dataset_name=dataset_config.name)
 

@@ -317,6 +317,11 @@ def _detect_output_mode() -> OutputMode:
 
     Result is cached after the first call — reconfiguring structlog at runtime
     does not re-trigger detection.
+
+    Notes
+    -----
+    ``"json"`` mode is never auto-detected; it must be explicitly
+    requested via ``_setup_logger(output="json")``.
     """
     if settings.is_running_on_airflow:
         return "airflow"

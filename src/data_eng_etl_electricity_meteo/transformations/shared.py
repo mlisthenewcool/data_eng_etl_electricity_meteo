@@ -50,25 +50,23 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
-def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
-    """Apply common silver-layer steps: snake_case rename + validations.
+def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
+    """Apply common silver pre-processing: snake_case rename + drop all-null columns.
+
+    Called by the registry wrapper **before** the dataset-specific transform,
+    so that all silver transforms receive clean, snake_case column names.
 
     Parameters
     ----------
     df:
-        DataFrame returned by a dataset-specific silver transform.
+        Raw DataFrame read from the bronze parquet.
     dataset_name:
-        Dataset identifier (for logging and error reporting).
+        Dataset identifier (for logging).
 
     Returns
     -------
     pl.DataFrame
-        DataFrame with standardized column names, validated.
-
-    Raises
-    ------
-    TransformValidationError
-        If the resulting DataFrame is empty after dropping all-null columns.
+        DataFrame with snake_case columns and spurious all-null columns removed.
     """
     df = df.rename(to_snake_case)
 
@@ -80,6 +78,5 @@ def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
         logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
         df = df.drop(null_cols)
 
-    validate_not_empty(df, dataset_name)
-    logger.debug("Common silver steps applied")
+    logger.debug("Common silver pre-processing applied", dataset_name=dataset_name)
     return df

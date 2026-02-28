@@ -7,16 +7,16 @@ L'objectif est de transformer les données silver (Postgres) en données gold
 ## Architecture cible
 
 ```text
-remote_dataset_factory.py          load_pg_factory.py           dbt_transform_dag.py
+ingest_factory.py                  load_pg_factory.py           dbt_transform_dag.py
 ┌─────────────────────┐           ┌──────────────────┐         ┌──────────────────┐
-│ ingest_odre_instal. │──Asset──→ │ load_odre_instal. │──Asset─→│                  │
-│ ingest_meteo_stat.  │──Asset──→ │ load_meteo_stat.  │──Asset─→│  dbt run         │
-│ ingest_ign_contours │──Asset──→ │ load_ign_contours │──Asset─→│  dbt test        │
-│ ingest_eco2mix_*    │──Asset──→ │ load_eco2mix_*    │         │                  │
+│ odre_instal._ingest │──Asset──→ │ odre_instal._load_pg │─Asset─→│                  │
+│ meteo_stat._ingest  │──Asset──→ │ meteo_stat._load_pg  │─Asset─→│  dbt run         │
+│ ign_contours_ingest │──Asset──→ │ ign_contours_load_pg │─Asset─→│  dbt test        │
+│ eco2mix_*_ingest    │──Asset──→ │ eco2mix_*_load_pg    │        │                  │
 └─────────────────────┘           └──────────────────┘         └──────────────────┘
    silver .parquet                   silver PG                    gold PG
    (1 DAG/dataset)                   (1 DAG/dataset)              (1 DAG, AssetAll)
-   EXISTANT                          À IMPLÉMENTER                À IMPLÉMENTER
+   EXISTANT                          EXISTANT                     À IMPLÉMENTER
 ```
 
 ## Chaînage des DAGs par Assets
@@ -25,8 +25,8 @@ Trois niveaux de DAGs communiquent via le mécanisme d'Assets Airflow :
 
 ### Niveau 1 — Ingestion (existant)
 
-Les DAGs `ingest_*` produisent des Assets silver fichier en outlet. Déjà en place
-dans `remote_dataset_factory.py`.
+Les DAGs `*_ingest` produisent des Assets silver fichier en outlet. Déjà en place
+dans `ingest_factory.py`.
 
 ### Niveau 2 — Load Postgres (à implémenter)
 

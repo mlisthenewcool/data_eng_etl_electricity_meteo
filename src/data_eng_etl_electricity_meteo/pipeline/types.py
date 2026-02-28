@@ -9,7 +9,7 @@ Architecture
 
 Pipeline functions (typed) ↔ Airflow tasks (dicts via XCom):
 
-    ingest()    → PipelineContext(download=DownloadMetrics(...))
+    download()  → PipelineContext(download=DownloadMetrics(...))
     extract()   → PipelineContext(download=DownloadMetrics(..., extraction_info=...))
     to_bronze() → PipelineContext(..., bronze=BronzeMetrics(...))
     to_silver() → PipelineContext(..., silver=SilverMetrics(...))
@@ -118,7 +118,7 @@ class LoadPostgresMetrics(StrictModel):
     dataset_name:
         Dataset identifier.
     table:
-        Schema-qualified table name (e.g. ``silver.odre_installations``).
+        Schema-qualified table name (e.g. ``silver.dim_installations``).
     strategy:
         Loading strategy used: ``"snapshot"`` or ``"incremental"``.
     rows_loaded:

@@ -30,6 +30,8 @@ datasets:
     ingestion:
       frequency: "daily"
       mode: "snapshot"
+    postgres:
+      table: "dim_contours_iris"
 
   odre_installations:
     description: "Registre national des installations de production et stockage d'électricité"
@@ -40,6 +42,8 @@ datasets:
     ingestion:
       frequency: "daily"
       mode: "snapshot"
+    postgres:
+      table: "dim_installations"
 
   odre_eco2mix_cons_def:
     description: "Production électrique régionale eco2mix (consolidées et définitives)"
@@ -50,6 +54,8 @@ datasets:
     ingestion:
       frequency: "daily" # TODO[prod]: change to weekly or monthly
       mode: "snapshot"
+    postgres:
+      table: "fact_eco2mix_cons_def"
 
   odre_eco2mix_tr:
     description: "Production électrique régionale eco2mix (temps réel)"
@@ -60,6 +66,8 @@ datasets:
     ingestion:
       frequency: "hourly"
       mode: "snapshot" # TODO: à passer en incremental
+    postgres:
+      table: "fact_eco2mix_tr"
 
   meteo_france_stations:
     description: "Liste des stations météorologiques de Météo France avec accès aux caractéristiques détaillées."
@@ -72,6 +80,8 @@ datasets:
     ingestion:
       frequency: "daily"
       mode: "snapshot"
+    postgres:
+      table: "dim_stations_meteo"
 
   # ============================================================
   # DERIVED DATASETS (Gold - built from Silver sources)

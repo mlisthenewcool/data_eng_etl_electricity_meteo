@@ -8,6 +8,8 @@ datasets:
     ingestion:
       frequency: "daily"
       mode: "snapshot"
+    postgres:
+      table: "fact_electricity_mix"
 
   french_communes:
     description: "French communes geographic data from IGN"
@@ -19,6 +21,8 @@ datasets:
     ingestion:
       frequency: "yearly"
       mode: "snapshot"
+    postgres:
+      table: "dim_communes"
 
   energy_weather:
     description: "Combined energy and weather gold dataset"

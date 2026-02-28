@@ -1,11 +1,6 @@
--- Silver table: ODRE electricity production/storage installations registry.
--- Strategy: snapshot (TRUNCATE + COPY on each load).
--- Primary key: id_peps (PEPS installation identifier).
---
--- Note: "date_mise_enservice_(format_date)" is a verbatim column name from the
--- ODRE source API and is preserved as-is in the silver parquet.
+-- "date_mise_enservice_(format_date)" is a verbatim column name from the ODRE source API.
 
-CREATE TABLE IF NOT EXISTS silver.odre_installations (
+CREATE TABLE IF NOT EXISTS {schema}.{table} (
     id_peps                                 TEXT PRIMARY KEY,
     nom_installation                        TEXT,
     code_eic_resource_object                TEXT,
@@ -59,5 +54,21 @@ CREATE TABLE IF NOT EXISTS silver.odre_installations (
     "date_mise_enservice_(format_date)"     DATE,
     est_renouvelable                        BOOLEAN,
     type_energie                            TEXT,
-    est_actif                               BOOLEAN
+    est_actif                               BOOLEAN,
+    inserted_at                             TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_iris
+    ON {schema}.{table}(code_iris);
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_type_energie
+    ON {schema}.{table}(type_energie);
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_filiere
+    ON {schema}.{table}(code_filiere);
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_region
+    ON {schema}.{table}(code_region);
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_renouvelable
+    ON {schema}.{table}(est_renouvelable) WHERE est_renouvelable = TRUE;

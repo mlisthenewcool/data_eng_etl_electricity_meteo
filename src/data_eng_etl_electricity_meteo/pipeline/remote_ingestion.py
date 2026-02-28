@@ -3,7 +3,7 @@
 Orchestrates the full ingestion pipeline for a single remote dataset,
 completely decoupled from Airflow:
 
-1. **Ingest** — HEAD check + smart skip + download to landing
+1. **Download** — HEAD check + smart skip + download to landing
 2. **Extract** — 7z extraction with SHA-256 integrity (optional)
 3. **Bronze** — landing → versioned Parquet + ``latest`` symlink
 4. **Silver** — bronze latest → business transform → ``current`` / ``backup``
@@ -23,9 +23,9 @@ import httpx
 from data_eng_etl_electricity_meteo.core.data_catalog import RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
+    DownloadStageError,
     ExtractionError,
     ExtractStageError,
-    IngestStageError,
     SilverStageError,
     TransformValidationError,
 )
@@ -64,7 +64,7 @@ logger = get_logger("pipeline")
 class RemoteIngestionPipeline:
     """Pipeline manager for a single remote dataset.
 
-    Orchestrates: ingest → (extract) → to_bronze → to_silver.
+    Orchestrates: download → (extract) → to_bronze → to_silver.
 
     Attributes
     ----------
@@ -95,7 +95,7 @@ class RemoteIngestionPipeline:
         return RemoteFileManager(self.resolver)
 
     # ---------------------------------------------------------------------------
-    # Ingestion
+    # Download
     # ---------------------------------------------------------------------------
 
     def _decide_ingestion(
@@ -154,7 +154,7 @@ class RemoteIngestionPipeline:
             should_ingest=True, is_healing=False, remote_metadata=current_remote_file_info
         )
 
-    def ingest(
+    def download(
         self, version: str, previous_snapshot: PipelineRunSnapshot | None
     ) -> PipelineContext | None:
         """Run the full ingestion flow: smart-skip checks then download.
@@ -176,17 +176,17 @@ class RemoteIngestionPipeline:
 
         Raises
         ------
-        IngestStageError
+        DownloadStageError
             On any HTTP failure (connect, timeout, status error) during the
             HEAD check or the download.
         """
-        logger.info("Ingesting", version=version)
+        logger.info("Downloading", version=version)
 
         # --- 1. Fetch current remote metadata (HEAD request) ---
         try:
             remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
         except httpx.HTTPError as err:
-            raise IngestStageError() from err
+            raise DownloadStageError() from err
 
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
@@ -210,7 +210,7 @@ class RemoteIngestionPipeline:
                 progress=AirflowDownloadProgress if settings.is_running_on_airflow else None,
             )
         except httpx.HTTPError as err:
-            raise IngestStageError() from err
+            raise DownloadStageError() from err
 
         context = PipelineContext(
             version=version,
@@ -433,6 +433,7 @@ class RemoteIngestionPipeline:
             self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
             df.write_parquet(self.resolver.silver_current_path)
         except OSError as err:
+            self._file_manager.rollback_silver()
             raise SilverStageError() from err
 
         columns = df.columns

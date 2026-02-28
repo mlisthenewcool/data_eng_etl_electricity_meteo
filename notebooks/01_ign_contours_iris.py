@@ -1,51 +1,94 @@
 import marimo
 
-__generated_with = "0.19.11"
+__generated_with = "0.19.9"
 app = marimo.App(width="full")
 
 
 @app.cell
 def _():
-    from pathlib import Path  # noqa: PLC0415
+    import marimo as mo
+    import duckdb
+    import polars as pl
 
-    from data_eng_etl_electricity_meteo.core.logger import logger  # noqa: PLC0415
+    from data_eng_etl_electricity_meteo.core.settings import settings
 
-    return Path, logger
-
-
-@app.cell
-def _(Path, logger):
-    extras = {"status": "working", "user_id": 42}
-
-    logger.debug("Debug message", extra=extras)
-    logger.info("Info message", extra=extras)
-    logger.warning("Warning message", extra=extras)
-    logger.error("Error message", extra=extras)
-    logger.critical("Critical message", extra=extras)
-
-    logger.info("Message without extras")
-
-    path = Path(__file__).name
-    logger.info(f"Message with path {path}", extra={"path": path})
-
-    # ANSI injection test - codes should be stripped
-    logger.info("ANSI test", extra={"\x1b[1;31mred as key": "\033[1;31mred as value"})
-
-    logger.exception("No active exception")
-
-    logger.info("After exception")
+    return duckdb, mo, pl, settings
 
 
 @app.cell
-def _(logger):
-    try:
-        _ = 1 / 0
-    except ZeroDivisionError:
-        logger.exception("oui oui", extra={"ok?": "non"})
+def _(mo):
+    mo.md(r"""
+    # IGN Contours IRIS
+
+    Exploration of the IGN IRIS geographical boundaries using DuckDB spatial
+    extension. IRIS (Ilots Regroupés pour l'Information Statistique) are the
+    finest-grained INSEE statistical units (~2000 inhabitants each).
+    """)
+    return
 
 
 @app.cell
-def _():
+def _(settings):
+    contours_iris_path = settings.data_dir_path / "bronze" / "contours_iris.gpkg"
+    return (contours_iris_path,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Available layers
+    """)
+    return
+
+
+@app.cell
+def _(contours_iris_path, duckdb, pl):
+    con = duckdb.connect()
+    con.install_extension("spatial")
+    con.load_extension("spatial")
+
+    pl.Config.set_tbl_width_chars(width=300)
+    pl.Config.set_tbl_rows(n=30)
+
+    layers = (
+        con.execute(
+            query="SELECT layers FROM st_read_meta(?)",
+            parameters=[str(contours_iris_path)],
+        )
+        .pl()
+        .explode("layers")
+        .unnest("layers")
+    )
+    layers
+    return (con,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## Read IRIS geometries
+    """)
+    return
+
+
+@app.cell
+def _(con, contours_iris_path, pl):
+    query = """
+        SELECT *, ST_AsGeoJSON(geometrie)
+        FROM st_read(?, layer='contours_iris')
+    """
+    iris = con.execute(query=query, parameters=[str(contours_iris_path)]).pl()
+
+    print(f"shape: {iris.shape}")
+    print(f"columns: {iris.columns}")
+    iris.sort(by="code_iris")
+    return (iris,)
+
+
+@app.cell
+def _(iris, pl):
+    # Spot-check: commune 01014 should have multiple IRIS codes
+    iris.filter(pl.col("code_insee") == "01014")
     return
 
 
