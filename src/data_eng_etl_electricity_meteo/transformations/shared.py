@@ -50,6 +50,54 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
+def validate_no_nulls(df: pl.DataFrame, column: str, dataset_name: str) -> None:
+    """Raise if *column* contains any null values.
+
+    Parameters
+    ----------
+    df:
+        DataFrame to validate.
+    column:
+        Column name to check.
+    dataset_name:
+        Used in the exception for diagnostics.
+
+    Raises
+    ------
+    TransformValidationError
+        If *column* has at least one null.
+    """
+    null_count = df[column].null_count()
+    if null_count > 0:
+        raise TransformValidationError(
+            dataset_name, reason=f"Column '{column}' has {null_count} null values"
+        )
+
+
+def validate_unique(df: pl.DataFrame, column: str, dataset_name: str) -> None:
+    """Raise if *column* contains duplicate values.
+
+    Parameters
+    ----------
+    df:
+        DataFrame to validate.
+    column:
+        Column name to check.
+    dataset_name:
+        Used in the exception for diagnostics.
+
+    Raises
+    ------
+    TransformValidationError
+        If *column* has at least one duplicate.
+    """
+    n_dupes = len(df) - df[column].n_unique()
+    if n_dupes > 0:
+        raise TransformValidationError(
+            dataset_name, reason=f"Column '{column}' has {n_dupes} duplicate values"
+        )
+
+
 def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
     """Apply common silver pre-processing: snake_case rename + drop all-null columns.
 

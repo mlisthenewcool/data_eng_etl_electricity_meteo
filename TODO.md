@@ -31,12 +31,11 @@
 
 - [ ] Ajouter les données météorologiques
     - [ ] Comment automatiser les appels à l'API Météo France ?
+- [x] Résoudre erreur du load_pg_odre_installations (problème de clé primaire).
 
 ## Airflow
 
 - [ ] Gérer l'incohérence provoquée par le trigger event Asset dans l'UI.
-- [ ] DAGs
-    - [ ] Résoudre erreur du DAG load_pg_odre_installations (problème de clé primaire).
 
 ## Postgres
 

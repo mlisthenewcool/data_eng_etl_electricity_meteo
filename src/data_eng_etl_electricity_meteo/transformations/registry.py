@@ -15,7 +15,12 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.exceptions import TransformNotFoundError
-from data_eng_etl_electricity_meteo.transformations.shared import prepare_silver, validate_not_empty
+from data_eng_etl_electricity_meteo.transformations.shared import (
+    prepare_silver,
+    validate_no_nulls,
+    validate_not_empty,
+    validate_unique,
+)
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -50,12 +55,12 @@ BRONZE_TRANSFORMS: dict[str, BronzeTransformFunc] = {
     "odre_installations": odre_installations.transform_bronze,
 }
 
-SILVER_TRANSFORMS: dict[str, SilverTransformFunc] = {
-    "ign_contours_iris": ign_contours_iris.transform_silver,
-    "meteo_france_stations": meteo_france_stations.transform_silver,
-    "odre_eco2mix_cons_def": odre_eco2mix_cons_def.transform_silver,
-    "odre_eco2mix_tr": odre_eco2mix_tr.transform_silver,
-    "odre_installations": odre_installations.transform_silver,
+SILVER_TRANSFORMS: dict[str, tuple[SilverTransformFunc, str | None]] = {
+    "ign_contours_iris": (ign_contours_iris.transform_silver, None),
+    "meteo_france_stations": (meteo_france_stations.transform_silver, None),
+    "odre_eco2mix_cons_def": (odre_eco2mix_cons_def.transform_silver, None),
+    "odre_eco2mix_tr": (odre_eco2mix_tr.transform_silver, None),
+    "odre_installations": (odre_installations.transform_silver, "id_peps"),
 }
 
 # ---------------------------------------------------------------------------
@@ -113,7 +118,7 @@ def get_silver_transform(dataset_name: str) -> WrappedSilverTransformFunc:
         If no silver transform is registered for *dataset_name*.
     """
     try:
-        specific_fn = SILVER_TRANSFORMS[dataset_name]
+        specific_fn, primary_key = SILVER_TRANSFORMS[dataset_name]
     except KeyError:
         raise TransformNotFoundError(
             dataset_name=dataset_name, layer=MedallionLayer.SILVER
@@ -124,6 +129,9 @@ def get_silver_transform(dataset_name: str) -> WrappedSilverTransformFunc:
         df = prepare_silver(df, dataset_name)
         df = specific_fn(df)
         validate_not_empty(df, dataset_name)
+        if primary_key:
+            validate_no_nulls(df, primary_key, dataset_name)
+            validate_unique(df, primary_key, dataset_name)
         return df
 
     return wrapped

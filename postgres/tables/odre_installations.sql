@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     est_renouvelable                        BOOLEAN,
     type_energie                            TEXT,
     est_actif                               BOOLEAN,
+    est_agregation                          BOOLEAN,
     inserted_at                             TIMESTAMP DEFAULT NOW()
 );
 
@@ -72,3 +73,6 @@ CREATE INDEX IF NOT EXISTS idx_dim_installations_region
 
 CREATE INDEX IF NOT EXISTS idx_dim_installations_renouvelable
     ON {schema}.{table}(est_renouvelable) WHERE est_renouvelable = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_dim_installations_agregation
+    ON {schema}.{table}(est_agregation) WHERE est_agregation = TRUE;
