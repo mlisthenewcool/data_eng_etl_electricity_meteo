@@ -83,6 +83,18 @@ datasets:
     postgres:
       table: "dim_stations_meteo"
 
+  #  meteo_france_observations:
+  #    description: "todo"
+  #    source:
+  #      provider: "MétéoFrance"
+  #      url: "todo"
+  #      format: "todo"
+  #    ingestion:
+  #      frequency: "hourly"
+  #      mode: "snapshot" # TODO: incremental ?
+  #    postgres:
+  #      table: "fact_observations_meteo"
+
   # ============================================================
   # DERIVED DATASETS (Gold - built from Silver sources)
   # ============================================================
