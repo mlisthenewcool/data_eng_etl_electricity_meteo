@@ -269,8 +269,8 @@ class RemoteIngestionPipeline:
         # any future regression and also narrows the type for the call below.
         inner_file = self.dataset.source.inner_file
         if inner_file is None:
-            raise ExtractStageError() from ValueError(
-                f"inner_file is None for archive dataset '{self.dataset.name}'"
+            raise ExtractStageError(
+                "inner_file required for archive dataset", dataset=self.dataset.name
             )
 
         try:

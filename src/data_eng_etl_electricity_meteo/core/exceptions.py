@@ -180,9 +180,25 @@ class TransformValidationError(BaseProjectException):
 class PipelineStageError(BaseProjectException):
     """Raised when a pipeline stage fails."""
 
-    def __init__(self, stage: PipelineStage, message: str | None = None) -> None:
+    def __init__(
+        self,
+        stage: PipelineStage,
+        message: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> None:
         self.stage = stage
+        self.context = context or {}
         super().__init__(message or f"Pipeline stage '{stage}' failed.")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return only the structured context (stage is already in the message).
+
+        Returns
+        -------
+        dict[str, Any]
+            Mapping of context keys to their values.
+        """
+        return dict(self.context)
 
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes.
@@ -217,52 +233,54 @@ class PipelineStageError(BaseProjectException):
 class DownloadStageError(PipelineStageError):
     """Raised when the download stage fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.DOWNLOAD)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.DOWNLOAD, message, context or None)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.EXTRACT)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.EXTRACT, message, context or None)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.BRONZE)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.BRONZE, message, context or None)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.SILVER)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.SILVER, message, context or None)
 
 
 class PostgresLoadError(PipelineStageError):
     """Raised when loading silver Parquet into Postgres fails."""
 
-    def __init__(self, message: str | None = None) -> None:
-        super().__init__(PipelineStage.LOAD_POSTGRES, message=message)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.LOAD_POSTGRES, message, context or None)
 
 
 class PostgresCredentialsError(PostgresLoadError):
     """Raised when Postgres credentials are missing from env vars and Docker secrets."""
 
     def __init__(self, missing_field: str, suggestion: str) -> None:
-        self.missing_field = missing_field
-        self.suggestion = suggestion
-        super().__init__(message="Postgres credentials not configured.")
+        super().__init__(
+            message="Postgres credentials not configured.",
+            missing_field=missing_field,
+            suggestion=suggestion,
+        )
 
 
 class GoldStageError(PipelineStageError):
     """Raised when the gold aggregation stage fails."""
 
-    def __init__(self) -> None:
-        super().__init__(PipelineStage.GOLD)
+    def __init__(self, message: str | None = None, **context: Any) -> None:
+        super().__init__(PipelineStage.GOLD, message, context or None)
 
 
 # ---------------------------------------------------------------------------
@@ -432,4 +450,31 @@ if __name__ == "__main__":
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise SilverStageError() from err
     except SilverStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    # ---------------------------------------------------------------------------
+    # 5) New pattern — message + structured context
+    # ---------------------------------------------------------------------------
+    _section("PostgresLoadError  with message + context (no cause)")
+    try:
+        raise PostgresLoadError("SQL path escapes postgres directory", path="/etc/passwd")
+    except PostgresLoadError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("ExtractStageError  with message + context (no cause)")
+    try:
+        raise ExtractStageError("inner_file required for archive dataset", dataset=_DATASET)
+    except ExtractStageError as error:
+        error.log(_logger.critical)
+    _end()
+
+    _section("PostgresCredentialsError  with context via to_dict")
+    try:
+        raise PostgresCredentialsError(
+            missing_field="POSTGRES_PASSWORD",
+            suggestion="Set POSTGRES_PASSWORD or mount Docker secret",
+        )
+    except PostgresCredentialsError as error:
         error.log(_logger.critical)

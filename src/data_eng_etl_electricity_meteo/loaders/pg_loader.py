@@ -157,7 +157,7 @@ def _read_sql_file(subdir: str, dataset_name: str) -> str:
 
     # Guard against path traversal (e.g. dataset_name="../../etc/passwd")
     if not path.is_relative_to(settings.postgres_dir_path.resolve()):
-        raise PostgresLoadError() from ValueError(f"SQL path escapes postgres directory: {path}")
+        raise PostgresLoadError("SQL path escapes postgres directory", path=str(path))
 
     if not path.exists():
         raise FileNotFoundError(f"SQL file not found: {path}")

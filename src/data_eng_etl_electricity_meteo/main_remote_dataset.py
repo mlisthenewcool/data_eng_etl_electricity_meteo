@@ -141,7 +141,7 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     try:
         metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
     except PostgresLoadError as err:
-        err.log(logger.exception)
+        err.log(logger.critical)
         sys.exit(1)
     finally:
         connection.close()

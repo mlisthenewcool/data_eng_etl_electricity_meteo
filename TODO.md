@@ -13,7 +13,7 @@
       les autres exceptions.
     - [ ] Uniformiser les messages d'erreur et les rendre plus actionnables.
     - [ ] Ajouter toutes les exceptions custom dans le smoke test visuel.
-    - [ ] Corriger le problème de création d'exceptions custom directement depuis
+    - [x] Corriger le problème de création d'exceptions custom directement depuis
       ValueError sans except préalable. Voir si ce n'est pas le cas pour d'autres
       exceptions ailleurs.
 - [ ] Ajouter des tests sur les modules/fonctions critiques
@@ -22,6 +22,10 @@
     - L'upsert sur un fichier complet n'apporte rien (coût de conflict detection sans
       gain). Le vrai bénéfice de l'incrémental vient du delta fetch côté source.
     - Le fichier SQL d'upsert est prêt (`postgres/upsert/odre_eco2mix_tr.sql`).
+
+## DuckDB
+
+- [ ] Installation de l'extension 'spatial' une seule fois en local comme sous Airflow ?
 
 ## Datasets/Transformations
 
@@ -38,7 +42,7 @@
 
 - [ ] Uniformiser initialisation des bases, schémas et tables. Tout doit être
   fonctionnel même sans Airflow.
-- [ ] Chargement bulk et non row-by-row.
+- [x] Chargement bulk et non row-by-row.
 
 ## Docker Compose
 
