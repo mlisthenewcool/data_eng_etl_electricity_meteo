@@ -3,13 +3,11 @@
 
 ## Now
 
-- [ ] [dbt] Étudier le passage à dbt Core pour l'insertion des fichiers silver dans
-  Postgres
+- [ ] [Docs] Documentation minimale du projet V1 (présentation, données, architecture,
+  outils) : [exemple projet avec bonne documentation](https://github.com/abeltavares/batch-data-pipeline)
 
 ## Next
 
-- [ ] [Docs] Documentation minimale du projet V1 (présentation, données, architecture,
-  outils) : [exemple projet avec bonne documentation](https://github.com/abeltavares/batch-data-pipeline)
 - [ ] [Tests] Ajouter des tests sur les modules/fonctions critiques
 - [ ] [Données] Intégrer les appels aux API Météo France (phase 2/3
   décrites ici : [integration_meteo_france.md](docs/integration_meteo_france.md))
@@ -17,7 +15,12 @@
 - [ ] [Données] Implémenter le delta fetch pour `odre_eco2mix_tr` (upsert SQL prêt,
   manque le delta côté source)
 - [ ] [Postgres] Gérer les changements de schémas alors que des données sont en prod ?
-- [ ] [dbt] Lancer les jobs dbt avec Airflow (cosmos ? DAG custom ?)
+- [ ] [Postgres] Évolution de schéma automatique (`ALTER TABLE ADD COLUMN`) quand le
+  Parquet silver contient de nouvelles colonnes absentes de la table PG
+- [ ] [Tests] Tests de qualité des données post-load (assertions Polars ou SQL :
+  nulls, distribution, cohérence temporelle)
+- [ ] [dbt] Évaluer dbt/SQLMesh pour la couche gold uniquement (agrégations
+  cross-datasets, vues matérialisées)
 - [ ] [Archi] Installation unique de l'extension DuckDB 'spatial' (local + Airflow)
 - [ ] [Airflow] Gérer l'incohérence provoquée par le trigger event Asset dans l'UI
 
@@ -33,13 +36,13 @@
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
 - [ ] [Docs] Script ou skill pour reformatter les docstrings proprement
 - [ ] [Pipeline] Persistance locale du state (JSON par dataset) pour le smart-skip
-  hors Airflow (`main_remote_dataset.py`)
+  hors Airflow (`cli/run_pipeline.py`)
 - [ ] [Pipeline] Capturer les métadonnées de téléchargement custom par département
-  pour le smart-skip de la climatologie
+  pour le smart skip de la climatologie
 - [ ] [Pipeline] Options `--skip-bronze`, `--skip-silver`, `--skip-postgres` aux
-  entrypoints CLI + rétention configurable des fichiers landing (ex: 1 jour)
+  entrypoints CLI + rétention configurable des fichiers landing (ex : 1 jour)
 - [ ] [Airflow] Créer un DAG de maintenance pour le nettoyage des fichiers bronze
-  obsolètes (`cleanup_old_bronze_versions` existe mais n'est appelé nulle part)
+  obsolètes (`cleanup_old_bronze_versions` existe, mais n'est appelé nulle part)
 
 ## Résolu
 
@@ -49,3 +52,5 @@
 - [x] [Tests] Corriger la création d'exceptions custom directement depuis ValueError
 - [x] [Données] Ajouter les données météorologiques
 - [x] [Postgres] Ajouter `updated_at` (DEFAULT NULL) sur les tables incrémentales
+- [x] [dbt] Étudier le passage à dbt Core pour le chargement silver → Postgres
+  (écarté : [compte rendu](docs/choix_technique_chargement_postgres.md))
