@@ -1,7 +1,7 @@
 """Progress reporting primitives: protocols, throttle logic, and tqdm adapters.
 
-Higher-level (Airflow-aware) reporters live in ``pipeline.progress`` and
-build on top of the types defined here.
+Higher-level (Airflow-aware) reporters live in ``pipeline.progress`` and build on top of
+the types defined here.
 """
 
 import time
@@ -27,9 +27,8 @@ LOG_MIN_INTERVAL_S: float = 5.0
 class DownloadProgressReporter(Protocol):
     """Reports byte-count updates during a streaming download.
 
-    Implementations receive the total expected bytes at construction time
-    (``0`` when ``Content-Length`` is absent) and individual chunk sizes
-    via :meth:`update`.
+    Implementations receive the total expected bytes at construction time (``0`` when
+    ``Content-Length`` is absent) and individual chunk sizes via :meth:`update`.
     """
 
     def update(self, n: int) -> None:
@@ -47,8 +46,8 @@ class DownloadProgressReporter(Protocol):
 class ThrottledProgressTracker:
     """Track bytes processed and decide when to emit a log line.
 
-    Accumulates byte counts and exposes ``accumulate`` which returns ``True``
-    when the elapsed time or percentage-change threshold is crossed.
+    Accumulates byte counts and exposes ``accumulate`` which returns ``True`` when the
+    elapsed time or percentage-change threshold is crossed.
 
     Parameters
     ----------
@@ -104,8 +103,8 @@ class ThrottledProgressTracker:
 class BaseExtractCallback(ExtractCallback):
     """No-op defaults for all py7zr abstract hooks.
 
-    Subclasses only need to override ``report_update`` to implement
-    meaningful progress reporting.
+    Subclasses only need to override ``report_update`` to implement meaningful progress
+    reporting.
     """
 
     def report_start(self, processing_file_path: str, processing_bytes: str) -> None:

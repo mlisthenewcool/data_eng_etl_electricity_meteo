@@ -15,7 +15,7 @@ def to_snake_case(name: str) -> str:
 
     Parameters
     ----------
-    name:
+    name
         Input string (CamelCase, mixed-case, space- or hyphen-separated).
 
     Returns
@@ -36,9 +36,9 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
 
     Parameters
     ----------
-    df:
+    df
         DataFrame to validate.
-    dataset_name:
+    dataset_name
         Used in the exception for diagnostics.
 
     Raises
@@ -50,65 +50,75 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
-def validate_no_nulls(df: pl.DataFrame, column: str, dataset_name: str) -> None:
+def validate_no_nulls(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
     """Raise if *column* contains any null values.
 
     Parameters
     ----------
-    df:
+    df
         DataFrame to validate.
-    column:
-        Column name to check.
-    dataset_name:
+    column
+        Column name (or list of column names) to check.
+    dataset_name
         Used in the exception for diagnostics.
 
     Raises
     ------
     TransformValidationError
-        If *column* has at least one null.
+        If any checked column has at least one null.
     """
-    null_count = df[column].null_count()
-    if null_count > 0:
-        raise TransformValidationError(
-            dataset_name, reason=f"Column '{column}' has {null_count} null values"
-        )
+    columns = [column] if isinstance(column, str) else column
+    for col in columns:
+        null_count = df[col].null_count()
+        if null_count > 0:
+            raise TransformValidationError(
+                dataset_name, reason=f"Column '{col}' has {null_count} null values"
+            )
 
 
-def validate_unique(df: pl.DataFrame, column: str, dataset_name: str) -> None:
+def validate_unique(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
     """Raise if *column* contains duplicate values.
+
+    When *column* is a list, checks uniqueness of the composite key
+    (i.e. the combination of all listed columns).
 
     Parameters
     ----------
-    df:
+    df
         DataFrame to validate.
-    column:
-        Column name to check.
-    dataset_name:
+    column
+        Column name (or list of column names) to check for uniqueness.
+    dataset_name
         Used in the exception for diagnostics.
 
     Raises
     ------
     TransformValidationError
-        If *column* has at least one duplicate.
+        If the (composite) key has at least one duplicate.
     """
-    n_dupes = len(df) - df[column].n_unique()
+    if isinstance(column, str):
+        n_dupes = len(df) - df[column].n_unique()
+        label = f"Column '{column}'"
+    else:
+        n_dupes = df.select(column).is_duplicated().sum()
+        label = f"Columns {column}"
     if n_dupes > 0:
         raise TransformValidationError(
-            dataset_name, reason=f"Column '{column}' has {n_dupes} duplicate values"
+            dataset_name, reason=f"{label} has {n_dupes} duplicate values"
         )
 
 
 def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
     """Apply common silver pre-processing: snake_case rename + drop all-null columns.
 
-    Called by the registry wrapper **before** the dataset-specific transform,
-    so that all silver transforms receive clean, snake_case column names.
+    Called by the registry wrapper **before** the dataset-specific transform, so that
+    all silver transforms receive clean, snake_case column names.
 
     Parameters
     ----------
-    df:
+    df
         Raw DataFrame read from the bronze parquet.
-    dataset_name:
+    dataset_name
         Dataset identifier (for logging).
 
     Returns

@@ -1,23 +1,22 @@
 """Structured logging with environment-aware configuration.
 
-Auto-detects the execution context (Airflow, TTY, or pipe) and applies
-the most appropriate rendering strategy.  Exposes a single public
-function — ``get_logger`` — that returns named structlog loggers.
+Auto-detects the execution context (Airflow, TTY, or pipe) and applies the most
+appropriate rendering strategy.  Exposes a single public function — ``get_logger`` —
+that returns named structlog loggers.
 
 Output modes
 ------------
 airflow
-    Extends Airflow 3's structlog processor chain with project-specific
-    processors (see ``_setup_airflow_logger``).
+    Extends Airflow 3's structlog processor chain with project-specific processors
+    (see ``_setup_airflow_logger``).
 tty
     Colored console output with timestamp, log level and logger name.
     Ideal for local interactive development.
 plain
-    Identical to *tty* but without colors — suitable when stderr is
-    redirected to a file or piped to another process.
+    Identical to ``tty`` but without colors — suitable when stderr is redirected to a
+    file or piped to another process.
 json
-    Machine-readable JSON lines (UTC timestamps), serialized with
-    *orjson* for speed.
+    Machine-readable JSON lines (UTC timestamps), serialized with ``orjson`` for speed.
 """
 
 import re
@@ -60,15 +59,15 @@ _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", 
 def _normalize_value(value: object) -> str | int | float:
     """Convert a non-``None`` value to a log-friendly primitive.
 
-    ``None`` inputs are not accepted — callers handle ``None`` explicitly
-    before calling this function (drop it or preserve it as a JSON null).
+    ``None`` inputs are not accepted — callers handle ``None`` explicitly before calling
+    this function (drop it or preserve it as a JSON null).
 
     Notes
     -----
-    Booleans are converted to ``"True"`` / ``"False"`` strings so that
-    renderers relying on truthiness (e.g. Airflow's log display) do not
-    silently swallow ``False``.  The ``bool`` branch must precede ``int``
-    because ``bool`` is a subclass of ``int`` in Python.
+    Booleans are converted to ``"True"`` / ``"False"`` strings so that renderers relying
+    on truthiness (e.g. Airflow's log display) do not silently swallow ``False``.
+    The ``bool`` branch must precede ``int`` because ``bool`` is a subclass of ``int``
+    in Python.
     """
     if isinstance(value, bool):
         return str(value)
@@ -89,9 +88,9 @@ def _normalize_value(value: object) -> str | int | float:
 def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
     """Recursively flatten *mapping* into dotted-key entries.
 
-    When *prefix* is empty, top-level keys are used as-is; otherwise each key
-    is prepended with ``prefix.``.  ``None`` leaves are dropped.  Scalar values
-    are returned as-is — normalization is the caller's responsibility.
+    When *prefix* is empty, top-level keys are used as-is; otherwise each key is
+    prepended with *prefix* and a dot. ``None`` leaves are dropped. Scalar values are
+    returned as-is — normalization is the caller's responsibility.
     """
     result: EventDict = {}
     for key, value in mapping.items():
@@ -110,14 +109,14 @@ def _flatten_and_normalize(
 ) -> EventDict:
     """Flatten nested dicts into dotted keys and normalize scalar values.
 
-    Console modes (tty / plain) only — **not** for Airflow, which requires
-    nested dict structures to be preserved (see ``_normalize_types``).
+    Console modes (tty / plain) only — **not** for Airflow, which requires nested dict
+    structures to be preserved (see ``_normalize_types``).
 
     - Structlog internal keys (``event``, ``level``, etc.) are passed through as-is.
-    - Nested dicts are flattened: ``{'source': {'provider': 'IGN'}}``
-      becomes ``source.provider=IGN``.
-    - ``None`` values are dropped; ``Path``, ``Enum``, and ``bool`` are
-      converted to strings.
+    - Nested dicts are flattened: ``{'source': {'provider': 'IGN'}}`` becomes
+      ``source.provider=IGN``.
+    - ``None`` values are dropped; ``Path``, ``Enum``, and ``bool`` are converted to
+      strings.
     """
     internal: EventDict = {}
     external: EventDict = {}
@@ -135,10 +134,9 @@ def _visual_len(s: str) -> int:
 def _build_level_styles() -> dict[str, str]:
     """Build the level → ANSI color mapping for console rendering.
 
-    Returns structlog's default styles with project overrides.  The
-    returned dict is the single source of truth for level-based coloring:
-    it is shared between ``ConsoleRenderer`` (level badge) and
-    ``_colorize_event`` (event text).
+    Returns structlog's default styles with project overrides.  The returned dict is the
+    single source of truth for level-based coloring: it is shared between
+    ``ConsoleRenderer`` (level badge) and ``_colorize_event`` (event text).
 
     Returns
     -------
@@ -163,8 +161,8 @@ def _colorize_event(
     Parameters
     ----------
     level_styles
-        Mapping of lowercase level names to ANSI escape sequences, as
-        returned by ``_build_level_styles``.
+        Mapping of lowercase level names to ANSI escape sequences, as returned by
+        ``_build_level_styles``.
     """
 
     def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
@@ -182,20 +180,18 @@ def _prepend_logger_name(
 ) -> structlog.types.Processor:
     """Return a processor that prefixes the event with ``[logger_name]``.
 
-    Must be inserted **after** ``_colorize_event`` so the name stays
-    uncolored while the event text keeps its level color.
+    Must be inserted **after** ``_colorize_event`` so the name stays uncolored while the
+    event text keeps its level color.
 
-    When *pad_to* is set, the combined ``[name] event`` string is
-    right-padded to *pad_to* visible characters (ANSI codes excluded
-    from the length calculation).
+    When *pad_to* is set, the combined ``[name] event`` string is right-padded to
+    *pad_to* visible characters (ANSI codes excluded from the length calculation).
 
     Parameters
     ----------
     use_colors
         Render the logger name in cyan when ``True``.
     pad_to
-        Target visual width for the ``[name] event`` prefix.  ``0``
-        disables padding.
+        Target visual width for the ``[name] event`` prefix.  ``0`` disables padding.
     """
 
     def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
@@ -252,10 +248,9 @@ def _walk(value: object) -> object:
     ``None`` is returned as-is and stored unconditionally by the caller
     (``_normalize_types``), preserving JSON nulls.
 
-    Containers are recursed into rather than repr'd, because Airflow's UI
-    expects them intact (e.g. ``ExceptionDictTransformer`` output).
-    Tuples are converted to lists — JSON has no tuple type and both
-    serialize identically.
+    Containers are recursed into rather than repr'd, because Airflow's UI expects them
+    intact (e.g. ``ExceptionDictTransformer`` output). Tuples are converted to lists —
+    JSON has no tuple type and both serialize identically.
     """
     if value is None:
         return None
@@ -273,12 +268,11 @@ def _normalize_types(
 ) -> EventDict:
     """Lightly normalize scalar types for Airflow's JSON log pipeline.
 
-    Unlike ``_flatten_and_normalize``, this processor preserves the full
-    dict/list structure and ``None`` values — Airflow's
-    ``ExceptionDictTransformer`` produces nested structures
-    (``[{"type": …, "frames": […]}]``) that the UI expects intact.
-    Only scalar leaves (``Path``, ``Enum``, ``bool``) are converted to
-    JSON-serializable primitives.
+    Unlike ``_flatten_and_normalize``, this processor preserves the full dict/list
+    structure and ``None`` values — Airflow's ``ExceptionDictTransformer`` produces
+    nested structures (``[{"type": …, "frames": […]}]``) that the UI expects intact.
+    Only scalar leaves (``Path``, ``Enum``, ``bool``) are converted to JSON-serializable
+    primitives.
     """
     return {key: _walk(value) for key, value in event_dict.items()}
 
@@ -286,18 +280,17 @@ def _normalize_types(
 def _setup_airflow_logger() -> None:
     """Insert ``_normalize_types`` into Airflow 3's existing structlog chain.
 
-    Airflow 3 task subprocesses send structured JSON logs to the supervisor
-    via a dedicated pipe (``NamedBytesLogger``).  The supervisor writes them
-    to the log file; the UI renders that JSON.
+    Airflow 3 task subprocesses send structured JSON logs to the supervisor via a
+    dedicated pipe (``NamedBytesLogger``).
+    The supervisor writes them to the log file; the UI renders that JSON.
 
     The existing chain must **not** be flattened — Airflow's
-    ``ExceptionDictTransformer`` produces nested structures
-    (``[{"type": …, "frames": […]}]``) that the UI expects intact.
-    Only scalar type conversion (``Path`` → ``str``, ``Enum`` → value)
-    is injected here via ``_normalize_types``.
+    ``ExceptionDictTransformer`` produces nested structures (``[{"type": …, "frames":
+    […]}]``) that the UI expects intact. Only scalar type conversion (``Path`` →
+    ``str``, ``Enum`` → value) is injected here via ``_normalize_types``.
 
-    This function is idempotent: calling it multiple times leaves the
-    processor chain unchanged after the first insertion.
+    This function is idempotent: calling it multiple times leaves the processor chain
+    unchanged after the first insertion.
     """
     config = structlog.get_config()
     processors = list(config.get("processors", []))
@@ -315,13 +308,13 @@ def _setup_airflow_logger() -> None:
 def _detect_output_mode() -> OutputMode:
     """Infer the best output mode for the current execution environment.
 
-    Result is cached after the first call — reconfiguring structlog at runtime
-    does not re-trigger detection.
+    Result is cached after the first call — reconfiguring structlog at runtime does not
+    re-trigger detection.
 
     Notes
     -----
-    ``"json"`` mode is never auto-detected; it must be explicitly
-    requested via ``_setup_logger(output="json")``.
+    ``"json"`` mode is never auto-detected; it must be explicitly requested via
+    ``_setup_logger(output="json")``.
     """
     if settings.is_running_on_airflow:
         return "airflow"
@@ -341,16 +334,16 @@ def _setup_logger(
 ) -> None:
     """Configure structlog globally.
 
-    Called once at module import.  Can be called again to reconfigure
-    structlog (e.g. in tests).
+    Called once at module import.
+    Can be called again to reconfigure structlog (e.g. in tests).
 
     Parameters
     ----------
     output
         Output mode.  ``None`` triggers auto-detection via ``_detect_output_mode``.
     level
-        Minimum severity level.  Defaults to ``settings.logging_level``
-        evaluated at import time.
+        Minimum severity level.
+        Defaults to ``settings.logging_level`` evaluated at import time.
     """
     if output is None:
         output = _detect_output_mode()

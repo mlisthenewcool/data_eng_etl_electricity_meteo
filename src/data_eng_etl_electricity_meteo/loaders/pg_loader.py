@@ -1,8 +1,8 @@
 """Postgres silver-layer loader.
 
 Loads silver ``.parquet`` files into the Postgres ``silver`` schema.
-This module is **Airflow-agnostic** — it receives an open ``psycopg.Connection``
-and has no knowledge of how it was created (standalone, Hook, test fixture).
+This module is **Airflow-agnostic** — it receives an open ``psycopg.Connection`` and has
+no knowledge of how it was created (standalone, Hook, test fixture).
 
 Loading strategies (from ``ingestion.mode``):
 
@@ -61,15 +61,15 @@ def load_silver_to_postgres(
     - ``incremental``: ``COPY`` into a temp staging table, then execute the
       upsert from ``postgres/upsert/``.
 
-    Manages the transaction entirely: commits on success, rolls back on
-    failure. The caller is only responsible for closing the connection.
+    Manages the transaction entirely: commits on success, rolls back on failure.
+    The caller is only responsible for closing the connection.
 
     Parameters
     ----------
-    dataset_config:
-        Remote dataset configuration from the catalog. ``dataset_config.name``
-        must match a ``postgres/tables/`` DDL file.
-    conn:
+    dataset_config
+        Remote dataset configuration from the catalog.
+        ``dataset_config.name`` must match a ``postgres/tables/`` DDL file.
+    conn
         Open psycopg connection.
 
     Returns
@@ -79,8 +79,8 @@ def load_silver_to_postgres(
     Raises
     ------
     PostgresLoadError
-        On any load failure: missing DDL/upsert file, unreadable parquet,
-        or any ``psycopg`` database error.
+        On any load failure: missing DDL/upsert file, unreadable parquet, or any
+        ``psycopg`` database error.
     """
     mode = dataset_config.ingestion.mode
     silver_path = RemotePathResolver(dataset_config.name).silver_current_path
@@ -200,9 +200,9 @@ def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
     - Binary → BYTEA hex ``\xdeadbeef``
     - List   → PG array literal ``{"a","b","c"}`` (null-safe, quote-escaped)
 
-    List elements are individually double-quoted and inner ``"`` / ``\`` are
-    escaped so that values containing commas, braces, or quotes produce
-    valid Postgres array literals.
+    List elements are individually double-quoted and inner ``"`` / ``\`` are escaped so
+    that values containing commas, braces, or quotes produce valid Postgres array
+    literals.
     """
     exprs: list[pl.Expr] = []
 
@@ -242,8 +242,8 @@ def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
 def _copy_df(cur: psycopg.Cursor[Any], df: pl.DataFrame, copy_sql: psql.Composed) -> None:
     """Serialize ``df`` to CSV and stream it via COPY in 64 KB chunks.
 
-    Uses a ``SpooledTemporaryFile`` to keep small DataFrames in memory
-    and spill large ones to disk automatically.
+    Uses a ``SpooledTemporaryFile`` to keep small DataFrames in memory and spill large
+    ones to disk automatically.
     """
     with tempfile.SpooledTemporaryFile(max_size=_COPY_SPOOL_THRESHOLD) as buf:
         df.write_csv(buf, include_header=False)
@@ -309,4 +309,39 @@ def _load_incremental(
 
     cur.execute(upsert_sql)
 
-    return len(df)
+    return cur.rowcount
+
+
+def run_standalone_postgres_load(dataset_config: RemoteDatasetConfig) -> LoadPostgresMetrics:
+    """Open a standalone connection, load silver to Postgres, and close.
+
+    Convenience wrapper for CLI scripts that manages the full connection lifecycle so
+    callers only need to ``except PostgresLoadError``.
+
+    Parameters
+    ----------
+    dataset_config
+        Remote dataset configuration from the catalog.
+
+    Returns
+    -------
+    LoadPostgresMetrics
+
+    Raises
+    ------
+    PostgresLoadError
+        On connection failure or any load error.
+    """
+    from data_eng_etl_electricity_meteo.loaders.pg_connection import (  # noqa: PLC0415
+        open_standalone_connection,
+    )
+
+    try:
+        connection = open_standalone_connection()
+    except psycopg.OperationalError as err:
+        raise PostgresLoadError("Postgres connection failed") from err
+
+    try:
+        return load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
+    finally:
+        connection.close()

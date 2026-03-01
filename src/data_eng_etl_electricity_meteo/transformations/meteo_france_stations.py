@@ -59,7 +59,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the JSON file from landing layer.
 
     Returns
@@ -97,7 +97,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     Parameters
     ----------
-    df:
+    df
         Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns

@@ -1,19 +1,25 @@
 """Pipeline manager for remote (HTTP) datasets.
 
-Orchestrates the full ingestion pipeline for a single remote dataset,
-completely decoupled from Airflow:
+Orchestrates the full ingestion pipeline for a single remote dataset, completely
+decoupled from Airflow:
 
 1. **Download** — HEAD check + smart skip + download to landing
 2. **Extract** — 7z extraction with SHA-256 integrity (optional)
 3. **Bronze** — landing → versioned Parquet + ``latest`` symlink
 4. **Silver** — bronze latest → business transform → ``current`` / ``backup``
 
-Uses ``RemotePathResolver`` for all path operations and
-``RemoteFileManager`` for symlinks, rotation, and rollback.
+The download step can be customized via ``custom_download``: a callable that takes a
+landing directory and returns the path to the downloaded file.
+When set, the standard HEAD check + smart skip + single-URL download is replaced by the
+custom logic (e.g. multi-file merge for climatologie).
+
+Uses ``RemotePathResolver`` for all path operations and ``RemoteFileManager`` for
+symlinks, rotation, and rollback.
 """
 
 import shutil
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
@@ -50,14 +56,21 @@ from data_eng_etl_electricity_meteo.transformations.registry import (
     get_bronze_transform,
     get_silver_transform,
 )
-from data_eng_etl_electricity_meteo.utils.download import download_to_file
+from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo, download_to_file
 from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
+from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 from data_eng_etl_electricity_meteo.utils.remote_metadata import (
     RemoteFileMetadata,
     get_remote_file_metadata,
 )
 
 logger = get_logger("pipeline")
+
+# Callable that takes a landing directory and returns the path to
+# the downloaded file. Used to inject custom download logic (e.g.
+# multi-file merge for climatologie) instead of the standard
+# single-URL download.
+CustomDownloadFunc = Callable[[Path], Path]
 
 
 @dataclass
@@ -68,8 +81,12 @@ class RemoteIngestionPipeline:
 
     Attributes
     ----------
-    dataset:
+    dataset
         Remote dataset configuration from the catalog.
+    custom_download
+        Optional download strategy. When set, replaces the standard HEAD check +
+        single-URL download with custom logic. The callable receives the landing
+        directory and must return the path to the produced file.
 
     Raises
     ------
@@ -78,6 +95,7 @@ class RemoteIngestionPipeline:
     """
 
     dataset: RemoteDatasetConfig
+    custom_download: CustomDownloadFunc | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Validate that transform modules exist for this dataset (fast-fail)."""
@@ -105,21 +123,21 @@ class RemoteIngestionPipeline:
     ) -> IngestionDecision:
         """Determine if ingestion is required based on remote metadata and local state.
 
-        Checks upstream consistency (silver file vs metadata existence) and
-        compares remote metadata to detect changes.
+        Checks upstream consistency (silver file vs metadata existence) and compares
+        remote metadata to detect changes.
 
         Parameters
         ----------
-        current_remote_file_info:
+        current_remote_file_info
             Freshly fetched HTTP HEAD metadata.
-        previous_remote_file_info:
+        previous_remote_file_info
             Metadata from the previous successful run, or ``None``.
 
         Returns
         -------
         IngestionDecision
-            Whether to ingest, whether this is a healing run, and the
-            remote metadata used for the decision.
+            Whether to ingest, whether this is a healing run, and the remote metadata
+            used for the decision.
         """
         silver_file_exists = self.resolver.silver_current_path.exists()
         remote_metadata_exists = previous_remote_file_info is not None
@@ -159,14 +177,18 @@ class RemoteIngestionPipeline:
     ) -> PipelineContext | None:
         """Run the full ingestion flow: smart-skip checks then download.
 
-        Returns ``None`` if ingestion was skipped (unchanged remote or
-        identical content hash), otherwise the initial pipeline context.
+        When ``custom_download`` is set, delegates entirely to the custom callable
+        (no HEAD check, no smart skip).
+        Otherwise, performs the standard HEAD check + smart skip + single-URL download.
+
+        Returns ``None`` if ingestion was skipped (unchanged remote or identical content
+        hash), otherwise the initial pipeline context.
 
         Parameters
         ----------
-        version:
+        version
             Run version string (e.g. ``"2026-01-17"``).
-        previous_snapshot:
+        previous_snapshot
             Validated snapshot from the previous run, or ``None``.
 
         Returns
@@ -177,8 +199,83 @@ class RemoteIngestionPipeline:
         Raises
         ------
         DownloadStageError
-            On any HTTP failure (connect, timeout, status error) during the
-            HEAD check or the download.
+            On any HTTP failure (connect, timeout, status error) during the HEAD check
+            or the download, or if the custom download fails.
+        """
+        if self.custom_download is not None:
+            return self._run_custom_download(version)
+
+        return self._run_standard_download(version, previous_snapshot)
+
+    def _run_custom_download(self, version: str) -> PipelineContext:
+        """Execute the custom download strategy.
+
+        Parameters
+        ----------
+        version
+            Run version string.
+
+        Returns
+        -------
+        PipelineContext
+            Pipeline context with the landing file path.
+
+        Raises
+        ------
+        DownloadStageError
+            If the custom download callable fails.
+        """
+        assert self.custom_download is not None  # narrowing for type checker
+
+        logger.info("Running custom download", version=version)
+
+        try:
+            landing_path = self.custom_download(self.resolver.landing_dir)
+        except Exception as err:
+            raise DownloadStageError("Custom download failed") from err
+
+        file_hash = FileHasher.hash_file(landing_path)
+        size_mib = round(landing_path.stat().st_size / (1024 * 1024), 2)
+
+        logger.info(
+            "Custom download complete",
+            landing_path=landing_path,
+            size_mib=size_mib,
+        )
+
+        return PipelineContext(
+            version=version,
+            download=DownloadMetrics(
+                remote_metadata=RemoteFileMetadata(),
+                download_info=HttpDownloadInfo(
+                    path=landing_path,
+                    file_hash=file_hash,
+                    size_mib=size_mib,
+                ),
+            ),
+        )
+
+    def _run_standard_download(
+        self, version: str, previous_snapshot: PipelineRunSnapshot | None
+    ) -> PipelineContext | None:
+        """Execute the standard single-URL download with smart-skip logic.
+
+        Parameters
+        ----------
+        version
+            Run version string (e.g. ``"2026-01-17"``).
+        previous_snapshot
+            Validated snapshot from the previous run, or ``None``.
+
+        Returns
+        -------
+        PipelineContext | None
+            Initial pipeline context, or ``None`` if skipped.
+
+        Raises
+        ------
+        DownloadStageError
+            On any HTTP failure.
         """
         logger.info("Downloading", version=version)
 
@@ -242,24 +339,24 @@ class RemoteIngestionPipeline:
 
         Parameters
         ----------
-        context:
+        context
             Pipeline context whose ``download.download_info.path`` points to the
             archive.
-        previous_snapshot:
+        previous_snapshot
             Validated snapshot from the previous run, or ``None``.
 
         Returns
         -------
         PipelineContext | None
-            Updated context with ``download.extraction_info`` populated,
-            or ``None`` if the extracted content hash matches the previous run.
+            Updated context with ``download.extraction_info`` populated, or ``None`` if
+            the extracted content hash matches the previous run.
 
         Raises
         ------
         ExtractStageError
-            On archive not found, missing inner file, integrity failure, or
-            if ``inner_file`` is ``None`` (should not happen — guaranteed by
-            ``RemoteSourceConfig`` validator).
+            On archive not found, missing inner file, integrity failure, or if
+            ``inner_file`` is ``None``
+            (should not happen — guaranteed by ``RemoteSourceConfig`` validator).
         """
         archive_path = context.download.download_info.path
         landing_dir = archive_path.parent
@@ -332,12 +429,12 @@ class RemoteIngestionPipeline:
     def to_bronze(self, context: PipelineContext) -> PipelineContext:
         """Convert landing file to versioned bronze Parquet.
 
-        Steps: read landing → apply transform → write versioned parquet →
-        update ``latest.parquet`` symlink → cleanup landing.
+        Steps: read landing → apply transform → write versioned parquet → update
+        ``latest.parquet`` symlink → cleanup landing.
 
         Parameters
         ----------
-        context:
+        context
             Pipeline context from the ingest/extract stage.
 
         Returns
@@ -348,8 +445,8 @@ class RemoteIngestionPipeline:
         Raises
         ------
         BronzeStageError
-            On transform failure (DuckDB error), I/O error writing the
-            parquet, or failure updating the ``latest`` symlink.
+            On transform failure (DuckDB error), I/O error writing the parquet, or
+            failure updating the ``latest`` symlink.
         """
         bronze_path = self.resolver.bronze_path(context.version)
         bronze_path.parent.mkdir(parents=True, exist_ok=True)
@@ -397,12 +494,12 @@ class RemoteIngestionPipeline:
     def to_silver(self, context: PipelineContext) -> PipelineContext:
         """Apply business transformations to create silver layer.
 
-        Steps: rotate silver (current → backup) → read bronze latest →
-        apply transform → write ``current.parquet``.
+        Steps: rotate silver (current → backup) → read bronze latest → apply transform →
+        write ``current.parquet``.
 
         Parameters
         ----------
-        context:
+        context
             Pipeline context from the bronze stage.
 
         Returns
@@ -413,8 +510,8 @@ class RemoteIngestionPipeline:
         Raises
         ------
         SilverStageError
-            On transform failure (DuckDB error, validation error) or I/O
-            error during silver file rotation or write.
+            On transform failure (DuckDB error, validation error) or I/O error during
+            silver file rotation or write.
         """
         logger.info("Transforming to silver", version=context.version)
 

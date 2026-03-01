@@ -21,7 +21,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the parquet file from landing layer.
 
     Returns
@@ -49,15 +49,15 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for ODRE eco2mix_cons_def.
 
     Deduplicates on the composite primary key ``(code_insee_region, date_heure)``,
-    keeping the last occurrence. This handles DST transitions where the ODRE API
-    may return duplicate timestamps with updated values.
+    keeping the last occurrence. This handles DST transitions where the ODRE API may
+    return duplicate timestamps with updated values.
 
-    Note: extra all-null columns from the source (e.g. ``column_30``) are dropped
-    by ``prepare_silver`` before this function is called.
+    Note: extra all-null columns from the source (e.g. ``column_30``) are dropped by
+    ``prepare_silver`` before this function is called.
 
     Parameters
     ----------
-    df:
+    df
         Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns

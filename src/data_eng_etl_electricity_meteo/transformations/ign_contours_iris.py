@@ -21,18 +21,17 @@ logger = get_logger("transform.ign_contours_iris")
 def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for IGN Contours IRIS.
 
-    Reads GeoPackage from landing layer (with original filename preserved)
-    and applies basic filtering and geometry conversion.
+    Reads GeoPackage from landing layer (with original filename preserved) and applies
+    basic filtering and geometry conversion.
 
-    The GeoPackage (.gpkg) format is SQLite-based. GDAL (used internally by
-    DuckDB's ST_read) acquires file locks when reading, which can cause
-    indefinite hangs in Airflow's LocalExecutor if another process holds a
-    lock on the same file. To avoid this, the file is copied to a temporary
-    location before reading.
+    The GeoPackage (.gpkg) format is SQLite-based. GDAL (used internally by DuckDB's
+    ST_read) acquires file locks when reading, which can cause indefinite hangs in
+    Airflow's LocalExecutor if another process holds a lock on the same file. To
+    avoid this, the file is copied to a temporary location before reading.
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the GeoPackage in the landing directory.
 
     Returns
@@ -89,8 +88,8 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for IGN Contours IRIS.
 
     Enriches IRIS contours with centroid coordinates in WGS84.
-    The original geometry is in Lambert 93 (EPSG:2154), we transform
-    the centroid to WGS84 (EPSG:4326) for compatibility with other datasets.
+    The original geometry is in Lambert 93 (EPSG:2154), we transform the centroid to
+    WGS84 (EPSG:4326) for compatibility with other datasets.
 
     Transformations applied:
     - Remove cleabs column (internal IGN identifier, not useful)
@@ -100,7 +99,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     Parameters
     ----------
-    df:
+    df
         Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns

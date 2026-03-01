@@ -1,8 +1,8 @@
 """DAG factory for remote dataset ingestion pipelines.
 
 Generates one Airflow DAG per remote dataset declared in the data catalog.
-Each DAG follows the medallion architecture: landing -> bronze -> silver,
-with optional archive extraction between landing and bronze.
+Each DAG follows the medallion architecture: landing -> bronze -> silver, with optional
+archive extraction between landing and bronze.
 """
 
 from collections.abc import Generator
@@ -20,16 +20,27 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
+from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
+    CustomDownloadFunc,
+    RemoteIngestionPipeline,
+)
 from data_eng_etl_electricity_meteo.pipeline.types import (
     PipelineContext,
     PipelineRunSnapshot,
 )
+from data_eng_etl_electricity_meteo.utils.meteo_download import download_climatologie
 
 if TYPE_CHECKING:
     from airflow.sdk.execution_time.context import InletEventsAccessors
 
 logger = get_logger("dag_factory.ingest")
+
+# Datasets that require a custom download strategy instead of the standard
+# single-URL download. The callable receives the landing directory and
+# returns the path to the produced file.
+_CUSTOM_DOWNLOADS: dict[str, CustomDownloadFunc] = {
+    "meteo_france_climatologie": download_climatologie,
+}
 
 
 def _get_previous_snapshot(
@@ -39,9 +50,9 @@ def _get_previous_snapshot(
 
     Parameters
     ----------
-    inlet_events:
+    inlet_events
         Inlet events accessor injected by Airflow, or ``None``.
-    asset:
+    asset
         The Asset whose metadata to retrieve.
 
     Returns
@@ -222,7 +233,10 @@ def _generate_all_dags() -> dict[str, DAG]:
             continue
 
         try:
-            manager = RemoteIngestionPipeline(dataset=dataset)
+            manager = RemoteIngestionPipeline(
+                dataset=dataset,
+                custom_download=_CUSTOM_DOWNLOADS.get(dataset.name),
+            )
         except TransformNotFoundError as error:
             error.log(logger.warning)
             continue

@@ -83,6 +83,21 @@ datasets:
     postgres:
       table: "dim_stations_meteo"
 
+  meteo_france_climatologie:
+    description: "Données climatologiques horaires de Météo France (2 dernières années, 95 départements France métropolitaine)"
+    source:
+      provider: "MétéoFrance"
+      # Custom multi-file download : 95 fichiers par département (Parquet Hydra si dispo, sinon CSV.gz)
+      # Le téléchargement est géré par utils/meteo_download.py, pas le pipeline standard
+      # Doc API climatologie : https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesClimatologie
+      url: "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR/"
+      format: "csv_gz"
+    ingestion:
+      frequency: "daily"
+      mode: "incremental"
+    postgres:
+      table: "fact_meteo_horaire"
+
   #  meteo_france_observations:
   #    description: "todo"
   #    source:
@@ -106,18 +121,3 @@ datasets:
         - odre_installations
         - ign_contours_iris
         - meteo_france_stations
-
-  # exemple d'un fichier pour télécharger les données climatologiques sans passer par API
-  # https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR/H_01_latest-2025-2026.csv.gz
-
-  # documentation API climatologie: https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesClimatologie
-  # https://portail-api.meteofrance.fr/web/fr/api/test/a5935def-80ae-4e7e-83bc-3ef622f0438d/
-#  meteo_france_climatologie:
-#    description:
-#    source:
-#      provider:
-#      url:
-#      format:
-#    ingestion:
-#      frequency:
-#      mode:

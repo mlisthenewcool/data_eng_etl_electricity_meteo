@@ -92,8 +92,8 @@ class TestIngestionFrequencyFormatDatetimeAsVersion:
 class TestDatasetDiscriminator:
     """Test the dict branches of the discriminator (our routing logic).
 
-    Instance branches are not tested here: they only check isinstance(), which
-    is a pydantic concern, not ours.
+    Instance branches are not tested here: they only check isinstance(), which is a
+    pydantic concern, not ours.
     """
 
     def test_dict_with_url_in_source_is_remote(self) -> None:

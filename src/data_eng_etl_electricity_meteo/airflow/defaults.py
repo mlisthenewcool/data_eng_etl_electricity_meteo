@@ -1,7 +1,7 @@
 """Shared Airflow defaults for all DAG factories.
 
-Centralises production settings (retries, timeouts, start date) so
-that ``ingest_factory`` and ``load_pg_factory`` stay in sync.
+Centralises production settings (retries, timeouts, start date) so that
+``ingest_factory`` and ``load_pg_factory`` stay in sync.
 """
 
 from datetime import datetime, timedelta

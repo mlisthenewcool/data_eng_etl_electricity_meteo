@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     tco_bioenergies         DOUBLE PRECISION,
     tch_bioenergies         DOUBLE PRECISION,
     inserted_at             TIMESTAMP DEFAULT NOW(),
-    updated_at              TIMESTAMP DEFAULT NOW(),
+    updated_at              TIMESTAMP DEFAULT NULL,
     PRIMARY KEY (code_insee_region, date_heure)
 );
 

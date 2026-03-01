@@ -1,9 +1,9 @@
 """Explicit registry of dataset transformations.
 
 Each dataset must register its bronze and silver transform functions here.
-This is the single source of truth for available transformations — adding
-a dataset to the catalog without registering its transforms will fail fast
-in ``RemoteIngestionPipeline.__post_init__``.
+This is the single source of truth for available transformations — adding a dataset to
+the catalog without registering its transforms will fail fast in
+``RemoteIngestionPipeline.__post_init__``.
 
 Gold transformations are handled by dbt in Postgres, not in Python.
 """
@@ -41,6 +41,7 @@ WrappedSilverTransformFunc = Callable[[Path], pl.DataFrame]
 
 from data_eng_etl_electricity_meteo.transformations import (  # noqa: E402
     ign_contours_iris,
+    meteo_france_climatologie,
     meteo_france_stations,
     odre_eco2mix_cons_def,
     odre_eco2mix_tr,
@@ -49,14 +50,21 @@ from data_eng_etl_electricity_meteo.transformations import (  # noqa: E402
 
 BRONZE_TRANSFORMS: dict[str, BronzeTransformFunc] = {
     "ign_contours_iris": ign_contours_iris.transform_bronze,
+    "meteo_france_climatologie": meteo_france_climatologie.transform_bronze,
     "meteo_france_stations": meteo_france_stations.transform_bronze,
     "odre_eco2mix_cons_def": odre_eco2mix_cons_def.transform_bronze,
     "odre_eco2mix_tr": odre_eco2mix_tr.transform_bronze,
     "odre_installations": odre_installations.transform_bronze,
 }
 
-SILVER_TRANSFORMS: dict[str, tuple[SilverTransformFunc, str | None]] = {
+PrimaryKey = str | list[str] | None
+
+SILVER_TRANSFORMS: dict[str, tuple[SilverTransformFunc, PrimaryKey]] = {
     "ign_contours_iris": (ign_contours_iris.transform_silver, None),
+    "meteo_france_climatologie": (
+        meteo_france_climatologie.transform_silver,
+        ["id_station", "date_heure"],
+    ),
     "meteo_france_stations": (meteo_france_stations.transform_silver, None),
     "odre_eco2mix_cons_def": (odre_eco2mix_cons_def.transform_silver, None),
     "odre_eco2mix_tr": (odre_eco2mix_tr.transform_silver, None),
@@ -73,7 +81,7 @@ def get_bronze_transform(dataset_name: str) -> BronzeTransformFunc:
 
     Parameters
     ----------
-    dataset_name:
+    dataset_name
         Dataset identifier (must match a key in ``BRONZE_TRANSFORMS``).
 
     Returns
@@ -97,14 +105,13 @@ def get_bronze_transform(dataset_name: str) -> BronzeTransformFunc:
 def get_silver_transform(dataset_name: str) -> WrappedSilverTransformFunc:
     """Retrieve the silver transform for a dataset, wrapped with common steps.
 
-    The returned function reads the bronze parquet, applies common
-    pre-processing (snake_case rename, drop all-null columns), passes the
-    prepared DataFrame to the dataset-specific transform, and validates
-    the result is not empty.
+    The returned function reads the bronze parquet, applies common pre-processing
+    (snake_case rename, drop all-null columns), passes the prepared DataFrame to the
+    dataset-specific transform, and validates the result is not empty.
 
     Parameters
     ----------
-    dataset_name:
+    dataset_name
         Dataset identifier (must match a key in ``SILVER_TRANSFORMS``).
 
     Returns

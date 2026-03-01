@@ -5,7 +5,6 @@
 import sys
 from datetime import UTC, datetime
 
-import psycopg
 import typer
 
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
@@ -19,8 +18,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.loaders.pg_connection import open_standalone_connection
-from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
+from data_eng_etl_electricity_meteo.loaders.pg_loader import run_standalone_postgres_load
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 
 logger = get_logger("main")
@@ -130,21 +128,10 @@ def main(dataset_name: str) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     # 8) Load data to Postgres
     # ------------------------------------------------------------
     try:
-        connection = open_standalone_connection()
+        metrics = run_standalone_postgres_load(dataset_config)
     except PostgresLoadError as err:
         err.log(logger.critical)
         sys.exit(1)
-    except psycopg.OperationalError as err:
-        logger.critical("Postgres connection failed", error=str(err))
-        sys.exit(1)
-
-    try:
-        metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=connection)
-    except PostgresLoadError as err:
-        err.log(logger.critical)
-        sys.exit(1)
-    finally:
-        connection.close()
 
     logger.info("Load to Postgres ok", **metrics.model_dump())
 

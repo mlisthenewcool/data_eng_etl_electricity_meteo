@@ -33,7 +33,7 @@ class BaseProjectException(Exception):
 
         Parameters
         ----------
-        log_method:
+        log_method
             A structlog bound logger method (e.g. ``logger.error``).
         """
         log_method(str(self), **self.to_dict())
@@ -203,13 +203,13 @@ class PipelineStageError(BaseProjectException):
     def log(self, log_method: _LogMethod) -> None:
         """Log this exception and its cause with structured attributes.
 
-        If the cause is a ``BaseProjectException``, its attributes are merged
-        into the log event. Otherwise, the cause type and message are logged
-        as ``cause_type`` / ``cause`` fields.
+        If the cause is a ``BaseProjectException``, its attributes are merged into the
+        log event. Otherwise, the cause type and message are logged as ``cause_type`` /
+        ``cause`` fields.
 
         Parameters
         ----------
-        log_method:
+        log_method
             A structlog bound logger method (e.g. ``logger.critical``).
         """
         cause = self.__cause__

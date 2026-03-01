@@ -38,8 +38,8 @@ class LogLevel(StrEnum):
 class Settings(BaseSettings):
     """Immutable application settings loaded from env vars and Docker secrets.
 
-    Frozen (immutable) after instantiation. All computed fields are cached on
-    first access via ``@cached_property``.
+    Frozen (immutable) after instantiation.
+    All computed fields are cached on first access via ``@cached_property``.
 
     Source priority chain (highest to lowest):
 
@@ -51,12 +51,12 @@ class Settings(BaseSettings):
     Notes
     -----
     Credential resolution (``postgres_user`` / ``postgres_password``) uses
-    ``AliasChoices`` so both env-var names and Docker secret filenames are
-    accepted transparently.
+    ``AliasChoices`` so both env-var names and Docker secret filenames are accepted
+    transparently.
 
-    Computed path fields typed as ``DirectoryPath`` (``data_dir_path``,
-    ``postgres_dir_path``) validate that the target directory exists at
-    instantiation time. Instantiation will fail if those directories are absent.
+    Computed path fields typed as ``DirectoryPath``
+    (``data_dir_path``, ``postgres_dir_path``) validate that the target directory exists
+    at instantiation time. Instantiation will fail if those directories are absent.
     """
 
     # Project root resolved at class-definition time (before Pydantic
@@ -127,8 +127,8 @@ class Settings(BaseSettings):
     def is_running_on_airflow(self) -> bool:
         """Detect Airflow by checking the ``AIRFLOW_HOME`` environment variable.
 
-        ``AIRFLOW_HOME`` is always set by Airflow in every context (standalone,
-        scheduler, worker, task subprocess).
+        ``AIRFLOW_HOME`` is always set by Airflow in every context
+        (standalone, scheduler, worker, task subprocess).
         """
         return "AIRFLOW_HOME" in os.environ
 
@@ -238,10 +238,10 @@ class Settings(BaseSettings):
         3. ``dotenv_settings``  — ``.env`` file
         4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``)
 
-        The built-in ``file_secret_settings`` (which reads from
-        ``model_config['secrets_dir']``) is intentionally replaced by an
-        explicit ``SecretsSettingsSource`` so the path is a class constant
-        rather than a configurable setting.
+        The built-in ``file_secret_settings``
+        (which reads from ``model_config['secrets_dir']``) is intentionally replaced by
+        an explicit ``SecretsSettingsSource`` so the path is a class constant rather
+        than a configurable setting.
         """
         return (
             init_settings,
@@ -254,9 +254,9 @@ class Settings(BaseSettings):
 def _load_settings() -> Settings:
     """Instantiate settings, aborting with a clear message on validation error.
 
-    Uses ``print(stderr)`` instead of structlog because the project logger
-    depends on ``settings.logging_level`` (circular), and calling
-    ``structlog.configure()`` here would overwrite Airflow's own config.
+    Uses ``print(stderr)`` instead of structlog because the project logger depends on
+    ``settings.logging_level`` (circular), and calling ``structlog.configure()`` here
+    would overwrite Airflow's own config.
     """
     try:
         return Settings()

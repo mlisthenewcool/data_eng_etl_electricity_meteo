@@ -43,7 +43,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the parquet file from landing layer.
 
     Returns
@@ -70,21 +70,21 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for ODRE installations.
 
-    Generates synthetic primary keys for aggregated installations and adds
-    business flags for energy type classification.
+    Generates synthetic primary keys for aggregated installations and adds business
+    flags for energy type classification.
 
     Transformations applied:
 
     - Flag ``est_agregation`` (``True`` when original ``id_peps`` is null).
-    - Synthetic ``id_peps`` for aggregated rows via geographic cascade
-      (IRIS → COM → DEP → REG → FR) + filière + sequence number.
+    - Synthetic ``id_peps`` for aggregated rows via geographic cascade (IRIS → COM → DEP
+      → REG → FR) + filière + sequence number.
     - Add ``est_renouvelable`` flag based on ``code_filiere``.
     - Add ``type_energie`` simplified classification via ``TYPE_ENERGIE_MAPPING``.
     - Add ``est_actif`` flag (``True`` when ``date_deraccordement`` is null).
 
     Parameters
     ----------
-    df:
+    df
         Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
