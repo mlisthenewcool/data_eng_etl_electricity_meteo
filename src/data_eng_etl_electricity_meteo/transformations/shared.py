@@ -108,6 +108,45 @@ def validate_unique(df: pl.DataFrame, column: str | list[str], dataset_name: str
         )
 
 
+def deduplicate_on_composite_key(
+    df: pl.DataFrame,
+    key_columns: list[str],
+    dataset_name: str,
+) -> pl.DataFrame:
+    """Deduplicate rows on a composite key, keeping the last occurrence.
+
+    Handles DST (Daylight Saving Time) transitions where data sources may return
+    duplicate timestamps: during the autumn clock change (last Sunday of October in
+    France), the hour 2:00-3:00 occurs twice, producing duplicates on time-based keys.
+
+    Parameters
+    ----------
+    df
+        DataFrame to deduplicate.
+    key_columns
+        Column names forming the composite key.
+    dataset_name
+        Dataset identifier (for logging).
+
+    Returns
+    -------
+    pl.DataFrame
+        Deduplicated DataFrame.
+    """
+    before = len(df)
+    df = df.unique(subset=key_columns, keep="last")
+    removed = before - len(df)
+    if removed > 0:
+        logger.info(
+            "Deduplicated rows",
+            dataset_name=dataset_name,
+            removed=removed,
+            remaining=len(df),
+            key_columns=key_columns,
+        )
+    return df
+
+
 def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
     """Apply common silver pre-processing: snake_case rename + drop all-null columns.
 

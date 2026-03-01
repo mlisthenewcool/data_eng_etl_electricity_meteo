@@ -1,5 +1,3 @@
--- eolien is TEXT (vs BIGINT in eco2mix_tr): known inconsistency in the ODRE source API.
-
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
     code_insee_region       TEXT            NOT NULL,
     libelle_region          TEXT,
@@ -10,7 +8,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     consommation            BIGINT,
     thermique               BIGINT,
     nucleaire               BIGINT,
-    eolien                  TEXT,
+    eolien                  BIGINT,
     solaire                 BIGINT,
     hydraulique             BIGINT,
     pompage                 BIGINT,

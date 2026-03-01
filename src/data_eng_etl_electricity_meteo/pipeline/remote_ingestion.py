@@ -225,7 +225,7 @@ class RemoteIngestionPipeline:
         DownloadStageError
             If the custom download callable fails.
         """
-        assert self.custom_download is not None  # narrowing for type checker
+        assert self.custom_download is not None  # type narrowing: guarded by download() dispatch
 
         logger.info("Running custom download", version=version)
 
@@ -283,7 +283,7 @@ class RemoteIngestionPipeline:
         try:
             remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
         except httpx.HTTPError as err:
-            raise DownloadStageError() from err
+            raise DownloadStageError("HEAD metadata fetch failed") from err
 
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
@@ -307,7 +307,7 @@ class RemoteIngestionPipeline:
                 progress=AirflowDownloadProgress if settings.is_running_on_airflow else None,
             )
         except httpx.HTTPError as err:
-            raise DownloadStageError() from err
+            raise DownloadStageError("File download failed") from err
 
         context = PipelineContext(
             version=version,
@@ -379,7 +379,7 @@ class RemoteIngestionPipeline:
                 progress=AirflowExtractProgress if settings.is_running_on_airflow else None,
             )
         except ExtractionError as err:
-            raise ExtractStageError() from err
+            raise ExtractStageError("Archive extraction failed") from err
 
         updated_context = PipelineContext(
             version=context.version,
@@ -461,12 +461,12 @@ class RemoteIngestionPipeline:
             df = transform(context.download.landing_path)
             df.write_parquet(bronze_path)
         except (duckdb.Error, OSError) as err:
-            raise BronzeStageError() from err
+            raise BronzeStageError("Bronze transform or write failed") from err
 
         try:
             self._file_manager.update_bronze_latest_link(context.version)
         except OSError as err:
-            raise BronzeStageError() from err
+            raise BronzeStageError("Bronze symlink update failed") from err
 
         self._cleanup_landing()
 
@@ -522,7 +522,7 @@ class RemoteIngestionPipeline:
         try:
             df = transform(self.resolver.bronze_latest_path)
         except (duckdb.Error, OSError, TransformValidationError) as err:
-            raise SilverStageError() from err
+            raise SilverStageError("Silver transform failed") from err
 
         # Rotate silver BEFORE writing to disk: current → backup
         try:
@@ -531,7 +531,7 @@ class RemoteIngestionPipeline:
             df.write_parquet(self.resolver.silver_current_path)
         except OSError as err:
             self._file_manager.rollback_silver()
-            raise SilverStageError() from err
+            raise SilverStageError("Silver file rotation or write failed") from err
 
         columns = df.columns
         row_count = len(df)

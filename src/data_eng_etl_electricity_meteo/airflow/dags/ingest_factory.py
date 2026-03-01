@@ -20,27 +20,17 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
-    CustomDownloadFunc,
-    RemoteIngestionPipeline,
-)
+from data_eng_etl_electricity_meteo.pipeline.custom_downloads import CUSTOM_DOWNLOADS
+from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 from data_eng_etl_electricity_meteo.pipeline.types import (
     PipelineContext,
     PipelineRunSnapshot,
 )
-from data_eng_etl_electricity_meteo.utils.meteo_download import download_climatologie
 
 if TYPE_CHECKING:
     from airflow.sdk.execution_time.context import InletEventsAccessors
 
 logger = get_logger("dag_factory.ingest")
-
-# Datasets that require a custom download strategy instead of the standard
-# single-URL download. The callable receives the landing directory and
-# returns the path to the produced file.
-_CUSTOM_DOWNLOADS: dict[str, CustomDownloadFunc] = {
-    "meteo_france_climatologie": download_climatologie,
-}
 
 
 def _get_previous_snapshot(
@@ -235,7 +225,7 @@ def _generate_all_dags() -> dict[str, DAG]:
         try:
             manager = RemoteIngestionPipeline(
                 dataset=dataset,
-                custom_download=_CUSTOM_DOWNLOADS.get(dataset.name),
+                custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
             )
         except TransformNotFoundError as error:
             error.log(logger.warning)
@@ -247,5 +237,5 @@ def _generate_all_dags() -> dict[str, DAG]:
     return pipelines
 
 
-# Note: expose DAGs to Airflow
-_generate_all_dags()
+# Airflow discovers DAGs via @dag decorator; return value is intentionally unused.
+_ = _generate_all_dags()

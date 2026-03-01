@@ -67,7 +67,7 @@ def main(
     version = dataset_config.ingestion.frequency.format_datetime_as_version(start_datetime)
 
     # ------------------------------------------------------------------
-    # 1) Build pipeline with custom download (96 CSV.gz → merged parquet)
+    # 1) Build pipeline with custom download (95 departments → merged parquet)
     # ------------------------------------------------------------------
     manager = RemoteIngestionPipeline(
         dataset=dataset_config,

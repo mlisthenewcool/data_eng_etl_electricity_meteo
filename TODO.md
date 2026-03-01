@@ -9,7 +9,7 @@
 ## Next
 
 - [ ] [Docs] Documentation minimale du projet V1 (présentation, données, architecture,
-  outils)
+  outils) : [exemple projet avec bonne documentation](https://github.com/abeltavares/batch-data-pipeline)
 - [ ] [Tests] Ajouter des tests sur les modules/fonctions critiques
 - [ ] [Données] Intégrer les appels aux API Météo France (phase 2/3
   décrites ici : [integration_meteo_france.md](docs/integration_meteo_france.md))
@@ -32,6 +32,14 @@
 - [ ] [Docs] Documenter les variables d'environnement qui configurent le logging
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
 - [ ] [Docs] Script ou skill pour reformatter les docstrings proprement
+- [ ] [Pipeline] Persistance locale du state (JSON par dataset) pour le smart-skip
+  hors Airflow (`main_remote_dataset.py`)
+- [ ] [Pipeline] Capturer les métadonnées de téléchargement custom par département
+  pour le smart-skip de la climatologie
+- [ ] [Pipeline] Options `--skip-bronze`, `--skip-silver`, `--skip-postgres` aux
+  entrypoints CLI + rétention configurable des fichiers landing (ex: 1 jour)
+- [ ] [Airflow] Créer un DAG de maintenance pour le nettoyage des fichiers bronze
+  obsolètes (`cleanup_old_bronze_versions` existe mais n'est appelé nulle part)
 
 ## Résolu
 

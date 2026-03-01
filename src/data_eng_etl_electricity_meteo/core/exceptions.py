@@ -122,10 +122,17 @@ class DatasetTypeError(DataCatalogError):
 class SchemaValidationError(BaseProjectException):
     """Raised when DataFrame columns don't match the Postgres table schema."""
 
-    def __init__(self, table: str, extra_columns: list[str], missing_columns: list[str]) -> None:
+    def __init__(
+        self,
+        table: str,
+        extra_columns: list[str] | None = None,
+        missing_columns: list[str] | None = None,
+        type_mismatches: list[str] | None = None,
+    ) -> None:
         self.table = table
-        self.extra_columns = extra_columns
-        self.missing_columns = missing_columns
+        self.extra_columns = extra_columns or []
+        self.missing_columns = missing_columns or []
+        self.type_mismatches = type_mismatches or []
         super().__init__("Schema mismatch between Parquet and Postgres.")
 
 

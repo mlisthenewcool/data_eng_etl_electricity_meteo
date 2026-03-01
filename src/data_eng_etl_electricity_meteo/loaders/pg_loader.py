@@ -44,6 +44,26 @@ _COPY_SPOOL_THRESHOLD = 128 * 1024 * 1024  # 128 MB — CSV kept in RAM below, s
 _SERVER_MANAGED_COLUMNS: set[str] = {"inserted_at", "updated_at"}
 _SILVER_SCHEMA = "silver"
 
+# Polars base type → compatible Postgres data_type (from information_schema).
+# Unknown Polars types are silently skipped (no false positive).
+_POLARS_TO_PG_COMPATIBLE: dict[str, set[str]] = {
+    "Int8": {"smallint", "integer", "bigint"},
+    "Int16": {"smallint", "integer", "bigint"},
+    "Int32": {"integer", "bigint"},
+    "Int64": {"bigint"},
+    "UInt8": {"smallint", "integer", "bigint"},
+    "UInt16": {"integer", "bigint"},
+    "UInt32": {"bigint"},
+    "Float32": {"real", "double precision"},
+    "Float64": {"double precision"},
+    "Boolean": {"boolean"},
+    "String": {"text", "character varying"},
+    "Date": {"date"},
+    "Datetime": {"timestamp with time zone", "timestamp without time zone"},
+    "Binary": {"bytea"},
+    "List": {"ARRAY"},
+}
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -95,7 +115,7 @@ def load_silver_to_postgres(
             table=pg_table,
         )
     except FileNotFoundError as err:
-        raise PostgresLoadError() from err
+        raise PostgresLoadError("DDL file not found") from err
 
     logger.info(
         "Starting Postgres load",
@@ -108,7 +128,7 @@ def load_silver_to_postgres(
     try:
         df = pl.read_parquet(silver_path)
     except (pl.exceptions.PolarsError, OSError) as err:
-        raise PostgresLoadError() from err
+        raise PostgresLoadError("Failed to read silver Parquet") from err
 
     try:
         with conn.cursor() as cur:
@@ -123,10 +143,10 @@ def load_silver_to_postgres(
         conn.commit()
     except (SchemaValidationError, FileNotFoundError) as err:
         conn.rollback()
-        raise PostgresLoadError() from err
+        raise PostgresLoadError("Schema validation or SQL file error") from err
     except psycopg.Error as err:
         conn.rollback()
-        raise PostgresLoadError() from err
+        raise PostgresLoadError("Database error during load") from err
 
     metrics = LoadPostgresMetrics(
         dataset_name=dataset_config.name,
@@ -176,21 +196,38 @@ def _format_sql_template(subdir: str, dataset_name: str, **identifiers: str) -> 
 
 
 def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, pg_table: str) -> None:
-    """Raise ``SchemaValidationError`` if DataFrame and PG table columns diverge."""
-    tid = psql.Identifier(_SILVER_SCHEMA, pg_table)
-    cur.execute(psql.SQL("SELECT * FROM {table} LIMIT 0").format(table=tid))
-    pg_cols = {desc[0] for desc in (cur.description or [])} - _SERVER_MANAGED_COLUMNS
+    """Raise ``SchemaValidationError`` if DataFrame and PG table columns diverge.
+
+    Checks both column **names** (extra / missing) and **type compatibility**
+    (Polars dtype vs Postgres data_type from ``information_schema``).
+    """
+    cur.execute(
+        "SELECT column_name, data_type FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = %s",
+        (_SILVER_SCHEMA, pg_table),
+    )
+    pg_columns: dict[str, str] = {row[0]: row[1] for row in cur.fetchall()}
+    pg_cols = set(pg_columns.keys()) - _SERVER_MANAGED_COLUMNS
     df_cols = set(df.columns)
 
     extra = df_cols - pg_cols
     missing = pg_cols - df_cols
 
+    type_mismatches: list[str] = []
+    for col in sorted(df_cols & pg_cols):
+        polars_type_name = type(df.schema[col].base_type()).__name__
+        pg_type = pg_columns[col]
+        compatible = _POLARS_TO_PG_COMPATIBLE.get(polars_type_name)
+        if compatible is not None and pg_type not in compatible:
+            type_mismatches.append(f"{col}: Polars {polars_type_name} vs Postgres {pg_type}")
+
     qualified_table = f"{_SILVER_SCHEMA}.{pg_table}"
-    if extra or missing:
+    if extra or missing or type_mismatches:
         raise SchemaValidationError(
             table=qualified_table,
             extra_columns=sorted(extra),
             missing_columns=sorted(missing),
+            type_mismatches=type_mismatches or None,
         )
 
 

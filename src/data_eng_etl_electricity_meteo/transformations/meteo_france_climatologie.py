@@ -74,7 +74,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
     """Bronze transformation for Météo France climatologie.
 
     Reads the 16 columns from the merged parquet and casts numeric columns to Float64.
-    ``strict=False`` converts sentinel strings (``""``, ``"mq"``) to null.
+    Known sentinel strings (``""``, ``"mq"``) are replaced with null before casting.
+    Uses ``strict=True`` so that any unexpected non-numeric value raises an error.
 
     Parameters
     ----------
@@ -95,8 +96,23 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     df = pl.read_parquet(landing_path, columns=columns)
 
+    # Replace known sentinel values with null in string-typed numeric columns.
+    # Hydra Parquet may already have numeric types — sentinel replacement only
+    # applies to columns still in String/Utf8 form.
+    sentinel_values = ["", "mq"]
+    string_numeric_cols = [
+        c
+        for c, t in BRONZE_COLUMNS.items()
+        if t != pl.Utf8 and df.schema[c] in (pl.String, pl.Utf8)
+    ]
+    if string_numeric_cols:
+        df = df.with_columns(
+            pl.when(pl.col(c).is_in(sentinel_values)).then(None).otherwise(pl.col(c)).alias(c)
+            for c in string_numeric_cols
+        )
+
     return df.with_columns(
-        *(pl.col(c).cast(t, strict=False).alias(c) for c, t in BRONZE_COLUMNS.items())
+        *(pl.col(c).cast(t, strict=True).alias(c) for c, t in BRONZE_COLUMNS.items())
     )
 
 
@@ -147,11 +163,11 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         .alias("date_heure"),
     )
 
-    # Narrowing casts for integer-valued columns
+    # Narrowing casts for integer-valued columns (values are whole numbers in source)
     df = df.with_columns(
-        pl.col("nebulosite").cast(pl.Int16, strict=False),
-        pl.col("direction_vent").cast(pl.Int16, strict=False),
-        pl.col("humidite").cast(pl.Int16, strict=False),
+        pl.col("nebulosite").cast(pl.Int16, strict=True),
+        pl.col("direction_vent").cast(pl.Int16, strict=True),
+        pl.col("humidite").cast(pl.Int16, strict=True),
     )
 
     # Reorder columns to match the Postgres table schema

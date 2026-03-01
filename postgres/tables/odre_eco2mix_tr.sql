@@ -1,6 +1,3 @@
--- pompage, stockage_batterie, destockage_batterie are TEXT because the real-time
--- source sometimes contains non-numeric annotations (vs BIGINT in consolidated).
-
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
     code_insee_region       TEXT            NOT NULL,
     libelle_region          TEXT,
@@ -14,11 +11,11 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     eolien                  BIGINT,
     solaire                 BIGINT,
     hydraulique             BIGINT,
-    pompage                 TEXT,
+    pompage                 BIGINT,
     bioenergies             BIGINT,
     ech_physiques           BIGINT,
-    stockage_batterie       TEXT,
-    destockage_batterie     TEXT,
+    stockage_batterie       BIGINT,
+    destockage_batterie     BIGINT,
     tco_thermique           DOUBLE PRECISION,
     tch_thermique           DOUBLE PRECISION,
     tco_nucleaire           DOUBLE PRECISION,

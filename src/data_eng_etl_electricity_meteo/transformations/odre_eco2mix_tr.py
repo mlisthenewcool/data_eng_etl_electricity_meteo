@@ -5,8 +5,13 @@ from pathlib import Path
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.transformations.shared import deduplicate_on_composite_key
 
 logger = get_logger("transform.odre_eco2mix_tr")
+
+# Columns that contain non-numeric annotations in the real-time source API.
+# Cast to Int64 (BIGINT) in silver; non-castable values become null.
+_NUMERIC_TEXT_COLUMNS = ["pompage", "stockage_batterie", "destockage_batterie"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,18 +70,20 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Deduplicated DataFrame ready for the silver layer.
     """
-    # Select only expected columns in the correct order
-    # This drops any extra columns (like column_68) from the source
-    # TODO: df = df.select(list(SCHEMA_ODRE_ECO2MIX_TR.names()))
+    # Cast columns that contain non-numeric annotations to Int64
+    for col in _NUMERIC_TEXT_COLUMNS:
+        if col in df.columns:
+            before_nulls = df[col].null_count()
+            df = df.with_columns(pl.col(col).cast(pl.Int64, strict=False))
+            introduced = df[col].null_count() - before_nulls
+            if introduced > 0:
+                logger.warning("Cast introduced nulls", column=col, new_nulls=introduced)
 
-    # Deduplicate on primary key (region + datetime)
-    # Keep last occurrence (most recent data from source)
-    # This handles DST transitions where ODRE API may return duplicate timestamps
-    # example : 30 March 2025
-    df = df.unique(subset=["code_insee_region", "date_heure"], keep="last")
-
-    # TODO: Validate the output
-    # validate_odre_eco2mix_tr(df)
+    df = deduplicate_on_composite_key(
+        df,
+        key_columns=["code_insee_region", "date_heure"],
+        dataset_name="odre_eco2mix_tr",
+    )
 
     logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
     return df

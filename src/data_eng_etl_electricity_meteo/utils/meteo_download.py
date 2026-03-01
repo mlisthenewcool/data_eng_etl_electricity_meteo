@@ -244,8 +244,8 @@ def _download_department(
     """
     dept = resource["dept"]
     parquet_url = resource.get("parquet_url")
-    csv_url = resource["csv_url"]  # always present (set by discovery or fallback)
-    assert isinstance(csv_url, str)
+    csv_url = resource["csv_url"]
+    assert isinstance(csv_url, str)  # type narrowing: always set by discovery/fallback
 
     df: pl.DataFrame | None = None
 
@@ -346,7 +346,7 @@ def download_climatologie(
         resources_by_dept: dict[str, dict[str, str | None]] = {}
         for r in fallback:
             dept = r["dept"]
-            assert isinstance(dept, str)  # guaranteed by _build_fallback_resources
+            assert isinstance(dept, str)  # type narrowing: always set by discovery/fallback
             resources_by_dept[dept] = r
 
         # Enrich with API discovery (adds Parquet URLs where available)
@@ -363,7 +363,15 @@ def download_climatologie(
                 for resource in resources_by_dept.values()
             }
             for future in as_completed(futures):
-                rows = future.result()
+                resource = futures[future]
+                try:
+                    rows = future.result()
+                except (pl.exceptions.PolarsError, OSError):
+                    logger.exception(
+                        "Department download failed unexpectedly",
+                        department=resource.get("dept"),
+                    )
+                    continue
                 if rows > 0:
                     dept_count += 1
                     total_rows += rows

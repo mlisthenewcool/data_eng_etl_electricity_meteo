@@ -60,14 +60,20 @@ BRONZE_TRANSFORMS: dict[str, BronzeTransformFunc] = {
 PrimaryKey = str | list[str] | None
 
 SILVER_TRANSFORMS: dict[str, tuple[SilverTransformFunc, PrimaryKey]] = {
-    "ign_contours_iris": (ign_contours_iris.transform_silver, None),
+    "ign_contours_iris": (ign_contours_iris.transform_silver, "code_iris"),
     "meteo_france_climatologie": (
         meteo_france_climatologie.transform_silver,
         ["id_station", "date_heure"],
     ),
-    "meteo_france_stations": (meteo_france_stations.transform_silver, None),
-    "odre_eco2mix_cons_def": (odre_eco2mix_cons_def.transform_silver, None),
-    "odre_eco2mix_tr": (odre_eco2mix_tr.transform_silver, None),
+    "meteo_france_stations": (meteo_france_stations.transform_silver, "id"),
+    "odre_eco2mix_cons_def": (
+        odre_eco2mix_cons_def.transform_silver,
+        ["code_insee_region", "date_heure"],
+    ),
+    "odre_eco2mix_tr": (
+        odre_eco2mix_tr.transform_silver,
+        ["code_insee_region", "date_heure"],
+    ),
     "odre_installations": (odre_installations.transform_silver, "id_peps"),
 }
 
