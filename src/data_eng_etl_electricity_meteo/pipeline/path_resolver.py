@@ -136,6 +136,11 @@ class RemotePathResolver(_BasePathResolver):
         """Previous silver version (N-1) for fast rollback."""
         return self._silver_dir / "backup.parquet"
 
+    @property
+    def silver_delta_path(self) -> Path:
+        """Delta file containing only new/changed rows for incremental loads."""
+        return self._silver_dir / "delta.parquet"
+
 
 if __name__ == "__main__":
     import sys
@@ -167,4 +172,5 @@ if __name__ == "__main__":
             bronze_latest_version=_resolver.bronze_latest_version(),
             silver_backup_path=_resolver.silver_backup_path,
             silver_current_path=_resolver.silver_current_path,
+            silver_delta_path=_resolver.silver_delta_path,
         )

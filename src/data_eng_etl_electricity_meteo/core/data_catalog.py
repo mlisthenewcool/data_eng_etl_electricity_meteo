@@ -9,7 +9,8 @@ DataCatalog
             │   ├── name, description
             │   ├── source: RemoteSourceConfig (url, provider, format)
             │   ├── ingestion: IngestionPolicy (frequency, mode)
-            │   └── postgres: PostgresConfig (table name)
+            │   ├── postgres: PostgresConfig (table name)
+            │   └── primary_key: list[str] | None (natural key columns)
             └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
                 └── source: GoldSourceConfig (depends_on)
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 import yaml
-from pydantic import Discriminator, HttpUrl, Tag, ValidationError, model_validator
+from pydantic import BeforeValidator, Discriminator, HttpUrl, Tag, ValidationError, model_validator
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     AirflowContextError,
@@ -242,7 +243,6 @@ class IngestionPolicy(StrictModel):
 
     frequency: IngestionFrequency
     mode: IngestionMode
-    # incremental_key: str  # TODO: required if mode=INCREMENTAL
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +265,9 @@ class RemoteDatasetConfig(StrictModel):
         Ingestion frequency and mode.
     postgres
         Postgres loading configuration (target table name).
+    primary_key
+        Column names forming the natural key
+        (used for Polars diff, SQL upsert, and silver validation).
     """
 
     name: str
@@ -272,6 +275,7 @@ class RemoteDatasetConfig(StrictModel):
     source: RemoteSourceConfig
     ingestion: IngestionPolicy
     postgres: PostgresConfig
+    primary_key: Annotated[list[str], BeforeValidator(lambda v: [v] if isinstance(v, str) else v)]
 
 
 class GoldDatasetConfig(StrictModel):

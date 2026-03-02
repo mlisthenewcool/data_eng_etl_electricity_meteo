@@ -34,7 +34,10 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
-from data_eng_etl_electricity_meteo.pipeline.types import LoadPostgresMetrics
+from data_eng_etl_electricity_meteo.pipeline.types import (
+    IncrementalDiffMetrics,
+    LoadPostgresMetrics,
+)
 
 logger = get_logger("loaders.pg_loader")
 
@@ -71,15 +74,18 @@ _POLARS_TO_PG_COMPATIBLE: dict[str, set[str]] = {
 
 
 def load_silver_to_postgres(
-    dataset_config: RemoteDatasetConfig, conn: psycopg.Connection[Any]
+    dataset_config: RemoteDatasetConfig,
+    conn: psycopg.Connection[Any],
+    diff: IncrementalDiffMetrics | None = None,
 ) -> LoadPostgresMetrics:
     """Load a silver ``.parquet`` file into the Postgres silver schema.
 
     Reads ``ingestion.mode`` from the data catalog to select the strategy:
 
     - ``snapshot``   : ``TRUNCATE {table}`` then ``COPY`` directly into it.
-    - ``incremental``: ``COPY`` into a temp staging table, then execute the
-      upsert from ``postgres/upsert/``.
+    - ``incremental``: read ``delta.parquet`` (new + changed rows only), ``COPY``
+      into a temp staging table, then execute the upsert. After commit, verify row count
+      sync with the full silver snapshot; on mismatch, fallback to full refresh.
 
     Manages the transaction entirely: commits on success, rolls back on failure.
     The caller is only responsible for closing the connection.
@@ -91,6 +97,9 @@ def load_silver_to_postgres(
         ``dataset_config.name`` must match a ``postgres/tables/`` DDL file.
     conn
         Open psycopg connection.
+    diff
+        Incremental diff metrics from the silver stage, or ``None``.
+        Forwarded into the returned ``LoadPostgresMetrics`` for observability.
 
     Returns
     -------
@@ -103,7 +112,7 @@ def load_silver_to_postgres(
         ``psycopg`` database error.
     """
     mode = dataset_config.ingestion.mode
-    silver_path = RemotePathResolver(dataset_config.name).silver_current_path
+    resolver = RemotePathResolver(dataset_config.name)
     pg_table = dataset_config.postgres.table
     qualified_table = f"{_SILVER_SCHEMA}.{pg_table}"
 
@@ -117,18 +126,39 @@ def load_silver_to_postgres(
     except FileNotFoundError as err:
         raise PostgresLoadError("DDL file not found") from err
 
+    # --- Choose source file: delta for incremental, current for snapshot ---
+    if mode == IngestionMode.INCREMENTAL:
+        source_path = resolver.silver_delta_path
+    else:
+        source_path = resolver.silver_current_path
+
     logger.info(
         "Starting Postgres load",
         dataset=dataset_config.name,
         table=qualified_table,
         strategy=mode,
-        silver_path=silver_path,
+        source_path=source_path,
     )
 
     try:
-        df = pl.read_parquet(silver_path)
+        df = pl.read_parquet(source_path)
     except (pl.exceptions.PolarsError, OSError) as err:
         raise PostgresLoadError("Failed to read silver Parquet") from err
+
+    # --- Early exit for incremental with empty delta ---
+    if mode == IngestionMode.INCREMENTAL and len(df) == 0:
+        logger.info(
+            "No new or changed rows, skipping Postgres load",
+            dataset=dataset_config.name,
+            table=qualified_table,
+        )
+        return LoadPostgresMetrics(
+            dataset_name=dataset_config.name,
+            table=qualified_table,
+            strategy=mode,
+            rows_loaded=0,
+            diff=diff,
+        )
 
     try:
         with conn.cursor() as cur:
@@ -148,13 +178,6 @@ def load_silver_to_postgres(
         conn.rollback()
         raise PostgresLoadError("Database error during load") from err
 
-    metrics = LoadPostgresMetrics(
-        dataset_name=dataset_config.name,
-        table=qualified_table,
-        strategy=mode,
-        rows_loaded=rows,
-    )
-
     logger.info(
         "Postgres load completed",
         dataset=dataset_config.name,
@@ -163,7 +186,21 @@ def load_silver_to_postgres(
         rows_loaded=rows,
     )
 
-    return metrics
+    # --- Post-load sync verification for incremental datasets ---
+    if mode == IngestionMode.INCREMENTAL:
+        fallback_rows = _verify_and_maybe_full_refresh(
+            dataset_config.name, conn, resolver, ddl_sql, pg_table
+        )
+        if fallback_rows is not None:
+            rows = fallback_rows
+
+    return LoadPostgresMetrics(
+        dataset_name=dataset_config.name,
+        table=qualified_table,
+        strategy=mode,
+        rows_loaded=rows,
+        diff=diff,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +326,89 @@ def _copy_df(cur: psycopg.Cursor[Any], df: pl.DataFrame, copy_sql: psql.Composed
         with cur.copy(copy_sql) as copy:
             while chunk := buf.read(_COPY_BUFFER_SIZE):
                 copy.write(chunk)
+
+
+def _verify_sync(
+    cur: psycopg.Cursor[Any],
+    pg_table: str,
+    expected_count: int,
+) -> bool:
+    """Verify that Postgres row count matches expected silver count."""
+    cur.execute(
+        psql.SQL("SELECT COUNT(*) FROM {table}").format(
+            table=psql.Identifier(_SILVER_SCHEMA, pg_table)
+        )
+    )
+    row = cur.fetchone()
+    assert row is not None  # COUNT(*) always returns a row
+    actual: int = row[0]
+    if actual != expected_count:
+        logger.warning(
+            "Row count mismatch after incremental load",
+            pg_count=actual,
+            silver_count=expected_count,
+        )
+        return False
+    return True
+
+
+def _verify_and_maybe_full_refresh(
+    dataset_name: str,
+    conn: psycopg.Connection[Any],
+    resolver: RemotePathResolver,
+    ddl_sql: psql.Composed,
+    pg_table: str,
+) -> int | None:
+    """Check row count sync after incremental load; full refresh on mismatch.
+
+    Parameters
+    ----------
+    dataset_name
+        Dataset identifier (for logging).
+    conn
+        Open psycopg connection (already committed after initial load).
+    resolver
+        Path resolver for reading the full silver snapshot.
+    ddl_sql
+        Pre-formatted DDL SQL for table creation.
+    pg_table
+        Unqualified Postgres table name.
+
+    Returns
+    -------
+    int | None
+        Rows loaded during full refresh fallback, or ``None`` if already in sync.
+    """
+    try:
+        silver_full = pl.read_parquet(resolver.silver_current_path)
+    except (pl.exceptions.PolarsError, OSError) as err:
+        logger.warning("Cannot read silver snapshot for sync check", error=str(err))
+        return None
+
+    try:
+        with conn.cursor() as cur:
+            if _verify_sync(cur, pg_table, expected_count=len(silver_full)):
+                return None
+
+            # Mismatch → full refresh from current.parquet
+            logger.warning(
+                "Full refresh triggered by row count mismatch",
+                dataset=dataset_name,
+            )
+            cur.execute(ddl_sql)
+            rows = _load_snapshot(cur, silver_full, pg_table)
+
+        conn.commit()
+    except psycopg.Error as err:
+        conn.rollback()
+        raise PostgresLoadError("Full refresh fallback failed") from err
+
+    logger.info(
+        "Full refresh fallback completed",
+        dataset=dataset_name,
+        rows_loaded=rows,
+    )
+    return rows
 
 
 def _load_snapshot(cur: psycopg.Cursor[Any], df: pl.DataFrame, pg_table: str) -> int:

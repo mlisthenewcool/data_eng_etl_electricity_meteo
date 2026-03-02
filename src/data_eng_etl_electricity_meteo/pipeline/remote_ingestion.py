@@ -25,8 +25,9 @@ from pathlib import Path
 
 import duckdb
 import httpx
+import polars as pl
 
-from data_eng_etl_electricity_meteo.core.data_catalog import RemoteDatasetConfig
+from data_eng_etl_electricity_meteo.core.data_catalog import IngestionMode, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
     DownloadStageError,
@@ -47,6 +48,7 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
     BronzeMetrics,
     DownloadMetrics,
     ExtractionInfo,
+    IncrementalDiffMetrics,
     IngestionDecision,
     PipelineContext,
     PipelineRunSnapshot,
@@ -494,8 +496,9 @@ class RemoteIngestionPipeline:
     def to_silver(self, context: PipelineContext) -> PipelineContext:
         """Apply business transformations to create silver layer.
 
-        Steps: rotate silver (current → backup) → read bronze latest → apply transform →
-        write ``current.parquet``.
+        For incremental datasets, computes a delta (new + changed rows) by comparing the
+        new transform output against the previous ``current.parquet``. The delta is
+        written to ``delta.parquet`` alongside the full snapshot in ``current.parquet``.
 
         Parameters
         ----------
@@ -524,11 +527,24 @@ class RemoteIngestionPipeline:
         except (duckdb.Error, OSError, TransformValidationError) as err:
             raise SilverStageError("Silver transform failed") from err
 
-        # Rotate silver BEFORE writing to disk: current → backup
+        # --- Compute delta BEFORE rotating (current.parquet is still "previous") ---
+        is_incremental = self.dataset.ingestion.mode == IngestionMode.INCREMENTAL
+        diff_metrics: IncrementalDiffMetrics | None = None
+
+        if is_incremental:
+            diff_metrics, delta = self._compute_incremental_diff(df)
+        else:
+            delta = None
+
+        # Rotate silver: current → backup, then write new files
         try:
             self._file_manager.rotate_silver()
             self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
             df.write_parquet(self.resolver.silver_current_path)
+
+            if is_incremental:
+                assert delta is not None
+                delta.write_parquet(self.resolver.silver_delta_path)
         except OSError as err:
             self._file_manager.rollback_silver()
             raise SilverStageError("Silver file rotation or write failed") from err
@@ -537,12 +553,19 @@ class RemoteIngestionPipeline:
         row_count = len(df)
         parquet_size = round(self.resolver.silver_current_path.stat().st_size / (1024 * 1024), 2)
 
-        logger.info(
-            "Silver transformation complete",
-            row_count=row_count,
-            n_columns=len(columns),
-            file_size_mib=parquet_size,
-        )
+        log_kwargs: dict[str, object] = {
+            "row_count": row_count,
+            "n_columns": len(columns),
+            "file_size_mib": parquet_size,
+        }
+        if diff_metrics:
+            log_kwargs.update(
+                rows_new=diff_metrics.rows_new,
+                rows_changed=diff_metrics.rows_changed,
+                rows_unchanged=diff_metrics.rows_unchanged,
+            )
+
+        logger.info("Silver transformation complete", **log_kwargs)
 
         return PipelineContext(
             version=context.version,
@@ -552,5 +575,77 @@ class RemoteIngestionPipeline:
                 file_size_mib=parquet_size,
                 row_count=row_count,
                 columns=columns,
+                diff=diff_metrics,
             ),
         )
+
+    def _compute_incremental_diff(
+        self, df: pl.DataFrame
+    ) -> tuple[IncrementalDiffMetrics, pl.DataFrame]:
+        """Compute the delta between the new silver DataFrame and the previous snapshot.
+
+        Parameters
+        ----------
+        df
+            Full new silver DataFrame (from the transform).
+
+        Returns
+        -------
+        tuple[IncrementalDiffMetrics, pl.DataFrame]
+            Diff statistics and the delta DataFrame (new + changed rows only).
+        """
+        pk = self.dataset.primary_key
+
+        if not self.resolver.silver_current_path.exists():
+            # First run: everything is new
+            logger.info("No previous silver snapshot, full delta", rows=len(df))
+            return (
+                IncrementalDiffMetrics(
+                    rows_total=len(df),
+                    rows_new=len(df),
+                    rows_changed=0,
+                    rows_unchanged=0,
+                ),
+                df,
+            )
+
+        previous = pl.read_parquet(self.resolver.silver_current_path)
+
+        # Align types: previous may have different dtypes due to schema evolution
+        previous = previous.cast(df.schema)
+
+        # New rows: PK absent from previous
+        df_new = df.join(previous.select(pk), on=pk, how="anti")
+
+        # Changed rows: PK present in both, at least one non-key column differs
+        non_key_cols = [col for col in df.columns if col not in pk]
+        joined = df.join(previous, on=pk, how="inner", suffix="_prev")
+
+        diff_exprs = [
+            (pl.col(col) != pl.col(f"{col}_prev"))
+            | (pl.col(col).is_null() != pl.col(f"{col}_prev").is_null())
+            for col in non_key_cols
+        ]
+        any_changed = pl.any_horizontal(*diff_exprs)
+        df_changed = joined.filter(any_changed).select(df.columns)
+
+        delta = pl.concat([df_new, df_changed])
+        rows_unchanged = len(df) - len(df_new) - len(df_changed)
+
+        metrics = IncrementalDiffMetrics(
+            rows_total=len(df),
+            rows_new=len(df_new),
+            rows_changed=len(df_changed),
+            rows_unchanged=rows_unchanged,
+        )
+
+        logger.info(
+            "Incremental diff computed",
+            rows_total=metrics.rows_total,
+            rows_new=metrics.rows_new,
+            rows_changed=metrics.rows_changed,
+            rows_unchanged=metrics.rows_unchanged,
+            delta_rows=len(delta),
+        )
+
+        return metrics, delta

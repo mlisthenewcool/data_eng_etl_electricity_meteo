@@ -94,12 +94,46 @@ class BronzeMetrics(StrictModel):
     columns: list[str]
 
 
+class IncrementalDiffMetrics(StrictModel):
+    """Delta statistics computed during silver transformation for incremental datasets.
+
+    Attributes
+    ----------
+    rows_total
+        Total rows in the full silver snapshot.
+    rows_new
+        Rows whose PK is absent from the previous snapshot (inserts).
+    rows_changed
+        Rows whose PK exists but at least one non-key column differs (updates).
+    rows_unchanged
+        Rows identical to the previous snapshot (skipped).
+    """
+
+    rows_total: int
+    rows_new: int
+    rows_changed: int
+    rows_unchanged: int
+
+
 class SilverMetrics(StrictModel):
-    """Metrics produced by the silver transformation stage."""
+    """Metrics produced by the silver transformation stage.
+
+    Attributes
+    ----------
+    file_size_mib
+        Size of ``current.parquet`` in MiB.
+    row_count
+        Number of rows in the silver snapshot.
+    columns
+        Column names.
+    diff
+        Incremental diff statistics, or ``None`` for snapshot datasets.
+    """
 
     file_size_mib: float
     row_count: int
     columns: list[str]
+    diff: IncrementalDiffMetrics | None = None
 
 
 class GoldMetrics(StrictModel):
@@ -123,12 +157,15 @@ class LoadPostgresMetrics(StrictModel):
         Loading strategy used: ``"snapshot"`` or ``"incremental"``.
     rows_loaded
         Number of rows written (for incremental: rows inserted + updated).
+    diff
+        Incremental diff statistics from the silver stage, or ``None``.
     """
 
     dataset_name: str
     table: str
     strategy: IngestionMode
     rows_loaded: int
+    diff: IncrementalDiffMetrics | None = None
 
 
 # ---------------------------------------------------------------------------

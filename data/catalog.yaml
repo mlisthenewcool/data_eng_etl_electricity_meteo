@@ -22,6 +22,7 @@ datasets:
 
   ign_contours_iris:
     description: "La base de données de référence pour la diffusion infra-communale des résultats du recensement de la population par Iris, de précision décamétrique"
+    primary_key: "code_iris"
     source:
       provider: "IGN"
       url: "https://data.geopf.fr/telechargement/download/CONTOURS-IRIS/CONTOURS-IRIS_3-0__GPKG_LAMB93_FXX_2025-01-01/CONTOURS-IRIS_3-0__GPKG_LAMB93_FXX_2025-01-01.7z"
@@ -35,6 +36,7 @@ datasets:
 
   odre_installations:
     description: "Registre national des installations de production et stockage d'électricité"
+    primary_key: "id_peps"
     source:
       provider: "ODRE"
       url: "https://object.files.data.gouv.fr/hydra-parquet/hydra-parquet/c14e5a7d-2ca6-4ad8-bc61-93889d13fc25.parquet"
@@ -47,6 +49,7 @@ datasets:
 
   odre_eco2mix_cons_def:
     description: "Production électrique régionale eco2mix (consolidées et définitives)"
+    primary_key: [ "code_insee_region", "date_heure" ]
     source:
       provider: "ODRE"
       url: "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-regional-cons-def/exports/parquet?lang=fr&timezone=Europe%2FBerlin"
@@ -59,6 +62,7 @@ datasets:
 
   odre_eco2mix_tr:
     description: "Production électrique régionale eco2mix (temps réel)"
+    primary_key: [ "code_insee_region", "date_heure" ]
     source:
       provider: "ODRE"
       url: "https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/eco2mix-regional-tr/exports/parquet?lang=fr&timezone=Europe%2FBerlin"
@@ -71,6 +75,7 @@ datasets:
 
   meteo_france_stations:
     description: "Liste des stations météorologiques de Météo France avec accès aux caractéristiques détaillées."
+    primary_key: "id"
     # url_description: "https://www.data.gouv.fr/datasets/informations-sur-les-stations-metadonnees"
     source:
       provider: "MétéoFrance"
@@ -85,6 +90,7 @@ datasets:
 
   meteo_france_climatologie:
     description: "Données climatologiques horaires de Météo France (2 dernières années, 95 départements France métropolitaine)"
+    primary_key: [ "id_station", "date_heure" ]
     source:
       provider: "MétéoFrance"
       # Custom multi-file download : 95 fichiers par département (Parquet Hydra si dispo, sinon CSV.gz)
@@ -97,18 +103,6 @@ datasets:
       mode: "incremental"
     postgres:
       table: "fact_meteo_horaire"
-
-  #  meteo_france_observations:
-  #    description: "todo"
-  #    source:
-  #      provider: "MétéoFrance"
-  #      url: "todo"
-  #      format: "todo"
-  #    ingestion:
-  #      frequency: "hourly"
-  #      mode: "snapshot" # TODO: incremental ?
-  #    postgres:
-  #      table: "fact_observations_meteo"
 
   # ============================================================
   # DERIVED DATASETS (Gold - built from Silver sources)
