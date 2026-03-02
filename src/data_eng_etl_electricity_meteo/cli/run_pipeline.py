@@ -15,13 +15,20 @@ import typer
 from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
 from data_eng_etl_electricity_meteo.pipeline.custom_downloads import CUSTOM_DOWNLOADS
 
-app = typer.Typer()
+app = typer.Typer(no_args_is_help=True)
 
 
 @app.command()
 def main(
-    dataset_name: str = typer.Argument(help="Catalog identifier (e.g. odre_installations)."),
-    skip_postgres: bool = typer.Option(False, help="Skip Postgres loading."),
+    dataset_name: str = typer.Argument(
+        help="Catalog identifier (e.g. odre_installations, odre_eco2mix_tr).",
+        show_default=False,
+    ),
+    skip_postgres: bool = typer.Option(
+        False,
+        help="Skip the final Postgres load step.",
+        show_default=True,
+    ),
 ) -> None:
     """Run the remote dataset pipeline for a single dataset."""
     run_pipeline(

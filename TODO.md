@@ -3,8 +3,13 @@
 
 ## Now
 
+- [ ] [dbt] Évaluer dbt/SQLMesh pour la couche gold uniquement (agrégations
+  cross-datasets, vues matérialisées)
+- [ ] [dbt] Implémenter dbt pour la couche gold
 - [ ] [Docs] Documentation minimale du projet V1 (présentation, données, architecture,
   outils) : [exemple projet avec bonne documentation](https://github.com/abeltavares/batch-data-pipeline)
+- [ ] [Postgres] Implémenter un pré-filtrage avec Polars des lignes qui ont été
+  modifiées pour les requêtes UPSERT
 
 ## Next
 
@@ -19,8 +24,6 @@
   Parquet silver contient de nouvelles colonnes absentes de la table PG
 - [ ] [Tests] Tests de qualité des données post-load (assertions Polars ou SQL :
   nulls, distribution, cohérence temporelle)
-- [ ] [dbt] Évaluer dbt/SQLMesh pour la couche gold uniquement (agrégations
-  cross-datasets, vues matérialisées)
 - [ ] [Archi] Installation unique de l'extension DuckDB 'spatial' (local + Airflow)
 - [ ] [Airflow] Gérer l'incohérence provoquée par le trigger event Asset dans l'UI
 

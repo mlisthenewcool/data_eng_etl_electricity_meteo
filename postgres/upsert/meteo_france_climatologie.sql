@@ -33,11 +33,33 @@ ON CONFLICT (id_station, date_heure) DO UPDATE SET
     pression_mer        = EXCLUDED.pression_mer,
     updated_at          = NOW()
 WHERE (
-    {schema}.{table}.temperature,
+    {schema}.{table}.rayonnement_global,
+    {schema}.{table}.duree_insolation,
+    {schema}.{table}.nebulosite,
     {schema}.{table}.vitesse_vent,
-    {schema}.{table}.rayonnement_global
+    {schema}.{table}.direction_vent,
+    {schema}.{table}.rafale_max,
+    {schema}.{table}.temperature,
+    {schema}.{table}.temperature_max,
+    {schema}.{table}.temperature_min,
+    {schema}.{table}.point_de_rosee,
+    {schema}.{table}.humidite,
+    {schema}.{table}.precipitations,
+    {schema}.{table}.pression_station,
+    {schema}.{table}.pression_mer
 ) IS DISTINCT FROM (
-    EXCLUDED.temperature,
+    EXCLUDED.rayonnement_global,
+    EXCLUDED.duree_insolation,
+    EXCLUDED.nebulosite,
     EXCLUDED.vitesse_vent,
-    EXCLUDED.rayonnement_global
+    EXCLUDED.direction_vent,
+    EXCLUDED.rafale_max,
+    EXCLUDED.temperature,
+    EXCLUDED.temperature_max,
+    EXCLUDED.temperature_min,
+    EXCLUDED.point_de_rosee,
+    EXCLUDED.humidite,
+    EXCLUDED.precipitations,
+    EXCLUDED.pression_station,
+    EXCLUDED.pression_mer
 );

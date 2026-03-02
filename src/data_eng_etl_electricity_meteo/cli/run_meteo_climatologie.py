@@ -22,16 +22,30 @@ from data_eng_etl_electricity_meteo.utils.meteo_download import download_climato
 
 DATASET_NAME = "meteo_france_climatologie"
 
-app = typer.Typer()
+app = typer.Typer(no_args_is_help=True)
 
 
 @app.command()
 def main(
-    year_start: int | None = typer.Option(None, help="Start year (default: current - 1)."),
-    year_end: int | None = typer.Option(None, help="End year (default: current)."),
-    skip_postgres: bool = typer.Option(False, help="Skip Postgres loading."),
+    year_start: int | None = typer.Option(
+        None,
+        min=1950,
+        max=2100,
+        help="Start year for climatologie data (default: current year - 1).",
+    ),
+    year_end: int | None = typer.Option(
+        None,
+        min=1950,
+        max=2100,
+        help="End year for climatologie data (default: current year).",
+    ),
+    skip_postgres: bool = typer.Option(
+        False,
+        help="Skip the final Postgres load step.",
+        show_default=True,
+    ),
 ) -> None:
-    """Run the Météo France climatologie pipeline."""
+    """Run the Météo France climatologie pipeline (95 departmental files)."""
     run_pipeline(
         dataset_name=DATASET_NAME,
         custom_download=partial(
