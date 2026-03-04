@@ -13,8 +13,9 @@ models:
         description: "Code IRIS rattaché à l'installation (jointure vers contours IRIS)."
         tests:
           - relationships:
-              to: ref('stg_dim_contours_iris')
-              field: code_iris
+              arguments:
+                to: ref('stg_dim_contours_iris')
+                field: code_iris
       - name: type_energie
         description: "Type d'énergie produite (solaire, eolien, hydraulique, ...)."
         tests:

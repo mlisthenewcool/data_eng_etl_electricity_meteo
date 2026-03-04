@@ -9,6 +9,9 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages", "logs"]
 
+flags:
+  send_anonymous_usage_stats: false
+
 models:
   data_eng_gold:
     +persist_docs:

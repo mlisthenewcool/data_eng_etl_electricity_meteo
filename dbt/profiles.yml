@@ -1,6 +1,3 @@
-config:
-  send_anonymous_usage_stats: false
-
 # All env vars are required (no defaults) — missing vars cause an immediate error.
 # env_var() returns a string; '| int' casts to integer where the adapter expects one.
 #
