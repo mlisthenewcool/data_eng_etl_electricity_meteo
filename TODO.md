@@ -80,6 +80,8 @@
 
 ## Terminé
 
+- [x] [CI] _(2026-03-04)_ Ajouter docstring check, dbt compile, pip-audit et gitleaks
+  à la CI GitHub Actions et aux hooks prek
 - [x] [dbt] _(2026-03-04)_ Améliorer configuration dbt et déplacer les index GiST
   silver dans les scripts Postgres
 - [x] [Pipeline] _(2026-03-04)_ Corriger l'OOM du diff incrémental silver
