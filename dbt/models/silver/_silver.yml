@@ -5,10 +5,18 @@ models:
     description: "Vue staging des installations de production (colonnes utiles pour la couche gold)."
     columns:
       - name: id_peps
+        description: "Identifiant unique de l'installation (clé ODRE)."
         tests:
           - unique
           - not_null
+      - name: code_iris
+        description: "Code IRIS rattaché à l'installation (jointure vers contours IRIS)."
+        tests:
+          - relationships:
+              to: ref('stg_dim_contours_iris')
+              field: code_iris
       - name: type_energie
+        description: "Type d'énergie produite (solaire, eolien, hydraulique, ...)."
         tests:
           - not_null
 
@@ -16,14 +24,18 @@ models:
     description: "Vue staging des stations météo avec point geography PostGIS."
     columns:
       - name: station_id
+        description: "Identifiant unique de la station (renommé depuis 'id')."
         tests:
           - unique
           - not_null
+      - name: geog
+        description: "Point geography PostGIS WGS84 pour les requêtes spatiales KNN."
 
   - name: stg_dim_contours_iris
     description: "Vue staging des contours IRIS (centroïdes uniquement, sans géométrie WKB)."
     columns:
       - name: code_iris
+        description: "Code IRIS unique (clé IGN)."
         tests:
           - unique
           - not_null

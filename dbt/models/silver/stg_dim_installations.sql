@@ -5,7 +5,7 @@
     )
 }}
 
-select
+SELECT
     id_peps,
     nom_installation,
     code_iris,
@@ -15,4 +15,4 @@ select
     est_renouvelable,
     est_actif,
     puis_max_installee
-from {{ source('silver', 'dim_installations') }}
+FROM {{ source('silver', 'dim_installations') }}
