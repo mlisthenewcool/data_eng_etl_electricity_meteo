@@ -19,10 +19,10 @@ _NUMERIC_TEXT_COLUMNS = ["eolien"]
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for ODRE eco2mix_cons_def.
 
-    Simply reads parquet from landing as-is.
+    Simply scans parquet from landing as-is.
 
     Parameters
     ----------
@@ -31,8 +31,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Returns
     -------
-    pl.DataFrame
-        DataFrame ready for bronze layer.
+    pl.LazyFrame
+        LazyFrame ready for bronze layer.
 
     Raises
     ------
@@ -42,7 +42,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         If *landing_path* does not exist or is not readable.
     """
     logger.debug("Apply bronze transformations", landing_path=landing_path)
-    return pl.read_parquet(landing_path)
+    return pl.scan_parquet(landing_path)
 
 
 # ---------------------------------------------------------------------------

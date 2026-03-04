@@ -26,7 +26,7 @@ from data_eng_etl_electricity_meteo.transformations.shared import (
 # Type aliases
 # ---------------------------------------------------------------------------
 
-BronzeTransformFunc = Callable[[Path], pl.DataFrame]
+BronzeTransformFunc = Callable[[Path], pl.LazyFrame]
 
 # Silver transforms receive a pre-processed DataFrame (snake_case columns,
 # all-null columns dropped) and return the transformed DataFrame.
@@ -57,7 +57,7 @@ BRONZE_TRANSFORMS: dict[str, BronzeTransformFunc] = {
     "odre_installations": odre_installations.transform_bronze,
 }
 
-PrimaryKey = str | list[str] | None
+PrimaryKey = str | list[str]
 
 SILVER_TRANSFORMS: dict[str, tuple[SilverTransformFunc, PrimaryKey]] = {
     "ign_contours_iris": (ign_contours_iris.transform_silver, "code_iris"),

@@ -94,7 +94,8 @@ class TestBronzeTransform:
         """Bronze should select only the 16 columns from BRONZE_COLUMNS."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         assert len(result.columns) == 16
         assert set(result.columns) == set(BRONZE_COLUMNS.keys())
@@ -103,7 +104,8 @@ class TestBronzeTransform:
         """Numeric columns should be cast to Float64."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         for col, expected_type in BRONZE_COLUMNS.items():
             assert result[col].dtype == expected_type, f"Column {col} has wrong type"
@@ -112,7 +114,8 @@ class TestBronzeTransform:
         """Sentinel string "mq" should become null after strict=False cast."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         # Row 1 has "mq" for T → should be null
         assert result["T"][1] is None
@@ -121,7 +124,8 @@ class TestBronzeTransform:
         """Empty string "" should become null after strict=False cast."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         # Row 1 has "" for TX → should be null
         assert result["TX"][1] is None
@@ -130,7 +134,8 @@ class TestBronzeTransform:
         """Utf8 columns (NUM_POSTE, AAAAMMJJHH) should remain as Utf8."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         assert result["NUM_POSTE"].dtype == pl.Utf8
         assert result["AAAAMMJJHH"].dtype == pl.Utf8
@@ -166,7 +171,8 @@ class TestBronzeTransform:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "landing_typed.parquet"
             pl.DataFrame(data).write_parquet(path)
-            result = transform_bronze(path)
+            result = transform_bronze(path).collect()
+            assert isinstance(result, pl.DataFrame)
 
         # All columns should match target types
         for col, expected_type in BRONZE_COLUMNS.items():

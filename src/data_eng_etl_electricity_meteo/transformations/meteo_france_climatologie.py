@@ -70,8 +70,12 @@ COLUMNS_MAPPING: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for Météo France climatologie.
+
+    Returns a **LazyFrame** to avoid loading the full merged parquet (~760 MB) into
+    memory at once. The caller (``to_bronze``) uses ``sink_parquet`` so the Polars
+    streaming engine processes data in chunks.
 
     Reads the 16 columns from the merged parquet and casts numeric columns to Float64.
     Known sentinel strings (``""``, ``"mq"``) are replaced with null before casting.
@@ -84,34 +88,34 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Returns
     -------
-    pl.DataFrame
-        DataFrame with 16 typed columns ready for the bronze layer.
+    pl.LazyFrame
+        LazyFrame with 16 typed columns ready for the bronze layer.
     """
     columns = list(BRONZE_COLUMNS.keys())
     logger.debug(
-        "Reading merged parquet from landing",
+        "Reading merged parquet from landing (lazy)",
         landing_path=landing_path,
         columns_selected=len(columns),
     )
 
-    df = pl.read_parquet(landing_path, columns=columns)
-
-    # Replace known sentinel values with null in string-typed numeric columns.
-    # Hydra Parquet may already have numeric types — sentinel replacement only
-    # applies to columns still in String/Utf8 form.
+    # Read schema eagerly (no data loaded) to detect which columns are still strings
+    file_schema = pl.read_parquet_schema(landing_path)
     sentinel_values = ["", "mq"]
     string_numeric_cols = [
         c
         for c, t in BRONZE_COLUMNS.items()
-        if t != pl.Utf8 and df.schema[c] in (pl.String, pl.Utf8)
+        if t != pl.Utf8 and file_schema.get(c) in (pl.String, pl.Utf8)
     ]
+
+    lf = pl.scan_parquet(landing_path).select(columns)
+
     if string_numeric_cols:
-        df = df.with_columns(
+        lf = lf.with_columns(
             pl.when(pl.col(c).is_in(sentinel_values)).then(None).otherwise(pl.col(c)).alias(c)
             for c in string_numeric_cols
         )
 
-    return df.with_columns(
+    return lf.with_columns(
         *(pl.col(c).cast(t, strict=True).alias(c) for c, t in BRONZE_COLUMNS.items())
     )
 

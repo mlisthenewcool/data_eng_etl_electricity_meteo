@@ -1,0 +1,21 @@
+data_eng:
+  target: docker
+  outputs:
+    docker:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'postgres_service') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      dbname: "{{ env_var('POSTGRES_DB_NAME', 'default_db_name') }}"
+      user: "{{ env_var('POSTGRES_USER') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      schema: gold
+      threads: 2
+    local:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      dbname: "{{ env_var('POSTGRES_DB_NAME', 'default_db_name') }}"
+      user: "{{ env_var('POSTGRES_USER') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      schema: gold
+      threads: 2

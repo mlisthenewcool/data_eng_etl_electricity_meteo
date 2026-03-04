@@ -78,7 +78,7 @@ datasets:
     primary_key: "id"
     # url_description: "https://www.data.gouv.fr/datasets/informations-sur-les-stations-metadonnees"
     source:
-      provider: "MétéoFrance"
+      provider: "Météo-France"
       # url: "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/METADONNEES_STATION/fiches.json"
       url: "https://www.data.gouv.fr/api/1/datasets/r/1fe544d8-4615-4642-a307-5956a7d90922"
       format: "json"
@@ -92,7 +92,7 @@ datasets:
     description: "Données climatologiques horaires de Météo France (2 dernières années, 95 départements France métropolitaine)"
     primary_key: [ "id_station", "date_heure" ]
     source:
-      provider: "MétéoFrance"
+      provider: "Météo-France"
       # Custom multi-file download : 95 fichiers par département (Parquet Hydra si dispo, sinon CSV.gz)
       # Le téléchargement est géré par utils/meteo_download.py, pas le pipeline standard
       # Doc API climatologie : https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesClimatologie

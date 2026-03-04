@@ -460,9 +460,9 @@ class RemoteIngestionPipeline:
         transform = get_bronze_transform(self.dataset.name)
 
         try:
-            df = transform(context.download.landing_path)
-            df.write_parquet(bronze_path)
-        except (duckdb.Error, OSError) as err:
+            lf = transform(context.download.landing_path)
+            lf.sink_parquet(bronze_path)
+        except (duckdb.Error, pl.exceptions.PolarsError, OSError) as err:
             raise BronzeStageError("Bronze transform or write failed") from err
 
         try:
@@ -472,8 +472,11 @@ class RemoteIngestionPipeline:
 
         self._cleanup_landing()
 
-        columns = df.columns
-        row_count = len(df)
+        # Read metadata from the written file without loading all rows
+        columns = list(pl.read_parquet_schema(bronze_path).keys())
+        count_df = pl.scan_parquet(bronze_path).select(pl.len()).collect()
+        assert isinstance(count_df, pl.DataFrame)  # always true (no GPU engine)
+        row_count: int = count_df.item(0, 0)
         parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
 
         logger.info(
@@ -499,6 +502,13 @@ class RemoteIngestionPipeline:
         For incremental datasets, computes a delta (new + changed rows) by comparing the
         new transform output against the previous ``current.parquet``. The delta is
         written to ``delta.parquet`` alongside the full snapshot in ``current.parquet``.
+
+        The diff is computed **after** writing the new snapshot and freeing the
+        DataFrame from memory. Both Parquet files (current and backup) are then scanned
+        lazily so that the full datasets are never loaded simultaneously. This keeps
+        peak memory at ~2 GB (one DataFrame) instead of ~8 GB
+        (two DataFrames + a full-column join), which caused OOM kills on the 18M-row
+        climatologie dataset when other DAGs ran in parallel.
 
         Parameters
         ----------
@@ -527,30 +537,31 @@ class RemoteIngestionPipeline:
         except (duckdb.Error, OSError, TransformValidationError) as err:
             raise SilverStageError("Silver transform failed") from err
 
-        # --- Compute delta BEFORE rotating (current.parquet is still "previous") ---
         is_incremental = self.dataset.ingestion.mode == IngestionMode.INCREMENTAL
         diff_metrics: IncrementalDiffMetrics | None = None
 
-        if is_incremental:
-            diff_metrics, delta = self._compute_incremental_diff(df)
-        else:
-            delta = None
-
-        # Rotate silver: current → backup, then write new files
+        # Rotate silver: current → backup, write new current, then free df.
+        # The diff is computed AFTER freeing df, lazily from the two Parquet
+        # files (current vs backup), to avoid holding two full DataFrames
+        # in memory simultaneously (~4 GB for 18M-row datasets → OOM).
         try:
             self._file_manager.rotate_silver()
             self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
             df.write_parquet(self.resolver.silver_current_path)
-
-            if is_incremental:
-                assert delta is not None
-                delta.write_parquet(self.resolver.silver_delta_path)
         except OSError as err:
             self._file_manager.rollback_silver()
             raise SilverStageError("Silver file rotation or write failed") from err
 
         columns = df.columns
         row_count = len(df)
+        del df  # free ~2 GB before diff computation
+
+        if is_incremental:
+            diff_metrics, delta = self._compute_incremental_diff_from_files()
+            try:
+                delta.write_parquet(self.resolver.silver_delta_path)
+            except OSError as err:
+                raise SilverStageError("Silver delta write failed") from err
         parquet_size = round(self.resolver.silver_current_path.stat().st_size / (1024 * 1024), 2)
 
         log_kwargs: dict[str, object] = {
@@ -579,15 +590,17 @@ class RemoteIngestionPipeline:
             ),
         )
 
-    def _compute_incremental_diff(
-        self, df: pl.DataFrame
+    def _compute_incremental_diff_from_files(
+        self,
     ) -> tuple[IncrementalDiffMetrics, pl.DataFrame]:
-        """Compute the delta between the new silver DataFrame and the previous snapshot.
+        """Compute the delta between current (new) and backup (old) Parquet files.
 
-        Parameters
-        ----------
-        df
-            Full new silver DataFrame (from the transform).
+        Both files are scanned lazily so that the full datasets are never loaded into
+        memory simultaneously. Only the delta rows (new + changed) are collected —
+        typically a tiny fraction of the total.
+
+        Must be called **after** ``rotate_silver`` + ``write_parquet`` so that
+        ``silver_current_path`` = new data and ``silver_backup_path`` = old data.
 
         Returns
         -------
@@ -595,45 +608,61 @@ class RemoteIngestionPipeline:
             Diff statistics and the delta DataFrame (new + changed rows only).
         """
         pk = self.dataset.primary_key
+        new_lf = pl.scan_parquet(self.resolver.silver_current_path)
 
-        if not self.resolver.silver_current_path.exists():
+        if not self.resolver.silver_backup_path.exists():
             # First run: everything is new
-            logger.info("No previous silver snapshot, full delta", rows=len(df))
+            new_df = new_lf.collect()
+            assert isinstance(new_df, pl.DataFrame)  # always true (no GPU engine)
+            logger.info("No previous silver snapshot, full delta", rows=len(new_df))
             return (
                 IncrementalDiffMetrics(
-                    rows_total=len(df),
-                    rows_new=len(df),
+                    rows_total=len(new_df),
+                    rows_new=len(new_df),
                     rows_changed=0,
                     rows_unchanged=0,
                 ),
-                df,
+                new_df,
             )
 
-        previous = pl.read_parquet(self.resolver.silver_current_path)
+        old_lf = pl.scan_parquet(self.resolver.silver_backup_path)
 
         # Align types: previous may have different dtypes due to schema evolution
-        previous = previous.cast(df.schema)
+        old_lf = old_lf.cast(new_lf.collect_schema())
 
-        # New rows: PK absent from previous
-        df_new = df.join(previous.select(pk), on=pk, how="anti")
+        # New rows: anti-join on PK only (old file only loads PK column)
+        df_new = new_lf.join(old_lf.select(pk), on=pk, how="anti").collect()
+        assert isinstance(df_new, pl.DataFrame)
 
-        # Changed rows: PK present in both, at least one non-key column differs
-        non_key_cols = [col for col in df.columns if col not in pk]
-        joined = df.join(previous, on=pk, how="inner", suffix="_prev")
+        # Changed rows: hash-based comparison instead of full column join.
+        # pl.struct hashing is null-aware, so null vs value diffs are detected.
+        non_key_cols = [c for c in new_lf.collect_schema().names() if c not in pk]
+        hash_expr = pl.struct(non_key_cols).hash().alias("_row_hash")
 
-        diff_exprs = [
-            (pl.col(col) != pl.col(f"{col}_prev"))
-            | (pl.col(col).is_null() != pl.col(f"{col}_prev").is_null())
-            for col in non_key_cols
-        ]
-        any_changed = pl.any_horizontal(*diff_exprs)
-        df_changed = joined.filter(any_changed).select(df.columns)
+        changed_pks = (
+            new_lf.select(pk + [hash_expr])
+            .join(
+                old_lf.select(pk + [hash_expr]),
+                on=pk,
+                how="inner",
+                suffix="_prev",
+            )
+            .filter(pl.col("_row_hash") != pl.col("_row_hash_prev"))
+            .select(pk)
+            .collect()
+        )
+        assert isinstance(changed_pks, pl.DataFrame)
+        df_changed = new_lf.join(changed_pks.lazy(), on=pk, how="inner").collect()
+        assert isinstance(df_changed, pl.DataFrame)
 
         delta = pl.concat([df_new, df_changed])
-        rows_unchanged = len(df) - len(df_new) - len(df_changed)
+        count_df = new_lf.select(pl.len()).collect()
+        assert isinstance(count_df, pl.DataFrame)
+        rows_total: int = count_df.item()
+        rows_unchanged = rows_total - len(df_new) - len(df_changed)
 
         metrics = IncrementalDiffMetrics(
-            rows_total=len(df),
+            rows_total=rows_total,
             rows_new=len(df_new),
             rows_changed=len(df_changed),
             rows_unchanged=rows_unchanged,

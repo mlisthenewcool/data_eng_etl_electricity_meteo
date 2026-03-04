@@ -52,7 +52,7 @@ PARAMS_EOLIENS = [
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for Meteo France stations.
 
     Simply reads JSON and converts to Parquet format.
@@ -64,8 +64,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Returns
     -------
-    pl.DataFrame
-        DataFrame with raw station data.
+    pl.LazyFrame
+        LazyFrame with raw station data.
 
     Raises
     ------
@@ -75,7 +75,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         If *landing_path* does not exist or is not readable.
     """
     logger.debug("Reading JSON from landing", landing_path=landing_path)
-    return pl.read_json(landing_path)
+    return pl.read_json(landing_path).lazy()
 
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ logger = get_logger("transform.ign_contours_iris")
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for IGN Contours IRIS.
 
     Reads GeoPackage from landing layer (with original filename preserved) and applies
@@ -36,8 +36,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 
     Returns
     -------
-    pl.DataFrame
-        Filtered DataFrame with geometry as WKB, ready for bronze layer.
+    pl.LazyFrame
+        Filtered LazyFrame with geometry as WKB, ready for bronze layer.
 
     Raises
     ------
@@ -76,7 +76,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         """
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
             logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
-    return df
+    return df.lazy()
 
 
 # ---------------------------------------------------------------------------

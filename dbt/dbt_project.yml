@@ -1,0 +1,29 @@
+name: data_eng_gold
+version: '1.0.0'
+config-version: 2
+profile: data_eng
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+on-run-start:
+  - "CREATE EXTENSION IF NOT EXISTS postgis"
+  - >
+    CREATE INDEX IF NOT EXISTS idx_stations_geog_solaire
+    ON silver.dim_stations_meteo
+    USING GIST ((ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography))
+    WHERE mesure_solaire = TRUE
+  - >
+    CREATE INDEX IF NOT EXISTS idx_stations_geog_eolien
+    ON silver.dim_stations_meteo
+    USING GIST ((ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography))
+    WHERE mesure_eolien = TRUE
+
+models:
+  data_eng_gold:
+    silver:
+      +materialized: view
+    gold:
+      +materialized: table

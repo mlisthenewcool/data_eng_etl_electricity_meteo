@@ -12,6 +12,11 @@ data/**/*
 !data/catalog.yaml
 !data/**/.gitkeep
 
+# dbt artifacts (target, packages, logs are generated at runtime)
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
 # local overrides (e.g. POSTGRES_HOST=localhost); see .env.example
 .env.local
 
@@ -19,6 +24,7 @@ data/**/*
 .idea/
 
 # TODO: remove when properly documented
+personal_notes/
 AGENTS.md
 CLAUDE.md
 opencode.jsonc

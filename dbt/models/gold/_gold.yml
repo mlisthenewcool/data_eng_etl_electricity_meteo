@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: installations_renouvelables_avec_stations_meteo
+    description: >
+      Chaque installation renouvelable active (solaire/éolien) associée à la station
+      météo la plus proche capable de mesurer les paramètres pertinents.
+      Jointure spatiale PostGIS KNN via l'opérateur <->.
+    columns:
+      - name: id_peps
+        description: "Identifiant unique de l'installation (clé ODRE)."
+        tests:
+          - unique
+          - not_null
+      - name: type_energie
+        description: "Type d'énergie renouvelable."
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['solaire', 'eolien']
+      - name: station_id
+        description: "Identifiant de la station météo la plus proche."
+        tests:
+          - not_null
+      - name: distance_km
+        description: "Distance en km entre l'installation et la station météo."
+        tests:
+          - not_null
