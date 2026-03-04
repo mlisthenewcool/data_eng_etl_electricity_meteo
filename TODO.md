@@ -56,7 +56,6 @@
   (ne pas inclure les minutes et secondes)
 - [ ] [Airflow] Uniformiser les logs (scheduler, triggerer, dag-processor, api-server,
   standalone)
-- [ ] [Data quality] Évaluer les avantages de Pandera pour la validation de schémas
 - [ ] [Données] Implémenter le delta fetch pour `odre_eco2mix_tr` (upsert SQL prêt,
   manque le delta côté source ; séparer les flux def/cons/tr)
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
@@ -77,9 +76,14 @@
   Airflow)
 - [ ] [Prod] Configurer les rôles et privilèges Postgres pour la production
 - [ ] [Stockage] Évaluer l'archivage long terme S3 Glacier après période de rétention
+- [ ] [Docker] Permettre l'utilisation de variables d'environnement pour configurer les
+  ports du service Airflow plutôt que des valeurs fixes
 
 ## Terminé
 
+- [x] [Data quality] _(2026-03-05)_ Évaluer les solutions de validation de schémas
+  DataFrame (Pandera, Patito, GE, custom) — documenté dans
+  `docs/data_quality_strategy.md` et `docs/dataframe_model_custom.md`
 - [x] [CI] _(2026-03-04)_ Ajouter docstring check, dbt compile, pip-audit et gitleaks
   à la CI GitHub Actions et aux hooks prek
 - [x] [dbt] _(2026-03-04)_ Améliorer configuration dbt et déplacer les index GiST

@@ -1,3 +1,5 @@
+# pass_filenames: false # to run every test, even if files aren't modified
+
 [[repos]]
 repo = "local"
 
@@ -5,7 +7,7 @@ repo = "local"
 id = "ruff-check"
 name = "ruff-check"
 entry = "uv run ruff check"
-args = ["--fix", "--force-exclude"]
+args = ["--fix"]
 language = "system"
 types = ["python"]
 
@@ -17,20 +19,23 @@ language = "system"
 types = ["python"]
 
 [[repos.hooks]]
+id = "docstring-format"
+name = "docstring-format"
+entry = "uv run python scripts/format_docstrings.py --check notebooks/ scripts/ src/ tests/"
+language = "system"
+pass_filenames = false
+files = '\.(py)$'
+
+[[repos.hooks]]
 id = "ty"
 name = "ty"
 entry = "uv run ty check"
 language = "system"
 types = ["python"]
-files = "^(src|tests)/"
-
-[[repos.hooks]]
-id = "docstring-format"
-name = "docstring-format"
-entry = "uv run python scripts/format_docstrings.py --check src/ tests/"
-language = "system"
-pass_filenames = false
-files = '\.(py)$'
+# hack: 'exclude' in pyproject.toml is somehow not read
+# better than 'pass_filenames: false' for performance
+# preventing prek from checking the whole project everytime
+files = "^(notebooks|scripts|src|tests)/"
 
 [[repos.hooks]]
 id = "pytest"
@@ -38,15 +43,17 @@ name = "pytest"
 entry = "uv run pytest"
 language = "system"
 pass_filenames = false
-files = '\.(py|yaml|json)$'
+files = '\.(py|yaml|json)$' # run the hook only if any .(py|yaml|json) changed
+#stages: [ pre-push ] # if tests are taking too much time
 
 [[repos.hooks]]
-id = "dbt-compile"
-name = "dbt-compile"
-entry = "scripts/dbt.sh compile"
+id = "dbt-parse"
+name = "dbt-parse"
+entry = "scripts/dbt.sh parse"
 language = "system"
 pass_filenames = false
 files = '^dbt/'
+stages = ["pre-push"]
 
 [[repos.hooks]]
 id = "pip-audit"
@@ -56,3 +63,4 @@ entry = "uv run pip-audit --ignore-vuln CVE-2025-62727"
 language = "system"
 pass_filenames = false
 files = '(pyproject\.toml|uv\.lock)$'
+stages = ["pre-push"]

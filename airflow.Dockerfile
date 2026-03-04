@@ -28,7 +28,8 @@ RUN pip install --no-cache-dir --upgrade uv
 RUN uv python upgrade
 
 # --- CONFIGURATION OPTIONS ---
-# Config structurelle qui ne change pas entre dev et prod (executor, timezone, comportement des DAGs)
+# Config structurelle qui ne change pas entre dev et prod
+# (executor, timezone, comportement des DAGs)
 # https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
 # - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG : prevent file conflicts within same dataset
@@ -54,5 +55,6 @@ RUN uv pip install --no-cache \
 # Install DuckDB extensions once
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"
 
+# Optional, check results with `docker buildx history logs`
 RUN uv pip list
 RUN uv pip list --outdated

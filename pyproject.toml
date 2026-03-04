@@ -38,11 +38,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-include = ["src/**/*.py", "tests/**/*.py", "notebooks/**/*.py"]
-#src = ["src", "test"]
-
-#[tool.ruff.format]
-#docstring-code-line-length = 80
+include = ["notebooks/**/*.py", "scripts/**/*.py", "src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = [
@@ -56,11 +52,7 @@ select = [
     "UP", # pyupgrade
     "TC", # flake8-type-checking
 ]
-
-# "D105", # Missing docstring in magic method (__post_init__, etc.)
-# "D107", # Missing docstring in __init__ (class docstring suffices)
-ignore = []
-#fixable = ["ALL"]
+fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
@@ -78,25 +70,21 @@ ignore = []
 ]
 
 [tool.ruff.lint.pydocstyle]
-#convention = "google"
 convention = "numpy"
 
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 88
 
 [tool.ty.src]
-include = ["src", "tests"]
-#exclude = ["notebooks"]
+include = ["notebooks", "scripts", "src", "tests"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing --cov-report=html:tests/htmlcov"
 pythonpath = ["src"]
-#testpaths = ["tests"]
 
 [tool.coverage.run]
-branch = true                 # check if all branches of if/else statement are used
+branch = true # check if all branches of if/else statement are used
 data_file = "tests/.coverage"
-#source = ["data_eng_etl_electricity_meteo"]
 
 [tool.coverage.report]
 #fail_under = 90

@@ -43,7 +43,7 @@ jobs:
         run: uv run ruff format --check
 
       - name: Docstring formatting
-        run: uv run python scripts/format_docstrings.py --check src/ tests/
+        run: uv run python scripts/format_docstrings.py --check notebooks/ scripts/ src/ tests/
 
       - name: Type checking (ty)
         run: uv run ty check

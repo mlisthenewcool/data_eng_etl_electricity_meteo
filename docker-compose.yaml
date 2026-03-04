@@ -1,5 +1,5 @@
 # --- Notes
-# PostGIS 17-3.5 extends Postgres 17 with spatial functions (ST_Distance, KNN via <->).
+# PostGIS 17-x.x extends Postgres 17 with spatial functions (ST_Distance, KNN via <->).
 # Postgres 17 is the latest supported version by Airflow.
 
 services:
@@ -7,7 +7,7 @@ services:
     container_name: postgres_container
     image: postgis/postgis:17-3.5
     restart: always
-    shm_size: 256mb # Shared memory increase for heavy Postgres operations
+    shm_size: 256mb # Shared memory for Postgres operations, TODO: OK in prod ?
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
     volumes:
@@ -20,7 +20,7 @@ services:
       POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}" # used by custom init script (postgres/init/...)
     healthcheck:
       # Check both databases are ready
-      test: ["CMD-SHELL", "USER=$$(cat /run/secrets/postgres_root_username); pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} && pg_isready -U $$USER -d ${POSTGRES_DB_NAME}"]
+      test: [ "CMD-SHELL", "USER=$$(cat /run/secrets/postgres_root_username); pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} && pg_isready -U $$USER -d ${POSTGRES_DB_NAME}" ]
       interval: 10s
       timeout: 5s
       retries: 5
