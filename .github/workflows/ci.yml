@@ -7,8 +7,16 @@ on:
     branches: [ master, dev ]
 
 jobs:
-  lint-format-and-typecheck:
+  quality:
+    name: Code quality & tests
     runs-on: ubuntu-latest
+    env:
+      # Dummy credentials for dbt parse (no DB connection needed)
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB_NAME: ci_dummy
+      POSTGRES_USER: ci_dummy
+      POSTGRES_PASSWORD: ci_dummy
     steps:
       - uses: actions/checkout@v6
 
@@ -34,6 +42,9 @@ jobs:
       - name: Formatter (ruff format)
         run: uv run ruff format --check
 
+      - name: Docstring formatting
+        run: uv run python scripts/format_docstrings.py --check src/ tests/
+
       - name: Type checking (ty)
         run: uv run ty check
 
@@ -46,3 +57,24 @@ jobs:
           echo '```text' >> $GITHUB_STEP_SUMMARY
           uv run pytest >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: dbt parse
+        run: uv run dbt parse --project-dir dbt --profiles-dir dbt --target docker
+
+      - name: Dependency audit (pip-audit)
+        # CVE-2025-62727: starlette 0.48.0, transitive dep of Airflow (dev only)
+        run: uv run pip-audit --ignore-vuln CVE-2025-62727
+
+  security:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # https://github.com/gitleaks/gitleaks-action
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

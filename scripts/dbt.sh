@@ -2,8 +2,9 @@
 # Wrapper for running dbt locally with credentials from secrets/ files.
 # Usage: ./scripts/dbt.sh debug|run|test|... [dbt flags]
 #
-# Reads Postgres credentials from secrets/ (same files as Docker Compose)
-# and forwards all arguments to dbt with the local profile target.
+# Credentials: uses POSTGRES_USER/POSTGRES_PASSWORD env vars if set,
+# otherwise reads from secrets/ files (same files as Docker Compose).
+# Forwards all arguments to dbt with the local profile target.
 
 set -euo pipefail
 
@@ -25,8 +26,8 @@ set -a
 [ -f "$REPO_ROOT/.env.local" ] && . "$REPO_ROOT/.env.local"
 set +a
 
-POSTGRES_USER="$(cat "$REPO_ROOT/secrets/postgres_root_username")"
-POSTGRES_PASSWORD="$(cat "$REPO_ROOT/secrets/postgres_root_password")"
+POSTGRES_USER="${POSTGRES_USER:-$(cat "$REPO_ROOT/secrets/postgres_root_username")}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(cat "$REPO_ROOT/secrets/postgres_root_password")}"
 export POSTGRES_USER POSTGRES_PASSWORD
 
 exec uv run dbt "$@" \

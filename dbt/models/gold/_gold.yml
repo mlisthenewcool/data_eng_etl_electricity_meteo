@@ -22,6 +22,10 @@ models:
         description: "Identifiant de la station météo la plus proche."
         tests:
           - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dim_stations_meteo')
+                field: station_id
       - name: distance_km
         description: "Distance en km entre l'installation et la station météo."
         tests:

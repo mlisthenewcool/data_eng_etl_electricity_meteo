@@ -5,7 +5,7 @@
     )
 }}
 
-select
+SELECT
     code_iris,
     nom_iris,
     code_insee,
@@ -13,4 +13,4 @@ select
     type_iris,
     centroid_lat,
     centroid_lon
-from {{ source('silver', 'dim_contours_iris') }}
+FROM {{ source('silver', 'dim_contours_iris') }}

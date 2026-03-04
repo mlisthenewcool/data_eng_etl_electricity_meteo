@@ -80,8 +80,8 @@ _DOCSTRING_RE = re.compile(
 def _get_docstring_line_ranges(source: str) -> list[tuple[int, int]]:
     """Return ``(start_line, end_line)`` 1-indexed for every real docstring.
 
-    Uses AST to identify only real docstrings (module, class, function), not
-    arbitrary triple-quoted strings (SQL queries, templates, etc.).
+    Uses AST to identify only real docstrings (module, class, function), not arbitrary
+    triple-quoted strings (SQL queries, templates, etc.).
     """
     try:
         tree = ast.parse(source)
@@ -168,8 +168,8 @@ def _looks_like_code_block(lines: list[str]) -> bool:
 def _protect_parens(text: str, max_group_len: int) -> str:
     """Replace spaces inside short ``(...)`` groups with non-breaking spaces.
 
-    Groups longer than *max_group_len* are left breakable — they cannot fit on
-    a single line anyway.
+    Groups longer than *max_group_len* are left breakable — they cannot fit on a single
+    line anyway.
     """
 
     def _protect_if_short(m: re.Match[str]) -> str:

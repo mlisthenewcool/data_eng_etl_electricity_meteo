@@ -20,12 +20,7 @@ services:
       POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}" # used by custom init script (postgres/init/...)
     healthcheck:
       # Check both databases are ready
-      test:
-        - "CMD-SHELL"
-        - >
-          USER=$$(cat /run/secrets/postgres_root_username);
-          pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} &&
-          pg_isready -U $$USER -d ${POSTGRES_DB_NAME}
+      test: ["CMD-SHELL", "USER=$$(cat /run/secrets/postgres_root_username); pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} && pg_isready -U $$USER -d ${POSTGRES_DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -25,9 +25,34 @@ types = ["python"]
 files = "^(src|tests)/"
 
 [[repos.hooks]]
+id = "docstring-format"
+name = "docstring-format"
+entry = "uv run python scripts/format_docstrings.py --check src/ tests/"
+language = "system"
+pass_filenames = false
+files = '\.(py)$'
+
+[[repos.hooks]]
 id = "pytest"
 name = "pytest"
 entry = "uv run pytest"
 language = "system"
 pass_filenames = false
 files = '\.(py|yaml|json)$'
+
+[[repos.hooks]]
+id = "dbt-compile"
+name = "dbt-compile"
+entry = "scripts/dbt.sh compile"
+language = "system"
+pass_filenames = false
+files = '^dbt/'
+
+[[repos.hooks]]
+id = "pip-audit"
+name = "pip-audit"
+# CVE-2025-62727: starlette 0.48.0, transitive dep of Airflow (dev only)
+entry = "uv run pip-audit --ignore-vuln CVE-2025-62727"
+language = "system"
+pass_filenames = false
+files = '(pyproject\.toml|uv\.lock)$'
