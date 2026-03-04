@@ -18,27 +18,26 @@ logger = get_logger("transform.ign_contours_iris")
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for IGN Contours IRIS.
 
-    Reads GeoPackage from landing layer (with original filename preserved)
-    and applies basic filtering and geometry conversion.
+    Reads GeoPackage from landing layer (with original filename preserved) and applies
+    basic filtering and geometry conversion.
 
-    The GeoPackage (.gpkg) format is SQLite-based. GDAL (used internally by
-    DuckDB's ST_read) acquires file locks when reading, which can cause
-    indefinite hangs in Airflow's LocalExecutor if another process holds a
-    lock on the same file. To avoid this, the file is copied to a temporary
-    location before reading.
+    The GeoPackage (.gpkg) format is SQLite-based. GDAL (used internally by DuckDB's
+    ST_read) acquires file locks when reading, which can cause indefinite hangs in
+    Airflow's LocalExecutor if another process holds a lock on the same file. To
+    avoid this, the file is copied to a temporary location before reading.
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the GeoPackage in the landing directory.
 
     Returns
     -------
-    pl.DataFrame
-        Filtered DataFrame with geometry as WKB, ready for bronze layer.
+    pl.LazyFrame
+        Filtered LazyFrame with geometry as WKB, ready for bronze layer.
 
     Raises
     ------
@@ -59,7 +58,8 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         logger.debug("Copied GeoPackage to temp file", tmp_path=tmp_gpkg)
 
         with duckdb.connect(":memory:") as conn:
-            # Spatial extension is installed with Docker when running on Airflow
+            # INSTALL is idempotent (fast cache check if already present).
+            # On Airflow the extension is pre-installed in the Docker image.
             if not settings.is_running_on_airflow:
                 conn.execute("INSTALL spatial;")
 
@@ -76,7 +76,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         """
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
             logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
-    return df
+    return df.lazy()
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +84,12 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for IGN Contours IRIS.
 
     Enriches IRIS contours with centroid coordinates in WGS84.
-    The original geometry is in Lambert 93 (EPSG:2154), we transform
-    the centroid to WGS84 (EPSG:4326) for compatibility with other datasets.
+    The original geometry is in Lambert 93 (EPSG:2154), we transform the centroid to
+    WGS84 (EPSG:4326) for compatibility with other datasets.
 
     Transformations applied:
     - Remove cleabs column (internal IGN identifier, not useful)
@@ -99,8 +99,8 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
@@ -110,21 +110,21 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
     Raises
     ------
     duckdb.Error
-        On DuckDB spatial query failure (missing extension, corrupt parquet, etc.).
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
+        On DuckDB spatial query failure (missing extension, etc.).
     """
-    logger.debug("Reading from bronze latest", bronze_path=latest_bronze_path)
-
     # Use DuckDB for spatial operations on the WKB geometry
     with duckdb.connect(":memory:") as conn:
-        # Spatial extension is installed with Docker when running on Airflow
+        # INSTALL is idempotent (fast cache check if already present).
+        # On Airflow the extension is pre-installed in the Docker image.
         if not settings.is_running_on_airflow:
             conn.execute("INSTALL spatial;")
 
         conn.execute("LOAD spatial;")
         conn.execute("SET threads = 1")
         conn.execute("SET memory_limit = '1GB'")
+
+        # Register the pre-processed DataFrame so DuckDB can query it directly
+        conn.register("bronze_data", df)
 
         # Compute centroids and transform to WGS84.
         # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154).
@@ -148,7 +148,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
                     'EPSG:2154',
                     'EPSG:4326'
                 ) AS centroid_wgs84
-            FROM read_parquet(?)
+            FROM bronze_data
         )
         SELECT
             code_iris,
@@ -163,7 +163,7 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
         """
 
         logger.debug("Computing centroids with DuckDB spatial extension")
-        df = conn.execute(query, [str(latest_bronze_path)]).pl()
+        result = conn.execute(query).pl()
 
-    logger.debug("Silver transformation completed", row_count=len(df), columns=df.columns)
-    return df
+    logger.debug("Silver transformation completed", row_count=len(result), columns=result.columns)
+    return result

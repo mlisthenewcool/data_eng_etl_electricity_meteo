@@ -8,7 +8,9 @@ DataCatalog
             ├── RemoteDatasetConfig (HTTP source)
             │   ├── name, description
             │   ├── source: RemoteSourceConfig (url, provider, format)
-            │   └── ingestion: IngestionPolicy (frequency, mode)
+            │   ├── ingestion: IngestionPolicy (frequency, mode)
+            │   ├── postgres: PostgresConfig (table name)
+            │   └── primary_key: list[str] | None (natural key columns)
             └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
                 └── source: GoldSourceConfig (depends_on)
@@ -23,7 +25,7 @@ from pathlib import Path
 from typing import Annotated, Any, Self
 
 import yaml
-from pydantic import Discriminator, HttpUrl, Tag, ValidationError, model_validator
+from pydantic import BeforeValidator, Discriminator, HttpUrl, Tag, ValidationError, model_validator
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     AirflowContextError,
@@ -36,11 +38,12 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 
 
 class SourceFormat(StrEnum):
-    """Supported source file formats (``7z``, ``parquet``, ``json``)."""
+    """Supported source file formats (``7z``, ``parquet``, ``json``, ``csv_gz``)."""
 
     SEVEN_Z = "7z"
     PARQUET = "parquet"
     JSON = "json"
+    CSV_GZ = "csv_gz"
 
     @property
     def is_archive(self) -> bool:
@@ -75,12 +78,12 @@ class IngestionFrequency(StrEnum):
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
         """Return the Airflow Jinja template for versioning.
 
-        Hourly -> ``{{ ts }}`` / ``{{ ts_nodash }}``,
-        otherwise -> ``{{ ds }}`` / ``{{ ds_nodash }}``.
+        Hourly    -> ``{{ ts }}`` / ``{{ ts_nodash }}``.
+        Otherwise -> ``{{ ds }}`` / ``{{ds_nodash }}``.
 
         Parameters
         ----------
-        no_dash:
+        no_dash
             If ``True``, return the ``_nodash`` variant.
 
         Returns
@@ -112,18 +115,17 @@ class IngestionFrequency(StrEnum):
 
         Parameters
         ----------
-        dt:
+        dt
             Datetime to format.
-        no_dash:
+        no_dash
             If ``True``, return compact format without separators.
 
         Returns
         -------
         str
-            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+)
-            or ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
-            ``no_dash=True``: ``%Y%m%d`` (daily+)
-            or ``%Y%m%dT%H%M%S`` (hourly).
+            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+) or
+            ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
+            ``no_dash=True``: ``%Y%m%d`` (daily+) or ``%Y%m%dT%H%M%S`` (hourly).
         """
         if self == IngestionFrequency.HOURLY:
             return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
@@ -152,14 +154,14 @@ class RemoteSourceConfig(StrictModel):
 
     Attributes
     ----------
-    provider:
+    provider
         Data provider name (e.g. ``"IGN"``).
-    url:
+    url
         Download URL.
-    format:
+    format
         File format.
-    inner_file:
-        File to extract from archive (required iff ``format.is_archive``).
+    inner_file
+        File to extract from archive (required if and only if ``format.is_archive``).
     """
 
     provider: str
@@ -169,7 +171,7 @@ class RemoteSourceConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_inner_file_consistency(self) -> Self:
-        """Ensure ``inner_file`` is set iff format is an archive."""
+        """Ensure ``inner_file`` is set if and only if format is an archive."""
         if self.format.is_archive and self.inner_file is None:
             raise ValueError(f"inner_file is required for archive format: {self.format}")
         if not self.format.is_archive and self.inner_file is not None:
@@ -185,13 +187,12 @@ class RemoteSourceConfig(StrictModel):
 class GoldSourceConfig(StrictModel):
     """Source configuration for Gold datasets.
 
-    ``depends_on`` is the single source of truth for Gold dependencies.
-    The future dbt ``sources.yml`` will be generated from the catalog,
-    not maintained separately.
+    ``depends_on`` is the single source of truth for Gold dependencies. The future dbt
+    ``sources.yml`` will be generated from the catalog, not maintained separately.
 
     Attributes
     ----------
-    depends_on:
+    depends_on
         Silver dataset names this Gold dataset is built from.
     """
 
@@ -210,6 +211,18 @@ class GoldSourceConfig(StrictModel):
 # ---------------------------------------------------------------------------
 
 
+class PostgresConfig(StrictModel):
+    """Postgres loading configuration for a dataset.
+
+    Attributes
+    ----------
+    table
+        Target table name without schema prefix (e.g. ``"dim_installations"``).
+    """
+
+    table: str
+
+
 class IngestionMode(StrEnum):
     """Ingestion mode (``snapshot`` or ``incremental``)."""
 
@@ -222,15 +235,14 @@ class IngestionPolicy(StrictModel):
 
     Attributes
     ----------
-    frequency:
+    frequency
         Update frequency (also determines version format).
-    mode:
+    mode
         Snapshot or incremental.
     """
 
     frequency: IngestionFrequency
     mode: IngestionMode
-    # incremental_key: str  # TODO: required if mode=INCREMENTAL
 
 
 # ---------------------------------------------------------------------------
@@ -243,20 +255,27 @@ class RemoteDatasetConfig(StrictModel):
 
     Attributes
     ----------
-    name:
+    name
         Dataset identifier (auto-injected from YAML key).
-    description:
+    description
         Human-readable description.
-    source:
+    source
         Remote source (url, provider, format).
-    ingestion:
+    ingestion
         Ingestion frequency and mode.
+    postgres
+        Postgres loading configuration (target table name).
+    primary_key
+        Column names forming the natural key
+        (used for Polars diff, SQL upsert, and silver validation).
     """
 
     name: str
     description: str
     source: RemoteSourceConfig
     ingestion: IngestionPolicy
+    postgres: PostgresConfig
+    primary_key: Annotated[list[str], BeforeValidator(lambda v: [v] if isinstance(v, str) else v)]
 
 
 class GoldDatasetConfig(StrictModel):
@@ -264,11 +283,11 @@ class GoldDatasetConfig(StrictModel):
 
     Attributes
     ----------
-    name:
+    name
         Dataset identifier (auto-injected from YAML key).
-    description:
+    description
         Human-readable description.
-    source:
+    source
         Gold source (depends_on).
     """
 
@@ -282,8 +301,8 @@ def _dataset_discriminator(
 ) -> str:
     """Discriminate between remote and gold datasets.
 
-    Handles both raw ``dict`` (deserialization) and model instances
-    (serialization), as required by Pydantic.
+    Handles both raw ``dict`` (deserialization) and model instances (serialization), as
+    required by Pydantic.
     """
     if isinstance(v, dict):
         source = v.get("source", {})
@@ -311,7 +330,7 @@ class DataCatalog(StrictModel):
 
     Attributes
     ----------
-    datasets:
+    datasets
         Mapping of dataset name to its configuration.
     """
 
@@ -320,7 +339,7 @@ class DataCatalog(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def inject_names_into_datasets(cls, data: Any) -> Any:
-        """Inject the YAML key into the 'name' field of each dataset."""
+        """Inject the YAML key into the ``name`` field of each dataset."""
         if isinstance(data, dict) and "datasets" in data:
             for name, config in data["datasets"].items():
                 if isinstance(config, dict):
@@ -333,7 +352,7 @@ class DataCatalog(StrictModel):
 
         Parameters
         ----------
-        path:
+        path
             Path to the YAML catalog file.
 
         Returns
@@ -380,7 +399,7 @@ class DataCatalog(StrictModel):
 
         Parameters
         ----------
-        name:
+        name
             Dataset identifier.
 
         Returns
@@ -408,7 +427,7 @@ class DataCatalog(StrictModel):
 
         Parameters
         ----------
-        name:
+        name
             Dataset identifier.
 
         Returns

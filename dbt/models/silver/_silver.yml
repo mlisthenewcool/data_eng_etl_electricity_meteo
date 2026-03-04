@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_dim_installations
+    description: "Vue staging des installations de production (colonnes utiles pour la couche gold)."
+    columns:
+      - name: id_peps
+        tests:
+          - unique
+          - not_null
+      - name: type_energie
+        tests:
+          - not_null
+
+  - name: stg_dim_stations_meteo
+    description: "Vue staging des stations météo avec point geography PostGIS."
+    columns:
+      - name: station_id
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_dim_contours_iris
+    description: "Vue staging des contours IRIS (centroïdes uniquement, sans géométrie WKB)."
+    columns:
+      - name: code_iris
+        tests:
+          - unique
+          - not_null

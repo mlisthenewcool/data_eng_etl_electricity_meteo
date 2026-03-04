@@ -1,10 +1,11 @@
 # --- Notes
+# PostGIS 17-3.5 extends Postgres 17 with spatial functions (ST_Distance, KNN via <->).
 # Postgres 17 is the latest supported version by Airflow.
 
 services:
   postgres_service:
     container_name: postgres_container
-    image: postgres:17
+    image: postgis/postgis:17-3.5
     restart: always
     shm_size: 256mb # Shared memory increase for heavy Postgres operations
     ports:
@@ -101,6 +102,7 @@ services:
       - ./src:/opt/airflow/src:ro
       - ./data:/opt/airflow/data # TODO: remplacer par airflow_data:/opt/airflow/data en prod + dans volumes en bas
       - ./postgres:/opt/airflow/postgres # we need this to execute Postgres' ingestion queries through Airflow
+      - ./dbt:/opt/airflow/dbt:ro
     healthcheck:
       # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html
       test: [ "CMD-SHELL", "curl -sf http://localhost:8080/api/v2/monitor/health || exit 1" ]
@@ -113,6 +115,8 @@ services:
       - -c
       - |
         export AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB_NAME}"
+        export POSTGRES_USER="$(cat /run/secrets/postgres_root_username)"
+        export POSTGRES_PASSWORD="$(cat /run/secrets/postgres_root_password)"
         exec airflow standalone
     secrets:
       - postgres_root_password

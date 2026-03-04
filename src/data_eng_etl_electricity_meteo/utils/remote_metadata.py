@@ -44,15 +44,15 @@ class RemoteFileMetadata:
 
         Parameters
         ----------
-        other:
+        other
             Previous metadata to compare against.
 
         Returns
         -------
         ChangeDetectionResult
-            ``has_changed=True`` if a change is detected or metadata is
-            insufficient to confirm identity; ``False`` only when at least
-            one field matches conclusively.
+            ``has_changed=True`` if a change is detected or metadata is insufficient to
+            confirm identity; ``False`` only when at least one field matches
+            conclusively.
         """
         if not self._has_any_field() or not other._has_any_field():
             return ChangeDetectionResult(True, "Missing metadata on current or previous state")
@@ -99,11 +99,11 @@ def get_remote_file_metadata(
 
     Parameters
     ----------
-    url:
+    url
         Remote file URL.
-    timeout:
+    timeout
         Request timeout in seconds.
-    follow_redirects:
+    follow_redirects
         Whether to follow HTTP redirects.
 
     Returns

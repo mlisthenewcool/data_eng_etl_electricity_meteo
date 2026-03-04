@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: silver
+    tables:
+      - name: dim_installations
+        description: "Installations de production d'électricité (source ODRE)."
+        columns:
+          - name: id_peps
+            tests:
+              - unique
+              - not_null
+
+      - name: dim_stations_meteo
+        description: "Stations météorologiques Météo France."
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+
+      - name: dim_contours_iris
+        description: "Contours IRIS IGN avec centroïdes WGS84."
+        columns:
+          - name: code_iris
+            tests:
+              - unique
+              - not_null

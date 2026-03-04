@@ -47,9 +47,9 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 
     Parameters
     ----------
-    response:
+    response
         HTTP response with headers to inspect.
-    url:
+    url
         Original request URL (fallback source for filename).
 
     Returns
@@ -110,16 +110,16 @@ def download_to_file(
 
     Parameters
     ----------
-    url:
+    url
         URL of the file to download.
-    dest_dir:
+    dest_dir
         Destination directory (created if needed).
-    fallback_filename:
+    fallback_filename
         Fallback filename if none could be extracted from the response.
-    progress:
+    progress
         Factory called with ``total_bytes`` (``0`` if unknown) that returns a
-        :class:`DownloadProgressReporter`.  Pass ``None`` (default) to use the
-        built-in tqdm progress bar.
+        :class:`DownloadProgressReporter`.
+        Pass ``None`` (default) to use the built-in tqdm progress bar.
 
     Returns
     -------

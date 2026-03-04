@@ -96,6 +96,90 @@ streame les bytes en chunks de 64 Ko vers psycopg3.
 - **Cohérence snapshot/incremental.** Le même mécanisme sert les deux
   stratégies, avec un preprocessing unifié des types complexes.
 
+### 6. dbt-core + dbt-postgres
+
+dbt est l'outil de référence pour les transformations SQL in-database (le « T » de
+ELT). L'idée serait de remplacer le loader Python par des modèles dbt qui gèrent le
+chargement silver Parquet → Postgres.
+
+**Problème fondamental : dbt ne sait pas lire de fichiers.** dbt opère exclusivement
+*dans* la base — il génère du SQL (`CREATE TABLE AS SELECT`, `INSERT INTO ... SELECT`)
+et l'exécute contre une base existante. Il n'a aucun mécanisme pour lire un Parquet
+depuis le disque.
+
+**Contournements évalués :**
+
+| Approche | Verdict |
+|---|---|
+| **dbt seeds** | CSV uniquement, < 5 MB recommandé. Inutilisable (100k–10M lignes). |
+| **dbt-external-tables** | Ne supporte **pas** Postgres (Snowflake/Redshift/BigQuery). |
+| **pg_parquet** (extension PG) | Extension tierce à installer dans l'image Docker, pas une feature dbt. |
+| **Pré-charger en staging + dbt** | Garde tout le code Python actuel + ajoute dbt par-dessus — complexité sans gain. |
+
+**Même avec les données déjà dans Postgres, dbt présente d'autres limites :**
+
+- **Performance** : dbt génère `INSERT INTO ... SELECT`, pas de `COPY`. Le bulk load
+  via `COPY FROM STDIN` est 3–10× plus rapide pour nos volumes.
+- **UPSERT** : la stratégie incrémentale par défaut sur Postgres est `delete+insert`
+  (supprime et réinsère toutes les lignes matchées). Notre `ON CONFLICT DO UPDATE` avec
+  `IS DISTINCT FROM` est plus précis — il n'écrit que si les valeurs changent, ce qui
+  évite des écritures WAL inutiles. Reproduire ce comportement en dbt nécessiterait une
+  macro custom.
+- **Validation cross-système** : les contrats dbt vérifient les types *dans* la base
+  (Postgres vs output du modèle), mais pas la compatibilité Polars↔Postgres. Le mapping
+  `_POLARS_TO_PG_COMPATIBLE` du loader actuel n'a pas d'équivalent dbt.
+- **Transaction atomique** : dbt gère ses propres transactions par modèle. Le loader
+  actuel exécute DDL + validation + load + upsert dans une seule transaction avec
+  rollback sur erreur.
+- **Dépendances** : +dbt-core, +dbt-postgres, +Cosmos (intégration Airflow) dans
+  l'image Docker — trois dépendances supplémentaires.
+
+**Rejeté** : dbt résout un problème différent (transformations SQL in-database). Pour
+le chargement de fichiers Parquet dans Postgres, il ajouterait de la complexité sans
+supprimer le code existant et sans bénéfice de performance.
+
+**Note** : dbt reste pertinent pour une éventuelle couche **gold** — agrégations
+cross-datasets (`fact_eco2mix` × `fact_meteo_horaire` × `dim_stations`), vues
+matérialisées pour dashboards. Ce cas d'usage pourra être réévalué quand le besoin se
+présentera.
+
+### 7. SQLMesh
+
+Alternative à dbt avec des **Python models** first-class (lecture Parquet via
+Polars/Pandas possible). Cependant :
+
+- Fivetran a racheté Tobiko (créateur de SQLMesh) en septembre 2025, puis a fusionné
+  avec dbt Labs. L'avenir de SQLMesh comme outil indépendant est **incertain**.
+- Reste un outil de transformation : pas de `COPY`, même limitations de performance
+  pour le bulk load.
+- Réécriture complète du pipeline nécessaire.
+
+**Écarté** : risque stratégique trop élevé pour un bénéfice marginal.
+
+## Synthèse comparative
+
+| Critère | COPY CSV (retenu) | dbt-postgres | SQLMesh |
+|---------|-------------------|-------------|---------|
+| Lecture Parquet | Polars | Non | Python models |
+| Bulk load | `COPY FROM STDIN` — optimal | `INSERT INTO ... SELECT` — 3–10× plus lent | `INSERT` — idem |
+| UPSERT `IS DISTINCT FROM` | Natif | Macro custom nécessaire | Custom |
+| Validation Polars↔PG | Mapping complet | Non (DB-only) | Partielle |
+| Transaction atomique | Oui | Par modèle | Par modèle |
+| Dépendances supplémentaires | Aucune | dbt-core, dbt-postgres, Cosmos | sqlmesh |
+| Couche gold (futur) | Code SQL à écrire | Excellent | Excellent |
+
+## Pistes d'amélioration du loader actuel
+
+Sans introduire dbt, le loader peut évoluer sur ces axes :
+
+1. **Tests de qualité des données** : assertions Polars ou SQL post-load (vérification
+   de nulls, distribution, cohérence temporelle).
+2. **Évolution de schéma automatique** : `ALTER TABLE ADD COLUMN` quand le Parquet
+   contient de nouvelles colonnes absentes de la table PG (plutôt que de modifier le DDL
+   manuellement).
+3. **dbt pour la couche gold uniquement** : quand le besoin d'agrégations cross-datasets
+   se présentera, évaluer dbt ou SQLMesh pour cette couche spécifique.
+
 ## Preprocessing des types non-standard
 
 `write_csv()` ne connaît pas le dialecte COPY de Postgres pour deux types :

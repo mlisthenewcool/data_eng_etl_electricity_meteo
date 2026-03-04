@@ -15,7 +15,7 @@ def to_snake_case(name: str) -> str:
 
     Parameters
     ----------
-    name:
+    name
         Input string (CamelCase, mixed-case, space- or hyphen-separated).
 
     Returns
@@ -36,9 +36,9 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
 
     Parameters
     ----------
-    df:
+    df
         DataFrame to validate.
-    dataset_name:
+    dataset_name
         Used in the exception for diagnostics.
 
     Raises
@@ -50,25 +50,120 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
-def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
-    """Apply common silver-layer steps: snake_case rename + validations.
+def validate_no_nulls(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
+    """Raise if *column* contains any null values.
 
     Parameters
     ----------
-    df:
-        DataFrame returned by a dataset-specific silver transform.
-    dataset_name:
-        Dataset identifier (for logging and error reporting).
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with standardized column names, validated.
+    df
+        DataFrame to validate.
+    column
+        Column name (or list of column names) to check.
+    dataset_name
+        Used in the exception for diagnostics.
 
     Raises
     ------
     TransformValidationError
-        If the resulting DataFrame is empty after dropping all-null columns.
+        If any checked column has at least one null.
+    """
+    columns = [column] if isinstance(column, str) else column
+    for col in columns:
+        null_count = df[col].null_count()
+        if null_count > 0:
+            raise TransformValidationError(
+                dataset_name, reason=f"Column '{col}' has {null_count} null values"
+            )
+
+
+def validate_unique(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
+    """Raise if *column* contains duplicate values.
+
+    When *column* is a list, checks uniqueness of the composite key
+    (i.e. the combination of all listed columns).
+
+    Parameters
+    ----------
+    df
+        DataFrame to validate.
+    column
+        Column name (or list of column names) to check for uniqueness.
+    dataset_name
+        Used in the exception for diagnostics.
+
+    Raises
+    ------
+    TransformValidationError
+        If the (composite) key has at least one duplicate.
+    """
+    if isinstance(column, str):
+        n_dupes = len(df) - df[column].n_unique()
+        label = f"Column '{column}'"
+    else:
+        n_dupes = df.select(column).is_duplicated().sum()
+        label = f"Columns {column}"
+    if n_dupes > 0:
+        raise TransformValidationError(
+            dataset_name, reason=f"{label} has {n_dupes} duplicate values"
+        )
+
+
+def deduplicate_on_composite_key(
+    df: pl.DataFrame,
+    key_columns: list[str],
+    dataset_name: str,
+) -> pl.DataFrame:
+    """Deduplicate rows on a composite key, keeping the last occurrence.
+
+    Handles DST (Daylight Saving Time) transitions where data sources may return
+    duplicate timestamps: during the autumn clock change (last Sunday of October in
+    France), the hour 2:00-3:00 occurs twice, producing duplicates on time-based keys.
+
+    Parameters
+    ----------
+    df
+        DataFrame to deduplicate.
+    key_columns
+        Column names forming the composite key.
+    dataset_name
+        Dataset identifier (for logging).
+
+    Returns
+    -------
+    pl.DataFrame
+        Deduplicated DataFrame.
+    """
+    before = len(df)
+    df = df.unique(subset=key_columns, keep="last")
+    removed = before - len(df)
+    if removed > 0:
+        logger.info(
+            "Deduplicated rows",
+            dataset_name=dataset_name,
+            removed=removed,
+            remaining=len(df),
+            key_columns=key_columns,
+        )
+    return df
+
+
+def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
+    """Apply common silver pre-processing: snake_case rename + drop all-null columns.
+
+    Called by the registry wrapper **before** the dataset-specific transform, so that
+    all silver transforms receive clean, snake_case column names.
+
+    Parameters
+    ----------
+    df
+        Raw DataFrame read from the bronze parquet.
+    dataset_name
+        Dataset identifier (for logging).
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with snake_case columns and spurious all-null columns removed.
     """
     df = df.rename(to_snake_case)
 
@@ -80,6 +175,5 @@ def apply_common_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
         logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
         df = df.drop(null_cols)
 
-    validate_not_empty(df, dataset_name)
-    logger.debug("Common silver steps applied")
+    logger.debug("Common silver pre-processing applied", dataset_name=dataset_name)
     return df

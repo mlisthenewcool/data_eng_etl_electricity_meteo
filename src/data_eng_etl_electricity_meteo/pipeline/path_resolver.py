@@ -1,7 +1,7 @@
 """Path resolution for the medallion architecture layers.
 
-``RemotePathResolver`` handles landing / bronze / silver paths for remote
-HTTP datasets. Gold datasets live in Postgres (via dbt), not on disk.
+``RemotePathResolver`` handles landing / bronze / silver paths for remote HTTP datasets.
+Gold datasets live in Postgres (via dbt), not on disk.
 """
 
 from dataclasses import dataclass, field
@@ -23,10 +23,10 @@ class _BasePathResolver:
 
         Notes
         -----
-        Necessary because resolvers can be instantiated directly (e.g. in tests
-        or scripts) without going through the catalog, where an empty name would
-        silently produce broken paths (e.g. ``bronze/latest.parquet`` instead of
-        ``bronze/{dataset_name}/latest.parquet``).
+        Necessary because resolvers can be instantiated directly
+        (e.g. in tests or scripts) without going through the catalog, where an empty
+        name would silently produce broken paths (e.g. ``bronze/latest.parquet`` instead
+        of ``bronze/{dataset_name}/latest.parquet``).
 
         Raises
         ------
@@ -63,7 +63,7 @@ class RemotePathResolver(_BasePathResolver):
 
         Parameters
         ----------
-        version:
+        version
             Version string (e.g. ``"2026-01-17"``).
 
         Returns
@@ -136,6 +136,11 @@ class RemotePathResolver(_BasePathResolver):
         """Previous silver version (N-1) for fast rollback."""
         return self._silver_dir / "backup.parquet"
 
+    @property
+    def silver_delta_path(self) -> Path:
+        """Delta file containing only new/changed rows for incremental loads."""
+        return self._silver_dir / "delta.parquet"
+
 
 if __name__ == "__main__":
     import sys
@@ -167,4 +172,5 @@ if __name__ == "__main__":
             bronze_latest_version=_resolver.bronze_latest_version(),
             silver_backup_path=_resolver.silver_backup_path,
             silver_current_path=_resolver.silver_current_path,
+            silver_delta_path=_resolver.silver_delta_path,
         )

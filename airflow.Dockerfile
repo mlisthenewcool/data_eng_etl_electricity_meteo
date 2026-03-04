@@ -48,7 +48,8 @@ ENV PYTHONPATH="/opt/airflow/src" \
 
 RUN uv pip install --no-cache \
     duckdb "httpx[http2]" orjson polars "psycopg[c]" py7zr pyarrow \
-    pydantic pydantic-settings pyaml structlog tqdm
+    pydantic pydantic-settings pyaml structlog tqdm \
+    "dbt-postgres>=1.10,<2"
 
 # Install DuckDB extensions once
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"

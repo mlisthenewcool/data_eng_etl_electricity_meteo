@@ -12,12 +12,12 @@ class StrictModel(BaseModel):
 def format_pydantic_errors(pydantic_errors: ValidationError) -> dict[str, str]:
     """Convert Pydantic validation errors to a structured dictionary.
 
-    This utility function transforms Pydantic's error format into a simpler
-    dict for logging and error messages.
+    This utility function transforms Pydantic's error format into a simpler dict for
+    logging and error messages.
 
     Parameters
     ----------
-    pydantic_errors:
+    pydantic_errors
         The exception raised by a Pydantic model during failed validation.
 
     Returns

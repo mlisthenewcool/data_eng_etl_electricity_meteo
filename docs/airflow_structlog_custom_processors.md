@@ -1,7 +1,6 @@
 # Airflow 3 et processeurs structlog custom
 
-> Synthèse au 2026-02-16. À revérifier lors des mises à jour
-> d'Airflow.
+> Synthèse au 2026-02-16. À revérifier lors des mises à jour d'Airflow.
 
 ## Contexte
 
@@ -58,7 +57,11 @@ processeurs configurée par Airflow.
 - [Configuration Reference - Airflow 3.1.7][5]
 
 [1]: https://github.com/apache/airflow/discussions/53006
+
 [2]: https://github.com/apache/airflow/issues/53442
+
 [3]: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/_api/airflow/providers/amazon/aws/log/cloudwatch_task_handler/index.html
+
 [4]: https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/advanced-logging-configuration.html
+
 [5]: https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html

@@ -1,11 +1,4 @@
--- Silver table: ODRE regional electricity production (consolidated & final).
--- Strategy: snapshot (TRUNCATE + COPY on each load).
--- Primary key: (code_insee_region, date_heure).
---
--- Note: the "eolien" column is TEXT in this dataset (vs BIGINT in eco2mix_tr),
--- a known inconsistency in the ODRE source API for consolidated data.
-
-CREATE TABLE IF NOT EXISTS silver.odre_eco2mix_cons_def (
+CREATE TABLE IF NOT EXISTS {schema}.{table} (
     code_insee_region       TEXT            NOT NULL,
     libelle_region          TEXT,
     nature                  TEXT,
@@ -15,7 +8,7 @@ CREATE TABLE IF NOT EXISTS silver.odre_eco2mix_cons_def (
     consommation            BIGINT,
     thermique               BIGINT,
     nucleaire               BIGINT,
-    eolien                  TEXT,
+    eolien                  BIGINT,
     solaire                 BIGINT,
     hydraulique             BIGINT,
     pompage                 BIGINT,
@@ -37,5 +30,9 @@ CREATE TABLE IF NOT EXISTS silver.odre_eco2mix_cons_def (
     tch_hydraulique         DOUBLE PRECISION,
     tco_bioenergies         DOUBLE PRECISION,
     tch_bioenergies         DOUBLE PRECISION,
+    inserted_at             TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (code_insee_region, date_heure)
 );
+
+CREATE INDEX IF NOT EXISTS idx_fact_eco2mix_cons_def_date
+    ON {schema}.{table}(date_heure);

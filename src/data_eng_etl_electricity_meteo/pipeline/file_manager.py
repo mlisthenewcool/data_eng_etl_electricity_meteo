@@ -33,13 +33,13 @@ def _rotate(
 
     Parameters
     ----------
-    dataset_name:
+    dataset_name
         Dataset identifier (for log context).
-    current_path:
+    current_path
         Path to the current file.
-    backup_path:
+    backup_path
         Path to the backup file.
-    layer:
+    layer
         Medallion layer (e.g. ``MedallionLayer.SILVER``).
 
     Raises
@@ -75,13 +75,13 @@ def _rollback(
 
     Parameters
     ----------
-    dataset_name:
+    dataset_name
         Dataset identifier (for log context).
-    current_path:
+    current_path
         Path to the current file.
-    backup_path:
+    backup_path
         Path to the backup file.
-    layer:
+    layer
         Medallion layer (e.g. ``MedallionLayer.SILVER``).
 
     Returns
@@ -134,7 +134,7 @@ class RemoteFileManager:
 
         Parameters
         ----------
-        target_version:
+        target_version
             Version string of the bronze file to point to.
 
         Raises
@@ -182,7 +182,7 @@ class RemoteFileManager:
 
         Parameters
         ----------
-        retention_days:
+        retention_days
             Number of days to retain versions (default from settings).
 
         Returns

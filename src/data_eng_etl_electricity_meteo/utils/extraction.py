@@ -37,7 +37,7 @@ def _validate_sqlite_header(path: Path) -> None:
 
     Parameters
     ----------
-    path:
+    path
         File to validate (GeoPackage files are SQLite databases).
 
     Raises
@@ -73,18 +73,18 @@ def extract_7z(
 
     Parameters
     ----------
-    archive_path:
+    archive_path
         Path to the .7z archive.
-    target_filename:
+    target_filename
         Name or suffix of file to extract (handles nested paths).
-    dest_dir:
+    dest_dir
         Destination directory (created if needed).
-    validate_sqlite:
+    validate_sqlite
         If ``True``, validate SQLite header after extraction.
-    progress:
-        Factory called with ``total_bytes`` (uncompressed size) that returns
-        an :class:`~py7zr.callbacks.ExtractCallback`.  Pass ``None`` (default)
-        to use the built-in tqdm progress bar.
+    progress
+        Factory called with ``total_bytes`` (uncompressed size) that returns an
+        :class:`~py7zr.callbacks.ExtractCallback`.
+        Pass ``None`` (default) to use the built-in tqdm progress bar.
 
     Returns
     -------

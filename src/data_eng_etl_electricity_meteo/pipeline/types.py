@@ -1,15 +1,15 @@
 """Typed metrics and pipeline context for the medallion architecture stages.
 
 Each pipeline stage produces a ``...Metrics`` type capturing its own output.
-All metrics accumulate in a single ``PipelineContext`` passed via Airflow XCom,
-growing at each stage: download → (extraction) → bronze → silver.
+All metrics accumulate in a single ``PipelineContext`` passed via Airflow XCom, growing
+at each stage: download → (extraction) → bronze → silver.
 
 Architecture
 ------------
 
 Pipeline functions (typed) ↔ Airflow tasks (dicts via XCom):
 
-    ingest()    → PipelineContext(download=DownloadMetrics(...))
+    download()  → PipelineContext(download=DownloadMetrics(...))
     extract()   → PipelineContext(download=DownloadMetrics(..., extraction_info=...))
     to_bronze() → PipelineContext(..., bronze=BronzeMetrics(...))
     to_silver() → PipelineContext(..., silver=SilverMetrics(...))
@@ -41,13 +41,13 @@ class ExtractionInfo(StrictModel):
 
     Attributes
     ----------
-    archive_path:
+    archive_path
         Path to the source archive.
-    file_path:
+    file_path
         Path to the extracted file.
-    file_hash:
+    file_hash
         SHA-256 hash of the extracted file.
-    size_mib:
+    size_mib
         Size of the extracted file in MiB.
     """
 
@@ -62,11 +62,11 @@ class DownloadMetrics(StrictModel):
 
     Attributes
     ----------
-    remote_metadata:
+    remote_metadata
         HTTP HEAD metadata captured before download.
-    download_info:
+    download_info
         Downloaded file path, hash, and size.
-    extraction_info:
+    extraction_info
         Extraction details if the source format is an archive, ``None`` otherwise.
     """
 
@@ -78,8 +78,8 @@ class DownloadMetrics(StrictModel):
     def landing_path(self) -> Path:
         """Path of the file entering the bronze stage.
 
-        Returns the extracted file when the source is an archive,
-        otherwise the raw downloaded file.
+        Returns the extracted file when the source is an archive, otherwise the raw
+        downloaded file.
         """
         if self.extraction_info is not None:
             return self.extraction_info.file_path
@@ -94,12 +94,46 @@ class BronzeMetrics(StrictModel):
     columns: list[str]
 
 
+class IncrementalDiffMetrics(StrictModel):
+    """Delta statistics computed during silver transformation for incremental datasets.
+
+    Attributes
+    ----------
+    rows_total
+        Total rows in the full silver snapshot.
+    rows_new
+        Rows whose PK is absent from the previous snapshot (inserts).
+    rows_changed
+        Rows whose PK exists but at least one non-key column differs (updates).
+    rows_unchanged
+        Rows identical to the previous snapshot (skipped).
+    """
+
+    rows_total: int
+    rows_new: int
+    rows_changed: int
+    rows_unchanged: int
+
+
 class SilverMetrics(StrictModel):
-    """Metrics produced by the silver transformation stage."""
+    """Metrics produced by the silver transformation stage.
+
+    Attributes
+    ----------
+    file_size_mib
+        Size of ``current.parquet`` in MiB.
+    row_count
+        Number of rows in the silver snapshot.
+    columns
+        Column names.
+    diff
+        Incremental diff statistics, or ``None`` for snapshot datasets.
+    """
 
     file_size_mib: float
     row_count: int
     columns: list[str]
+    diff: IncrementalDiffMetrics | None = None
 
 
 class GoldMetrics(StrictModel):
@@ -115,20 +149,23 @@ class LoadPostgresMetrics(StrictModel):
 
     Attributes
     ----------
-    dataset_name:
+    dataset_name
         Dataset identifier.
-    table:
-        Schema-qualified table name (e.g. ``silver.odre_installations``).
-    strategy:
+    table
+        Schema-qualified table name (e.g. ``silver.dim_installations``).
+    strategy
         Loading strategy used: ``"snapshot"`` or ``"incremental"``.
-    rows_loaded:
+    rows_loaded
         Number of rows written (for incremental: rows inserted + updated).
+    diff
+        Incremental diff statistics from the silver stage, or ``None``.
     """
 
     dataset_name: str
     table: str
     strategy: IngestionMode
     rows_loaded: int
+    diff: IncrementalDiffMetrics | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,12 +178,12 @@ class IngestionDecision(StrictModel):
 
     Attributes
     ----------
-    should_ingest:
+    should_ingest
         ``True`` if the remote file has changed and ingestion should proceed.
-    is_healing:
-        ``True`` if this run is a healing re-ingestion (e.g. previous run failed
-        mid-pipeline and local state is inconsistent).
-    remote_metadata:
+    is_healing
+        ``True`` if this run is a healing re-ingestion
+        (e.g. previous run failed mid-pipeline and local state is inconsistent).
+    remote_metadata
         HTTP HEAD metadata used for the decision.
     """
 
@@ -163,19 +200,19 @@ class IngestionDecision(StrictModel):
 class PipelineContext(StrictModel):
     """Pipeline state passed via Airflow XCom, accumulating metrics across stages.
 
-    Starts with only ``download`` populated after the ingest/extract tasks,
-    then ``bronze`` and ``silver`` are added by their respective tasks.
+    Starts with only ``download`` populated after the ingest/extract tasks, then
+    ``bronze`` and ``silver`` are added by their respective tasks.
 
     Attributes
     ----------
-    version:
-        Run version string (e.g. ``"2026-01-17"``). Determined by the DAG
-        from the run date and ingestion frequency, before any stage executes.
-    download:
+    version
+        Run version string (e.g. ``"2026-01-17"``). Determined by the DAG from the run
+        date and ingestion frequency, before any stage executes.
+    download
         Metrics from the download (and optional extraction) stage.
-    bronze:
+    bronze
         Metrics from the bronze conversion stage, or ``None`` if not yet run.
-    silver:
+    silver
         Metrics from the silver transformation stage, or ``None`` if not yet run.
     """
 
@@ -195,11 +232,11 @@ class DownloadSnapshot(StrictModel):
 
     Attributes
     ----------
-    remote_metadata:
+    remote_metadata
         HTTP HEAD metadata captured before download.
-    file_hash:
+    file_hash
         SHA-256 hash of the downloaded file.
-    size_mib:
+    size_mib
         Size of the downloaded file in MiB.
     """
 
@@ -213,9 +250,9 @@ class ExtractionSnapshot(StrictModel):
 
     Attributes
     ----------
-    file_hash:
+    file_hash
         SHA-256 hash of the extracted file.
-    size_mib:
+    size_mib
         Size of the extracted file in MiB.
     """
 
@@ -226,24 +263,24 @@ class ExtractionSnapshot(StrictModel):
 class PipelineRunSnapshot(StrictModel):
     """Snapshot of a complete pipeline run for observability.
 
-    Persisted in Airflow's Asset metadata after each successful silver run,
-    and read back on subsequent runs for smart-skip decisions.
+    Persisted in Airflow's Asset metadata after each successful silver run, and read
+    back on subsequent runs for smart-skip decisions.
 
-    File paths are excluded: they are deterministic from ``version`` +
-    ``dataset_name`` via ``RemotePathResolver``, and ephemeral landing paths
-    no longer exist after the bronze stage.
+    File paths are excluded: they are deterministic from ``version`` + ``dataset_name``
+    via ``RemotePathResolver``, and ephemeral landing paths no longer exist after the
+    bronze stage.
 
     Attributes
     ----------
-    version:
+    version
         Run version string.
-    download:
+    download
         Download metrics without ephemeral file paths.
-    extraction:
+    extraction
         Extraction metrics, or ``None`` if the source is not an archive.
-    bronze:
+    bronze
         Bronze conversion metrics (required — only set for complete runs).
-    silver:
+    silver
         Silver transformation metrics (required — only set for complete runs).
     """
 
@@ -259,7 +296,7 @@ class PipelineRunSnapshot(StrictModel):
 
         Parameters
         ----------
-        context:
+        context
             Complete pipeline context with all stages populated.
 
         Returns
@@ -305,7 +342,7 @@ class PipelineRunSnapshot(StrictModel):
 
         Parameters
         ----------
-        metadata:
+        metadata
             Raw metadata dict (e.g. from Airflow XCom ``extra``), or ``None``.
 
         Returns

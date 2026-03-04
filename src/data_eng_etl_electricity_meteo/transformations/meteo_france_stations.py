@@ -52,20 +52,20 @@ PARAMS_EOLIENS = [
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for Meteo France stations.
 
     Simply reads JSON and converts to Parquet format.
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the JSON file from landing layer.
 
     Returns
     -------
-    pl.DataFrame
-        DataFrame with raw station data.
+    pl.LazyFrame
+        LazyFrame with raw station data.
 
     Raises
     ------
@@ -75,7 +75,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         If *landing_path* does not exist or is not readable.
     """
     logger.debug("Reading JSON from landing", landing_path=landing_path)
-    return pl.read_json(landing_path)
+    return pl.read_json(landing_path).lazy()
 
 
 # ---------------------------------------------------------------------------
@@ -83,13 +83,13 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for Meteo France stations.
 
     Flattens nested structures and enriches with renewable energy flags.
 
     Transformations applied:
-    - Filter to active stations only (dateFin is empty)
+    - Filter to active stations only (date_fin is empty)
     - Extract latest position (latitude, longitude, altitude)
     - Filter to active parameters only
     - Create boolean flags for solar/wind measurement capability
@@ -97,33 +97,27 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
     pl.DataFrame
         Flattened DataFrame with measurement capability flags.
-
-    Raises
-    ------
-    polars.exceptions.PolarsError
-        On any Polars read or transformation failure.
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
     """
-    logger.debug("Reading from bronze", latest_bronze_path=latest_bronze_path)
-    df = pl.read_parquet(latest_bronze_path)
-
     logger.debug("Filtering active stations", total_stations=len(df))
 
     # Filter to active stations only
-    df_active = df.filter((pl.col("dateFin").is_null()) | (pl.col("dateFin") == ""))
+    # Note: date_fin is the snake_case version of the original dateFin column.
+    # Nested struct fields (inside positions/parametres lists) keep their
+    # original names — only top-level columns are renamed by prepare_silver.
+    df_active = df.filter((pl.col("date_fin").is_null()) | (pl.col("date_fin") == ""))
 
     logger.debug("Active stations filtered", active_stations=len(df_active))
 
     # Extract the latest position (the one with empty dateFin)
     # positions is a List of Structs: latitude, longitude, altitude, …
+    # Nested struct field names are NOT renamed (still original casing).
     df_with_position = df_active.with_columns(
         pl.col("positions")
         .list.eval(
@@ -175,16 +169,16 @@ def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
         pl.col("params_actifs_noms").list.len().alias("nb_parametres"),
     )
 
-    # Convert dateDebut to proper date
+    # Convert date_debut to proper date type
     df_final = df_with_flags.with_columns(
-        pl.col("dateDebut").str.slice(0, 10).str.to_date("%Y-%m-%d").alias("date_debut"),
+        pl.col("date_debut").str.slice(0, 10).str.to_date("%Y-%m-%d"),
     )
 
-    # Select and rename final columns
+    # Select final columns
     result = df_final.select(
         pl.col("id"),
         pl.col("nom"),
-        pl.col("lieuDit").alias("lieu_dit"),
+        pl.col("lieu_dit"),
         pl.col("bassin"),
         pl.col("date_debut"),
         pl.col("latitude"),

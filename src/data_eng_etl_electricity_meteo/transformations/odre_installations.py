@@ -5,7 +5,6 @@ from pathlib import Path
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.transformations.shared import to_snake_case
 
 logger = get_logger("transform.odre_installations")
 
@@ -13,9 +12,6 @@ logger = get_logger("transform.odre_installations")
 # ---------------------------------------------------------------------------
 # Domain constants
 # ---------------------------------------------------------------------------
-
-# TODO: id_peps column is null for aggregated installations
-# TODO: df.with_columns(pl.coalesce(["id_peps"], pl.concat_str([...], separator="_")))
 
 # Renewable energy filieres
 FILIERES_RENOUVELABLES = ["SOLAI", "EOLIE", "HYDLQ", "BIOEN", "MARIN", "GEOTH"]
@@ -40,20 +36,20 @@ TYPE_ENERGIE_MAPPING = {
 # ---------------------------------------------------------------------------
 
 
-def transform_bronze(landing_path: Path) -> pl.DataFrame:
+def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for ODRE installations.
 
-    Simply reads parquet from landing.
+    Simply scans parquet from landing.
 
     Parameters
     ----------
-    landing_path:
+    landing_path
         Path to the parquet file from landing layer.
 
     Returns
     -------
-    pl.DataFrame
-        DataFrame ready for bronze layer.
+    pl.LazyFrame
+        LazyFrame ready for bronze layer.
 
     Raises
     ------
@@ -63,7 +59,7 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
         If *landing_path* does not exist or is not readable.
     """
     logger.debug("Reading parquet from landing", landing_path=landing_path)
-    return pl.read_parquet(landing_path)
+    return pl.scan_parquet(landing_path)
 
 
 # ---------------------------------------------------------------------------
@@ -71,46 +67,69 @@ def transform_bronze(landing_path: Path) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def transform_silver(latest_bronze_path: Path) -> pl.DataFrame:
+def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """Silver transformation for ODRE installations.
 
-    Adds business flags for energy type classification.
+    Generates synthetic primary keys for aggregated installations and adds business
+    flags for energy type classification.
 
     Transformations applied:
 
-    - Rename columns to snake_case (needed before business logic).
+    - Flag ``est_agregation`` (``True`` when original ``id_peps`` is null).
+    - Synthetic ``id_peps`` for aggregated rows via geographic cascade (IRIS → COM → DEP
+      → REG → FR) + filière + sequence number.
     - Add ``est_renouvelable`` flag based on ``code_filiere``.
     - Add ``type_energie`` simplified classification via ``TYPE_ENERGIE_MAPPING``.
     - Add ``est_actif`` flag (``True`` when ``date_deraccordement`` is null).
 
     Parameters
     ----------
-    latest_bronze_path:
-        Path to the latest bronze parquet file.
+    df
+        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
     pl.DataFrame
-        Normalized and enriched DataFrame.
-
-    Raises
-    ------
-    polars.exceptions.PolarsError
-        On any Polars read failure (corrupt file, schema mismatch, etc.).
-    OSError
-        If *latest_bronze_path* does not exist or is not readable.
+        Enriched DataFrame with energy type flags.
     """
-    logger.debug("Reading from bronze", latest_bronze_path=latest_bronze_path)
-    df = pl.read_parquet(latest_bronze_path)
-
     logger.debug("Applying transformations", n_rows=len(df), n_cols=len(df.columns))
 
-    # Rename to snake_case early: business logic below references snake_case names.
-    # The registry wrapper will re-apply to_snake_case, which is a no-op.
-    df_renamed = df.rename(to_snake_case)
+    # --- Synthetic key for aggregated installations (id_peps is NULL) ----------
+    _geo_key = pl.coalesce(
+        pl.concat_str([pl.lit("IRIS"), pl.col("code_iris")], separator="_"),
+        pl.concat_str([pl.lit("COM"), pl.col("code_insee_commune")], separator="_"),
+        pl.concat_str([pl.lit("DEP"), pl.col("code_departement")], separator="_"),
+        pl.concat_str([pl.lit("REG"), pl.col("code_region")], separator="_"),
+        pl.lit("FR"),
+    )
+    _base_key = pl.concat_str([pl.lit("AGR"), _geo_key, pl.col("code_filiere")], separator="_")
 
-    # Add business flags
-    df_with_flags = df_renamed.with_columns(
+    n_null_peps = df["id_peps"].null_count()
+    df = df.with_columns(
+        pl.col("id_peps").is_null().alias("est_agregation"),
+        _base_key.alias("_base_key"),
+    )
+
+    # Add per-group sequence number so each synthetic key is unique
+    df = df.with_columns(
+        pl.when(pl.col("est_agregation"))
+        .then(
+            pl.concat_str(
+                [
+                    pl.col("_base_key"),
+                    pl.col("est_agregation").cum_sum().over("_base_key").cast(pl.Utf8),
+                ],
+                separator="_",
+            )
+        )
+        .otherwise(pl.col("id_peps"))
+        .alias("id_peps")
+    ).drop("_base_key")
+
+    logger.info("Synthetic keys generated for aggregated installations", n_synthetic=n_null_peps)
+
+    # --- Business flags -------------------------------------------------------
+    df_with_flags = df.with_columns(
         pl.col("code_filiere").is_in(FILIERES_RENOUVELABLES).alias("est_renouvelable"),
         pl.col("code_filiere")
         .replace_strict(TYPE_ENERGIE_MAPPING, default="autre")

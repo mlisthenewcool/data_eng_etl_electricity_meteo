@@ -1,7 +1,7 @@
 """Airflow-aware progress reporters for download and extraction stages.
 
-Used by ``RemoteIngestionPipeline`` to inject structured log progress into
-Airflow task logs instead of tqdm bars.
+Used by ``RemoteIngestionPipeline`` to inject structured log progress into Airflow task
+logs instead of tqdm bars.
 
 Pass these classes (not instances) as the ``progress`` factory argument of
 :func:`~data_eng_etl_electricity_meteo.utils.download.download_to_file` and
@@ -56,8 +56,8 @@ class AirflowDownloadProgress:
 class AirflowExtractProgress(BaseExtractCallback):
     """Logs extraction progress via structlog every X seconds or Y%.
 
-    Unlike downloads, the total uncompressed size is always known from the
-    7z archive metadata — percentage is always available.
+    Unlike downloads, the total uncompressed size is always known from the 7z archive
+    metadata — percentage is always available.
     """
 
     def __init__(self, total_bytes: int) -> None:
