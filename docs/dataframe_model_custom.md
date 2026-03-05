@@ -277,7 +277,7 @@ def get_silver_transform(dataset_name, transform_fn, primary_key, schema=None):
 
 ```python
 # transformations/schemas.py
-from data_eng_etl_electricity_meteo.core.dataframe_model import (
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import (
     Column,
     DataFrameModel,
 )

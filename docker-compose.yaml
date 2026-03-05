@@ -83,6 +83,7 @@ services:
       POSTGRES_HOST: "${POSTGRES_HOST}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
       POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}"
+      DBT_TARGET: "docker"
 
       # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD is).
       # AIRFLOW_CONN_PROJECT_POSTGRES is instead exported in the command below,
@@ -97,7 +98,7 @@ services:
       - ./src:/opt/airflow/src:ro
       - ./data:/opt/airflow/data # TODO: remplacer par airflow_data:/opt/airflow/data en prod + dans volumes en bas
       - ./postgres:/opt/airflow/postgres # we need this to execute Postgres' ingestion queries through Airflow
-      - ./dbt:/opt/airflow/dbt:ro
+      - ./dbt:/opt/airflow/dbt
     healthcheck:
       # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html
       test: [ "CMD-SHELL", "curl -sf http://localhost:8080/api/v2/monitor/health || exit 1" ]

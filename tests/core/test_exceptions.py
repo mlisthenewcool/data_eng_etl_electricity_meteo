@@ -53,9 +53,10 @@ class TestPipelineStageErrorLog:
         exc.__cause__ = cause
         log_method = Mock()
         exc.log(log_method)
+        cause_data = {f"cause_{k}": v for k, v in cause.to_dict().items()}
         log_method.assert_called_once_with(
             str(exc),
-            **exc.to_dict() | cause.to_dict(),
+            **exc.to_dict() | cause_data,
             cause_type=type(cause).__qualname__,
         )
 
@@ -153,6 +154,6 @@ class TestPipelineStageErrorLogWithContext:
         log_method.assert_called_once_with(
             "inner_file required",
             dataset="eco2mix",
-            path=Path("/data/archive.7z"),
+            cause_path=Path("/data/archive.7z"),
             cause_type="ArchiveNotFoundError",
         )

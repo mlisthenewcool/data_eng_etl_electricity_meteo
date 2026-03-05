@@ -250,22 +250,20 @@ def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, pg_table: str)
     extra = df_cols - pg_cols
     missing = pg_cols - df_cols
 
-    type_mismatches: list[str] = []
+    errors: list[str] = []
+    for col in sorted(extra):
+        errors.append(f"Unexpected column: {col}")
+    for col in sorted(missing):
+        errors.append(f"Missing column: {col}")
     for col in sorted(df_cols & pg_cols):
         polars_type_name = type(df.schema[col].base_type()).__name__
         pg_type = pg_columns[col]
         compatible = _POLARS_TO_PG_COMPATIBLE.get(polars_type_name)
         if compatible is not None and pg_type not in compatible:
-            type_mismatches.append(f"{col}: Polars {polars_type_name} vs Postgres {pg_type}")
+            errors.append(f"{col}: Polars {polars_type_name} vs Postgres {pg_type}")
 
-    qualified_table = f"{_SILVER_SCHEMA}.{pg_table}"
-    if extra or missing or type_mismatches:
-        raise SchemaValidationError(
-            table=qualified_table,
-            extra_columns=sorted(extra),
-            missing_columns=sorted(missing),
-            type_mismatches=type_mismatches or None,
-        )
+    if errors:
+        raise SchemaValidationError(errors)
 
 
 def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:

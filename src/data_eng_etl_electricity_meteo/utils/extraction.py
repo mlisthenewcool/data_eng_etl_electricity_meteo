@@ -155,7 +155,8 @@ def extract_7z(
             dest_path = dest_dir / target_filename
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Atomic move to final destination
+            # Move to final destination (not atomic across filesystems,
+            # but the source temp dir is cleaned up regardless)
             if dest_path.exists():
                 dest_path.unlink()
             shutil.move(src=extracted_file, dst=dest_path)

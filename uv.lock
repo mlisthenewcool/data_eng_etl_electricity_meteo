@@ -866,7 +866,7 @@ dev = [
 
 [[package]]
 name = "dbt-adapters"
-version = "1.22.7"
+version = "1.22.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agate" },
@@ -877,9 +877,9 @@ dependencies = [
     { name = "pytz" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/0e/635c51e944c90de9227e302a1c36b39f61d5fa01f6724b8da1324fbf9039/dbt_adapters-1.22.7.tar.gz", hash = "sha256:8f29848686a1767138a17b42bf1ba3c05a85de22977379f3dba7f67b4c41815f", size = 136894, upload-time = "2026-03-03T18:39:59.084Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/97/bff1a5f9bfd2e44fe8efafc173c69491794432aa4e602546bf8315563722/dbt_adapters-1.22.8.tar.gz", hash = "sha256:ee24fd42450f7518a9df350337769eae63626458f273f8d444b81944371f4976", size = 137073, upload-time = "2026-03-05T15:33:06.468Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/07/83f9542bd2e7af540d0d50f2c86d79f77f05c6f1978e6e90f418be7e38f1/dbt_adapters-1.22.7-py3-none-any.whl", hash = "sha256:2c3816818b4347ac8cb0cf907e18bee4dea2472c60dc2130ecb5be51c6a5db56", size = 173009, upload-time = "2026-03-03T18:39:55.509Z" },
+    { url = "https://files.pythonhosted.org/packages/93/ae/6dedcfd1bd9edddc677c521bebeee296f5b62bc4c5bfc231d0b1da1caecf/dbt_adapters-1.22.8-py3-none-any.whl", hash = "sha256:4962f5add2ff989e4d0275ebcb40bbd2c00c22b6c80a9bef8ce0ee9c284a893d", size = 173124, upload-time = "2026-03-05T15:33:04.034Z" },
 ]
 
 [[package]]

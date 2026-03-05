@@ -6,6 +6,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from data_eng_etl_electricity_meteo.core.exceptions import SourceSchemaDriftError
 from data_eng_etl_electricity_meteo.transformations.meteo_france_climatologie import (
     BRONZE_COLUMNS,
     COLUMNS_MAPPING,
@@ -205,15 +206,16 @@ class TestColumnSelection:
         result = transform_silver(df)
         assert len(result.columns) == 16
 
-    def test_extra_source_columns_are_dropped(self) -> None:
-        """Source columns not in COLUMNS_MAPPING should not appear in output."""
+    def test_extra_source_columns_raise_drift_error(self) -> None:
+        """Extra source columns should raise SourceSchemaDriftError."""
         df = _make_bronze_df().with_columns(
             pl.lit("extra_value").alias("extra_column"),
             pl.lit(42).alias("another_column"),
         )
-        result = transform_silver(df)
-        assert "extra_column" not in result.columns
-        assert "another_column" not in result.columns
+        with pytest.raises(SourceSchemaDriftError) as exc_info:
+            transform_silver(df)
+        assert "extra_column" in exc_info.value.added
+        assert "another_column" in exc_info.value.added
 
 
 # ---------------------------------------------------------------------------

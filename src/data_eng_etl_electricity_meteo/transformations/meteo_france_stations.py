@@ -1,10 +1,15 @@
 """Transformations for Météo France stations dataset."""
 
+from datetime import date
 from pathlib import Path
+from typing import Annotated
 
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform.meteo_france_stations")
 
@@ -45,6 +50,45 @@ PARAMS_EOLIENS = [
     "NOMBRE DE JOURS AVEC FXY>=8 M/S",
     "NOMBRE DE JOURS AVEC FXY>=10 M/S",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Silver schema
+# ---------------------------------------------------------------------------
+
+ALL_SOURCE_COLUMNS: set[str] = {
+    "bassin",
+    "date_debut",
+    "date_fin",
+    "id",
+    "lieu_dit",
+    "nom",
+    "parametres",
+    "positions",
+    "type_station",
+}
+
+# type_station is not used in the silver transform.
+USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS - {"type_station"}
+
+
+class SilverSchema(DataFrameModel):
+    """Silver output contract for Météo France stations."""
+
+    id: Annotated[str, Column(nullable=False, unique=True)]
+    nom: str
+    lieu_dit: str
+    bassin: str
+    date_debut: date
+    # Metropolitan France only (overseas territories excluded at source level)
+    latitude: Annotated[float, Column(nullable=False, ge=41.0, le=52.0)]
+    longitude: Annotated[float, Column(nullable=False, ge=-6.0, le=10.0)]
+    altitude: int
+    mesure_solaire: bool
+    mesure_eolien: bool
+    params_solaires: Annotated[list[str], Column(dtype=pl.List(pl.String))]
+    params_eoliens: Annotated[list[str], Column(dtype=pl.List(pl.String))]
+    nb_parametres: Annotated[int, Column(dtype=pl.UInt32())]
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +149,8 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Flattened DataFrame with measurement capability flags.
     """
+    validate_source_columns(df, ALL_SOURCE_COLUMNS, "meteo_france_stations")
+
     logger.debug("Filtering active stations", total_stations=len(df))
 
     # Filter to active stations only
@@ -198,4 +244,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         n_mesure_eolien=result["mesure_eolien"].sum(),
     )
 
+    SilverSchema.validate(result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Transform spec (collected by registry)
+# ---------------------------------------------------------------------------
+
+SPEC = DatasetTransformSpec(
+    name="meteo_france_stations",
+    bronze_transform=transform_bronze,
+    silver_transform=transform_silver,
+    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    silver_schema=SilverSchema,
+)

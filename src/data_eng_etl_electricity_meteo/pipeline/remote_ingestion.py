@@ -33,7 +33,9 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     DownloadStageError,
     ExtractionError,
     ExtractStageError,
+    SchemaValidationError,
     SilverStageError,
+    SourceSchemaDriftError,
     TransformValidationError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
@@ -54,10 +56,7 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
     PipelineRunSnapshot,
     SilverMetrics,
 )
-from data_eng_etl_electricity_meteo.transformations.registry import (
-    get_bronze_transform,
-    get_silver_transform,
-)
+from data_eng_etl_electricity_meteo.transformations.registry import get_transform_spec
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo, download_to_file
 from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
@@ -93,16 +92,15 @@ class RemoteIngestionPipeline:
     Raises
     ------
     TransformNotFoundError
-        At construction time if bronze or silver transforms are not registered.
+        At construction time if the transform spec is not registered.
     """
 
     dataset: RemoteDatasetConfig
     custom_download: CustomDownloadFunc | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate that transform modules exist for this dataset (fast-fail)."""
-        get_bronze_transform(self.dataset.name)
-        get_silver_transform(self.dataset.name)
+        """Validate that transform spec exists for this dataset (fast-fail)."""
+        get_transform_spec(self.dataset.name)
 
     @cached_property
     def resolver(self) -> RemotePathResolver:
@@ -457,10 +455,10 @@ class RemoteIngestionPipeline:
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
-        transform = get_bronze_transform(self.dataset.name)
+        spec = get_transform_spec(self.dataset.name)
 
         try:
-            lf = transform(context.download.landing_path)
+            lf = spec.bronze_transform(context.download.landing_path)
             lf.sink_parquet(bronze_path)
         except (duckdb.Error, pl.exceptions.PolarsError, OSError) as err:
             raise BronzeStageError("Bronze transform or write failed") from err
@@ -530,11 +528,18 @@ class RemoteIngestionPipeline:
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
-        transform = get_silver_transform(self.dataset.name)
+        spec = get_transform_spec(self.dataset.name)
 
         try:
-            df = transform(self.resolver.bronze_latest_path)
-        except (duckdb.Error, OSError, TransformValidationError) as err:
+            df = spec.run_silver(self.resolver.bronze_latest_path)
+        except (
+            duckdb.Error,
+            OSError,
+            pl.exceptions.PolarsError,
+            TransformValidationError,
+            SchemaValidationError,
+            SourceSchemaDriftError,
+        ) as err:
             raise SilverStageError("Silver transform failed") from err
 
         is_incremental = self.dataset.ingestion.mode == IngestionMode.INCREMENTAL

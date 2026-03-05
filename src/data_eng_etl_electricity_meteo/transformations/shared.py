@@ -4,7 +4,10 @@ import re
 
 import polars as pl
 
-from data_eng_etl_electricity_meteo.core.exceptions import TransformValidationError
+from data_eng_etl_electricity_meteo.core.exceptions import (
+    SourceSchemaDriftError,
+    TransformValidationError,
+)
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 
 logger = get_logger("transform.shared")
@@ -50,61 +53,38 @@ def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
         raise TransformValidationError(dataset_name, reason="DataFrame is empty after transform")
 
 
-def validate_no_nulls(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
-    """Raise if *column* contains any null values.
+def validate_source_columns(
+    df: pl.DataFrame,
+    expected_columns: set[str],
+    dataset_name: str,
+) -> None:
+    """Raise if the source DataFrame columns differ from expectations.
+
+    Called at the start of ``transform_silver()`` before any column selection, to detect
+    upstream API schema drift early.
 
     Parameters
     ----------
     df
-        DataFrame to validate.
-    column
-        Column name (or list of column names) to check.
+        Pre-processed bronze DataFrame (after ``prepare_silver``).
+    expected_columns
+        Set of column names expected in the source.
     dataset_name
-        Used in the exception for diagnostics.
+        Dataset identifier (for the exception).
 
     Raises
     ------
-    TransformValidationError
-        If any checked column has at least one null.
+    SourceSchemaDriftError
+        If columns were added or removed compared to *expected_columns*.
     """
-    columns = [column] if isinstance(column, str) else column
-    for col in columns:
-        null_count = df[col].null_count()
-        if null_count > 0:
-            raise TransformValidationError(
-                dataset_name, reason=f"Column '{col}' has {null_count} null values"
-            )
-
-
-def validate_unique(df: pl.DataFrame, column: str | list[str], dataset_name: str) -> None:
-    """Raise if *column* contains duplicate values.
-
-    When *column* is a list, checks uniqueness of the composite key
-    (i.e. the combination of all listed columns).
-
-    Parameters
-    ----------
-    df
-        DataFrame to validate.
-    column
-        Column name (or list of column names) to check for uniqueness.
-    dataset_name
-        Used in the exception for diagnostics.
-
-    Raises
-    ------
-    TransformValidationError
-        If the (composite) key has at least one duplicate.
-    """
-    if isinstance(column, str):
-        n_dupes = len(df) - df[column].n_unique()
-        label = f"Column '{column}'"
-    else:
-        n_dupes = df.select(column).is_duplicated().sum()
-        label = f"Columns {column}"
-    if n_dupes > 0:
-        raise TransformValidationError(
-            dataset_name, reason=f"{label} has {n_dupes} duplicate values"
+    actual = set(df.columns)
+    added = sorted(actual - expected_columns)
+    removed = sorted(expected_columns - actual)
+    if added or removed:
+        raise SourceSchemaDriftError(
+            dataset_name=dataset_name,
+            added=added,
+            removed=removed,
         )
 
 
@@ -147,11 +127,15 @@ def deduplicate_on_composite_key(
     return df
 
 
-def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
+def prepare_silver(
+    df: pl.DataFrame,
+    dataset_name: str,
+    expected_columns: frozenset[str] | None = None,
+) -> pl.DataFrame:
     """Apply common silver pre-processing: snake_case rename + drop all-null columns.
 
-    Called by the registry wrapper **before** the dataset-specific transform, so that
-    all silver transforms receive clean, snake_case column names.
+    Called by ``DatasetTransformSpec.run_silver()`` before the dataset-specific
+    transform, so that all silver transforms receive clean, snake_case column names.
 
     Parameters
     ----------
@@ -159,6 +143,9 @@ def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
         Raw DataFrame read from the bronze parquet.
     dataset_name
         Dataset identifier (for logging).
+    expected_columns
+        Columns that must be preserved even if entirely null.
+        Spurious all-null columns (not in this set) are dropped.
 
     Returns
     -------
@@ -167,10 +154,13 @@ def prepare_silver(df: pl.DataFrame, dataset_name: str) -> pl.DataFrame:
     """
     df = df.rename(to_snake_case)
 
-    # Drop columns that are entirely null — these are spurious columns injected by
-    # some source APIs (e.g. column_30 / column_68 from the ODRE eco2mix parquet).
-    # Logged as a warning so operators are aware of structural drift in the source.
-    null_cols = [col for col in df.columns if df[col].is_null().all()]
+    # Drop columns that are entirely null AND not expected by the transform.
+    # Spurious all-null columns are injected by some source APIs
+    # (e.g. column_30 / column_68 from the ODRE eco2mix parquet).
+    # Expected columns are preserved even if all-null to avoid false
+    # SourceSchemaDriftError in validate_source_columns.
+    keep = expected_columns or set()
+    null_cols = [col for col in df.columns if df[col].is_null().all() and col not in keep]
     if null_cols:
         logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
         df = df.drop(null_cols)

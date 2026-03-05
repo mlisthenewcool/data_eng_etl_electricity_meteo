@@ -36,3 +36,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
 
 CREATE INDEX IF NOT EXISTS idx_fact_eco2mix_cons_def_date
     ON {schema}.{table}(date_heure);
+
+-- No separate index on code_insee_region: B-tree composite indexes support
+-- lookups on any left prefix, so the PK (code_insee_region, date_heure)
+-- already serves region-only queries efficiently.

@@ -1,10 +1,15 @@
 """Transformations for ODRE installations dataset."""
 
+from datetime import date
 from pathlib import Path
+from typing import Annotated
 
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform.odre_installations")
 
@@ -29,6 +34,132 @@ TYPE_ENERGIE_MAPPING = {
     "STOCK": "stockage",
     "AUTRE": "autre",
 }
+
+
+# ---------------------------------------------------------------------------
+# Silver schema
+# ---------------------------------------------------------------------------
+
+# Source columns expected after prepare_silver (before computed columns are added).
+ALL_SOURCE_COLUMNS: set[str] = {
+    "capacite_reservoir",
+    "code_combustible",
+    "code_departement",
+    "code_eic_resource_object",
+    "code_epci",
+    "code_filiere",
+    "code_gestionnaire",
+    "code_insee_commune",
+    "code_insee_commune_implantation",
+    "code_iris",
+    "code_iris_commune_implantation",
+    "code_region",
+    "code_s3_renr",
+    "code_technologie",
+    "codes_combustibles_secondaires",
+    "combustible",
+    "combustibles_secondaires",
+    "commune",
+    "date_debut_version",
+    "date_deraccordement",
+    "date_mise_en_service",
+    "date_mise_enservice_(format_date)",
+    "date_raccordement",
+    "debit_maximal",
+    "departement",
+    "energie_annuelle_glissante_injectee",
+    "energie_annuelle_glissante_produite",
+    "energie_annuelle_glissante_soutiree",
+    "energie_stockable",
+    "epci",
+    "filiere",
+    "gestionnaire",
+    "hauteur_chute",
+    "id_peps",
+    "max_puis",
+    "mode_raccordement",
+    "nb_groupes",
+    "nb_installations",
+    "nom_installation",
+    "poste_source",
+    "productible",
+    "puis_max_charge",
+    "puis_max_installee",
+    "puis_max_installee_dis_charge",
+    "puis_max_rac",
+    "puis_max_rac_charge",
+    "regime",
+    "region",
+    "technologie",
+    "tension_raccordement",
+    "type_stockage",
+}
+
+# All source columns are used (directly or for computed flags).
+USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS
+
+
+class SilverSchema(DataFrameModel):
+    """Silver output contract for ODRE installations."""
+
+    id_peps: Annotated[str, Column(nullable=False, unique=True)]
+    nom_installation: str
+    code_eic_resource_object: str
+    code_iris: str
+    code_insee_commune: str
+    commune: str
+    code_epci: str
+    epci: str
+    code_departement: str
+    departement: str
+    code_region: str
+    region: str
+    code_iris_commune_implantation: str
+    code_insee_commune_implantation: str
+    code_s3_renr: str
+    date_raccordement: date
+    date_deraccordement: date
+    date_mise_en_service: date
+    date_debut_version: date
+    poste_source: str
+    tension_raccordement: str
+    mode_raccordement: str
+    code_filiere: str
+    filiere: str
+    code_combustible: str
+    combustible: str
+    codes_combustibles_secondaires: str
+    combustibles_secondaires: str
+    code_technologie: str
+    technologie: str
+    type_stockage: str
+    puis_max_installee: float
+    puis_max_rac_charge: str
+    puis_max_charge: str
+    puis_max_rac: float
+    puis_max_installee_dis_charge: str
+    nb_groupes: int
+    nb_installations: int
+    regime: str
+    energie_stockable: str
+    capacite_reservoir: str
+    hauteur_chute: str
+    productible: str
+    debit_maximal: str
+    code_gestionnaire: str
+    gestionnaire: str
+    energie_annuelle_glissante_injectee: int
+    energie_annuelle_glissante_produite: int
+    energie_annuelle_glissante_soutiree: int
+    max_puis: str
+    # Verbatim column name from the ODRE source API (with parentheses).
+    date_mise_enservice_format_date: Annotated[
+        date, Column(name="date_mise_enservice_(format_date)")
+    ]
+    est_renouvelable: bool
+    type_energie: str
+    est_actif: bool
+    est_agregation: bool
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +223,8 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Enriched DataFrame with energy type flags.
     """
+    validate_source_columns(df, ALL_SOURCE_COLUMNS, "odre_installations")
+
     logger.debug("Applying transformations", n_rows=len(df), n_cols=len(df.columns))
 
     # --- Synthetic key for aggregated installations (id_peps is NULL) ----------
@@ -137,11 +270,28 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("date_deraccordement").is_null().alias("est_actif"),
     )
 
+    result = df_with_flags.select(SilverSchema.polars_schema().names())
+
     logger.debug(
         "Silver transformation completed",
-        n_rows=len(df_with_flags),
-        n_renouvelables=df_with_flags["est_renouvelable"].sum(),
-        n_actifs=df_with_flags["est_actif"].sum(),
+        n_rows=len(result),
+        n_renouvelables=result["est_renouvelable"].sum(),
+        n_actifs=result["est_actif"].sum(),
     )
 
-    return df_with_flags
+    SilverSchema.validate(result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Transform spec (collected by registry)
+# ---------------------------------------------------------------------------
+
+SPEC = DatasetTransformSpec(
+    name="odre_installations",
+    bronze_transform=transform_bronze,
+    silver_transform=transform_silver,
+    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    silver_schema=SilverSchema,
+)

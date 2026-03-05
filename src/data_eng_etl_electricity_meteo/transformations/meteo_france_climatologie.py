@@ -9,11 +9,16 @@ Source data from data.gouv.fr is already in final units (°C, m/s, hPa, mm).
 No unit conversion is applied.
 """
 
+from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform.meteo_france_climatologie")
 
@@ -63,6 +68,40 @@ COLUMNS_MAPPING: dict[str, str] = {
     "pstat": "pression_station",
     "pmer": "pression_mer",
 }
+
+
+# ---------------------------------------------------------------------------
+# Silver schema
+# ---------------------------------------------------------------------------
+
+ALL_SOURCE_COLUMNS: set[str] = set(COLUMNS_MAPPING.keys())
+
+# All source columns are used (1:1 mapping to silver output).
+USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS
+
+
+class SilverSchema(DataFrameModel):
+    """Silver output contract for Météo France climatologie."""
+
+    id_station: Annotated[str, Column(nullable=False)]
+    date_heure: Annotated[
+        datetime,
+        Column(dtype=pl.Datetime("us", "UTC"), nullable=False),
+    ]
+    rayonnement_global: float
+    duree_insolation: float
+    nebulosite: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=9)]
+    vitesse_vent: Annotated[float, Column(ge=0)]
+    direction_vent: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=360)]
+    rafale_max: float
+    temperature: float
+    temperature_max: float
+    temperature_min: float
+    point_de_rosee: float
+    humidite: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=100)]
+    precipitations: Annotated[float, Column(ge=0)]
+    pression_station: float
+    pression_mer: float
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +190,8 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Transformed DataFrame with 16 columns ready for the silver layer.
     """
+    validate_source_columns(df, ALL_SOURCE_COLUMNS, "meteo_france_climatologie")
+
     logger.debug("Starting silver transform", input_rows=len(df), input_columns=len(df.columns))
 
     # Select and rename columns
@@ -183,4 +224,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         output_columns=df.columns,
     )
 
+    SilverSchema.validate(df)
     return df
+
+
+# ---------------------------------------------------------------------------
+# Transform spec (collected by registry)
+# ---------------------------------------------------------------------------
+
+SPEC = DatasetTransformSpec(
+    name="meteo_france_climatologie",
+    bronze_transform=transform_bronze,
+    silver_transform=transform_silver,
+    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    silver_schema=SilverSchema,
+)

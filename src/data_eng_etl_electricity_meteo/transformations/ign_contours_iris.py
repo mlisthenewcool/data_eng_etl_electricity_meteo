@@ -2,15 +2,70 @@
 
 import shutil
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Annotated
 
 import duckdb
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform.ign_contours_iris")
+
+
+@contextmanager
+def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
+    """Open a DuckDB in-memory connection with the spatial extension loaded.
+
+    On Airflow the extension is pre-installed in the Docker image, so ``INSTALL`` is
+    skipped to avoid unnecessary network/disk checks.
+    """
+    with duckdb.connect(":memory:") as conn:
+        if not settings.is_running_on_airflow:
+            conn.execute("INSTALL spatial;")
+        conn.execute("LOAD spatial;")
+        conn.execute("SET threads = 1")
+        conn.execute("SET memory_limit = '1GB'")
+        yield conn
+
+
+# ---------------------------------------------------------------------------
+# Silver schema
+# ---------------------------------------------------------------------------
+
+ALL_SOURCE_COLUMNS: set[str] = {
+    "cleabs",
+    "code_insee",
+    "code_iris",
+    "geom_wkb",
+    "iris",
+    "nom_commune",
+    "nom_iris",
+    "type_iris",
+}
+
+# cleabs (internal IGN id) and iris (redundant with code_iris) are not used.
+USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS - {"cleabs", "iris"}
+
+
+class SilverSchema(DataFrameModel):
+    """Silver output contract for IGN contours IRIS."""
+
+    code_iris: Annotated[str, Column(nullable=False, unique=True)]
+    nom_iris: str
+    code_insee: str
+    nom_commune: str
+    type_iris: Annotated[str, Column(isin=["H", "A", "D", "Z"])]
+    geom_wkb: Annotated[bytes, Column(dtype=pl.Binary(), nullable=False)]
+    # Metropolitan France only (overseas territories excluded at source level)
+    centroid_lat: Annotated[float, Column(nullable=False, ge=41.0, le=52.0)]
+    centroid_lon: Annotated[float, Column(nullable=False, ge=-6.0, le=10.0)]
 
 
 # ---------------------------------------------------------------------------
@@ -57,16 +112,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
         shutil.copy2(landing_path, tmp_gpkg)
         logger.debug("Copied GeoPackage to temp file", tmp_path=tmp_gpkg)
 
-        with duckdb.connect(":memory:") as conn:
-            # INSTALL is idempotent (fast cache check if already present).
-            # On Airflow the extension is pre-installed in the Docker image.
-            if not settings.is_running_on_airflow:
-                conn.execute("INSTALL spatial;")
-
-            conn.execute("LOAD spatial;")
-            conn.execute("SET threads = 1")
-            conn.execute("SET memory_limit = '1GB'")
-
+        with _duckdb_spatial_conn() as conn:
             # noinspection SqlResolve
             query = """
         SELECT\
@@ -112,18 +158,10 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     duckdb.Error
         On DuckDB spatial query failure (missing extension, etc.).
     """
+    validate_source_columns(df, ALL_SOURCE_COLUMNS, "ign_contours_iris")
+
     # Use DuckDB for spatial operations on the WKB geometry
-    with duckdb.connect(":memory:") as conn:
-        # INSTALL is idempotent (fast cache check if already present).
-        # On Airflow the extension is pre-installed in the Docker image.
-        if not settings.is_running_on_airflow:
-            conn.execute("INSTALL spatial;")
-
-        conn.execute("LOAD spatial;")
-        conn.execute("SET threads = 1")
-        conn.execute("SET memory_limit = '1GB'")
-
-        # Register the pre-processed DataFrame so DuckDB can query it directly
+    with _duckdb_spatial_conn() as conn:
         conn.register("bronze_data", df)
 
         # Compute centroids and transform to WGS84.
@@ -166,4 +204,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         result = conn.execute(query).pl()
 
     logger.debug("Silver transformation completed", row_count=len(result), columns=result.columns)
+    SilverSchema.validate(result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Transform spec (collected by registry)
+# ---------------------------------------------------------------------------
+
+SPEC = DatasetTransformSpec(
+    name="ign_contours_iris",
+    bronze_transform=transform_bronze,
+    silver_transform=transform_silver,
+    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    silver_schema=SilverSchema,
+)

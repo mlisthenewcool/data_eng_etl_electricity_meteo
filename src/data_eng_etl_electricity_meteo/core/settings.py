@@ -164,6 +164,32 @@ class Settings(BaseSettings):
         return self._ROOT_DIR / "postgres"
 
     # ---------------------------------------------------------------------------
+    # dbt config
+    # ---------------------------------------------------------------------------
+    dbt_target: str = Field(
+        default="dev",
+        description="dbt profile target name (override to 'docker' in containers)",
+    )
+
+    @computed_field
+    @cached_property
+    def dbt_project_dir(self) -> DirectoryPath:
+        """Dbt project directory (computed from root_dir)."""
+        return self._ROOT_DIR / "dbt"
+
+    @computed_field
+    @cached_property
+    def dbt_log_path(self) -> Path:
+        """Dbt log output directory."""
+        return self.dbt_project_dir / "logs"
+
+    @computed_field
+    @cached_property
+    def dbt_target_path(self) -> Path:
+        """Dbt target (compiled artifacts) directory."""
+        return self.dbt_project_dir / "target"
+
+    # ---------------------------------------------------------------------------
     # Download Settings
     # ---------------------------------------------------------------------------
     download_chunk_size: int = Field(

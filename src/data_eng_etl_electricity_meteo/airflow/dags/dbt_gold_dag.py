@@ -11,7 +11,6 @@ Pipeline position::
 
 import subprocess
 from datetime import timedelta
-from pathlib import Path
 
 import orjson
 from airflow.sdk import AssetAll, dag, task
@@ -19,27 +18,21 @@ from airflow.sdk import AssetAll, dag, task
 from data_eng_etl_electricity_meteo.airflow.assets import get_gold_pg_asset, get_silver_pg_asset
 from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.core.settings import settings
 
 logger = get_logger("dag.dbt_gold")
 
-DBT_PROJECT_DIR = Path("/opt/airflow/dbt")
-DBT_PROFILES_DIR = Path("/opt/airflow/dbt")
-DBT_TARGET = "docker"
-# dbt project dir is mounted read-only; redirect writable artifacts elsewhere
-DBT_LOG_PATH = Path("/tmp/dbt/logs")
-DBT_TARGET_PATH = Path("/tmp/dbt/target")
-
 _DBT_COMMON_ARGS = [
     "--project-dir",
-    str(DBT_PROJECT_DIR),
+    str(settings.dbt_project_dir),
     "--profiles-dir",
-    str(DBT_PROFILES_DIR),
+    str(settings.dbt_project_dir),
     "--target",
-    DBT_TARGET,
+    settings.dbt_target,
     "--log-path",
-    str(DBT_LOG_PATH),
+    str(settings.dbt_log_path),
     "--target-path",
-    str(DBT_TARGET_PATH),
+    str(settings.dbt_target_path),
     "--log-format",
     "json",
 ]

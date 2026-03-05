@@ -166,7 +166,14 @@ def download_to_file(
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             downloaded_bytes = 0
-            content_length = int(response.headers.get("content-length", 0))
+            try:
+                content_length = int(response.headers.get("content-length", 0))
+            except ValueError:
+                logger.warning(
+                    "Invalid Content-Length header",
+                    header=response.headers.get("content-length"),
+                )
+                content_length = 0
 
             hasher = FileHasher()
 

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Protocol
 
-from data_eng_etl_electricity_meteo.core.enums import MedallionLayer, PipelineStage
+from data_eng_etl_electricity_meteo.core.enums import PipelineStage
 
 
 class _LogMethod(Protocol):
@@ -120,20 +120,26 @@ class DatasetTypeError(DataCatalogError):
 
 
 class SchemaValidationError(BaseProjectException):
-    """Raised when DataFrame columns don't match the Postgres table schema."""
+    """Schema mismatch (columns, types, or value constraints)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("Schema validation failed.")
+
+
+class SourceSchemaDriftError(BaseProjectException):
+    """Source API columns changed (added or removed)."""
 
     def __init__(
         self,
-        table: str,
-        extra_columns: list[str] | None = None,
-        missing_columns: list[str] | None = None,
-        type_mismatches: list[str] | None = None,
+        dataset_name: str,
+        added: list[str],
+        removed: list[str],
     ) -> None:
-        self.table = table
-        self.extra_columns = extra_columns or []
-        self.missing_columns = missing_columns or []
-        self.type_mismatches = type_mismatches or []
-        super().__init__("Schema mismatch between Parquet and Postgres.")
+        self.dataset_name = dataset_name
+        self.added = added
+        self.removed = removed
+        super().__init__("Source schema drift detected.")
 
 
 # ---------------------------------------------------------------------------
@@ -162,12 +168,11 @@ class AirflowContextError(BaseProjectException):
 
 
 class TransformNotFoundError(BaseProjectException):
-    """Raised when no transformation is registered for a dataset/layer pair."""
+    """Raised when no transformation spec is registered for a dataset."""
 
-    def __init__(self, dataset_name: str, layer: MedallionLayer) -> None:
+    def __init__(self, dataset_name: str) -> None:
         self.dataset_name = dataset_name
-        self.layer = layer
-        super().__init__("Transform not found for dataset.")
+        super().__init__("Transform spec not found for dataset.")
 
 
 class TransformValidationError(BaseProjectException):
@@ -223,9 +228,10 @@ class PipelineStageError(BaseProjectException):
         if cause is None:
             log_method(str(self), **self.to_dict())
         elif isinstance(cause, BaseProjectException):
+            cause_data = {f"cause_{k}": v for k, v in cause.to_dict().items()}
             log_method(
                 str(self),
-                **self.to_dict() | cause.to_dict(),
+                **self.to_dict() | cause_data,
                 cause_type=type(cause).__qualname__,
             )
         else:
@@ -398,7 +404,7 @@ if __name__ == "__main__":
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.BRONZE)
+            raise TransformNotFoundError(dataset_name=_DATASET)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise BronzeStageError() from err
     except BronzeStageError as error:
@@ -433,7 +439,7 @@ if __name__ == "__main__":
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.SILVER)
+            raise TransformNotFoundError(dataset_name=_DATASET)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise SilverStageError() from err
     except SilverStageError as error:

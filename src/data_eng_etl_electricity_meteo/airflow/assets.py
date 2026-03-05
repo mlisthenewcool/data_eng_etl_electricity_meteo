@@ -19,9 +19,14 @@ from functools import cache
 
 from airflow.sdk import Asset
 
-from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
+
+# Asset group constants — these describe storage targets, not data layers
+# (intentionally not in MedallionLayer which is a data-layer concept).
+SILVER_FILE_GROUP = "silver"
+SILVER_PG_GROUP = "silver_pg"
+GOLD_PG_GROUP = "gold_pg"
 
 # TODO: add meaningful extras to Assets or remove them ?
 
@@ -48,9 +53,9 @@ def get_silver_file_asset(dataset_name: str) -> Asset:
     uri = resolver.silver_current_path.as_uri()
 
     return Asset(
-        name=f"{dataset_name}__{MedallionLayer.SILVER}",
+        name=f"{dataset_name}__{SILVER_FILE_GROUP}",
         uri=uri,
-        group=MedallionLayer.SILVER,
+        group=SILVER_FILE_GROUP,
         extra={"dataset_name": dataset_name},
     )
 
@@ -82,9 +87,9 @@ def get_silver_pg_asset(dataset_name: str) -> Asset:
         f"/{settings.postgres_db_name}/silver/{dataset_name}"
     )
     return Asset(
-        name=f"{dataset_name}__silver_pg",
+        name=f"{dataset_name}__{SILVER_PG_GROUP}",
         uri=uri,
-        group="silver_pg",
+        group=SILVER_PG_GROUP,
         extra={"dataset_name": dataset_name},
     )
 
@@ -111,8 +116,8 @@ def get_gold_pg_asset(dataset_name: str) -> Asset:
         f"/{settings.postgres_db_name}/gold/{dataset_name}"
     )
     return Asset(
-        name=f"{dataset_name}__gold_pg",
+        name=f"{dataset_name}__{GOLD_PG_GROUP}",
         uri=uri,
-        group="gold_pg",
+        group=GOLD_PG_GROUP,
         extra={"dataset_name": dataset_name},
     )
