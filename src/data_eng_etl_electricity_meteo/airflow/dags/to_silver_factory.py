@@ -226,7 +226,7 @@ def _generate_all_dags() -> dict[str, DAG]:
         logger.info("to_silver DAG created", dataset=dataset.name)
 
     total = len(catalog.get_remote_datasets())
-    logger.info("to_silver factory complete", created=len(pipelines), total=total)
+    logger.info("to_silver factory complete", created_count=len(pipelines), total_count=total)
 
     return pipelines
 

@@ -182,7 +182,7 @@ def _generate_all_dags() -> dict[str, DAG]:
         logger.info("to_gold DAG created", dataset=dataset.name)
 
     total = len(catalog.get_gold_datasets())
-    logger.info("to_gold factory complete", created=len(dags), total=total)
+    logger.info("to_gold factory complete", created_count=len(dags), total_count=total)
 
     return dags
 

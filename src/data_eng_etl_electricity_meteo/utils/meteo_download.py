@@ -15,16 +15,23 @@ single Parquet via lazy scanning.
 
 import re
 import shutil
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import polars as pl
+from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.exceptions import DownloadStageError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
+from data_eng_etl_electricity_meteo.utils.progress import (
+    BatchProgressFactory,
+    DownloadProgressReporter,
+)
 
 logger = get_logger("download.meteo_climatologie")
 
@@ -258,9 +265,14 @@ def _download_department(
             df = pl.read_parquet(tmp_path, columns=_LANDING_COLUMNS)
             # Cast to Utf8 for uniform schema across departments
             df = df.cast({c: pl.Utf8 for c in df.columns})
-            logger.info("Downloaded Parquet (Hydra)", department=dept, rows_count=len(df))
-        except (httpx.HTTPError, pl.exceptions.PolarsError, OSError):
-            logger.warning("Parquet download failed, falling back to CSV.gz", department=dept)
+            logger.debug("Downloaded Parquet (Hydra)", department=dept, rows_count=len(df))
+        except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
+            logger.warning(
+                "Parquet download failed, falling back to CSV.gz",
+                department=dept,
+                error=str(err),
+                error_type=type(err).__qualname__,
+            )
             df = None
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -272,9 +284,15 @@ def _download_department(
             _stream_to_file(client, csv_url, tmp_path)
             # Column projection + infer_schema=False → 16 Utf8 columns
             df = pl.read_csv(tmp_path, separator=";", infer_schema=False, columns=_LANDING_COLUMNS)
-            logger.info("Downloaded CSV.gz", department=dept, rows_count=len(df))
-        except httpx.HTTPError:
-            logger.warning("Failed to download department", department=dept, url=csv_url)
+            logger.debug("Downloaded CSV.gz", department=dept, rows_count=len(df))
+        except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
+            logger.warning(
+                "Failed to download department",
+                department=dept,
+                url=csv_url,
+                error=str(err),
+                error_type=type(err).__qualname__,
+            )
             return 0
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -285,12 +303,98 @@ def _download_department(
 
 
 # --------------------------------------------------------------------------------------
+# Parallel download orchestration
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _BatchResult:
+    """Aggregated result of the parallel department download."""
+
+    dept_count: int
+    failed_count: int
+    total_rows: int
+
+
+def _download_all_departments(
+    client: httpx.Client,
+    resources: dict[str, dict[str, str | None]],
+    tmp_dir: Path,
+    progress: BatchProgressFactory | None = None,
+) -> _BatchResult:
+    """Download all departments in parallel with progress tracking.
+
+    Parameters
+    ----------
+    client
+        Thread-safe HTTP client with shared connection pool.
+    resources
+        Mapping ``dept → resource dict`` with download URLs.
+    tmp_dir
+        Temporary directory for per-department Parquet files.
+    progress
+        Factory called with ``total_items`` that returns a progress reporter.
+        Pass ``None`` (default) to use the built-in tqdm progress bar.
+
+    Returns
+    -------
+    _BatchResult
+        Aggregated counts of successful, failed, and total rows.
+    """
+    dept_count = 0
+    failed_count = 0
+    total_rows = 0
+
+    with ThreadPoolExecutor(max_workers=_DOWNLOAD_MAX_WORKERS) as pool:
+        futures = {
+            pool.submit(_download_department, client, resource, tmp_dir): resource
+            for resource in resources.values()
+        }
+
+        reporter: DownloadProgressReporter = (
+            progress(len(futures))
+            if progress is not None
+            else tqdm(
+                total=len(futures),
+                unit="dept",
+                desc="Downloading departments",
+                file=sys.stderr,
+                leave=False,
+            )
+        )
+
+        try:
+            for future in as_completed(futures):
+                resource = futures[future]
+                try:
+                    rows = future.result()
+                except (pl.exceptions.PolarsError, OSError):
+                    logger.exception(
+                        "Department download failed unexpectedly",
+                        department=resource.get("dept"),
+                    )
+                    rows = 0
+                if rows > 0:
+                    dept_count += 1
+                    total_rows += rows
+                else:
+                    failed_count += 1
+                reporter.update(1)
+        finally:
+            reporter.close()
+
+    return _BatchResult(dept_count, failed_count, total_rows)
+
+
+# --------------------------------------------------------------------------------------
 # Main entry point
 # --------------------------------------------------------------------------------------
 
 
 def download_climatologie(
     dest_dir: Path,
+    progress: BatchProgressFactory | None = None,
+    *,
     year_start: int | None = None,
     year_end: int | None = None,
 ) -> Path:
@@ -305,6 +409,9 @@ def download_climatologie(
     ----------
     dest_dir
         Landing directory to write the merged parquet file.
+    progress
+        Factory called with ``total_items`` that returns a progress reporter.
+        Pass ``None`` (default) to use the built-in tqdm progress bar.
     year_start
         Start year for the 2-year window. Defaults to ``current_year - 1``.
     year_end
@@ -339,9 +446,6 @@ def download_climatologie(
         read=settings.download_timeout_sock_read,
     )
 
-    dept_count = 0
-    total_rows = 0
-
     # -- Build resource list (fallback + API discovery) --------------------------------
 
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
@@ -361,31 +465,11 @@ def download_climatologie(
             logger.warning("API discovery failed, using hardcoded CSV URLs only", error=str(err))
 
         # httpx.Client is thread-safe — parallel downloads with shared connection pool
-
-        # -- Parallel download of all departments --------------------------------------
-
-        with ThreadPoolExecutor(max_workers=_DOWNLOAD_MAX_WORKERS) as pool:
-            futures = {
-                pool.submit(_download_department, client, resource, tmp_dir): resource
-                for resource in resources_by_dept.values()
-            }
-            for future in as_completed(futures):
-                resource = futures[future]
-                try:
-                    rows = future.result()
-                except (pl.exceptions.PolarsError, OSError):
-                    logger.exception(
-                        "Department download failed unexpectedly",
-                        department=resource.get("dept"),
-                    )
-                    continue
-                if rows > 0:
-                    dept_count += 1
-                    total_rows += rows
+        result = _download_all_departments(client, resources_by_dept, tmp_dir, progress)
 
     # -- Merge temporary parquets into final file --------------------------------------
 
-    if dept_count == 0:
+    if result.dept_count == 0:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise DownloadStageError("No climatologie data downloaded from any department")
 
@@ -397,6 +481,12 @@ def download_climatologie(
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    logger.info("Merged climatologie data", departments_count=dept_count, rows_count=total_rows)
+    log_kwargs: dict[str, object] = {
+        "departments_count": result.dept_count,
+        "rows_count": result.total_rows,
+    }
+    if result.failed_count > 0:
+        log_kwargs["failed_count"] = result.failed_count
+    logger.info("Merged climatologie data", **log_kwargs)
 
     return merged_path

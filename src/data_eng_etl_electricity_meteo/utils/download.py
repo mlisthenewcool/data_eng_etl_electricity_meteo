@@ -122,7 +122,7 @@ def download_to_file(
         Fallback filename if none could be extracted from the response.
     progress
         Factory called with ``total_bytes`` (``0`` if unknown) that returns a
-        :class:`DownloadProgressReporter`.
+        `DownloadProgressReporter`.
         Pass ``None`` (default) to use the built-in tqdm progress bar.
 
     Returns
@@ -220,6 +220,6 @@ def download_to_file(
             file_hash = hasher.hexdigest
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)
 
-            logger.info("Download completed", filename=filename, size_mib=size_mib)
+            logger.info("Download completed", filename=filename, file_size_mib=size_mib)
 
             return HttpDownloadInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

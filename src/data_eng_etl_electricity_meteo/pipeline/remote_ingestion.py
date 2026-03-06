@@ -43,6 +43,7 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.file_manager import RemoteFileManager
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 from data_eng_etl_electricity_meteo.pipeline.progress import (
+    AirflowBatchProgress,
     AirflowDownloadProgress,
     AirflowExtractProgress,
 )
@@ -60,6 +61,7 @@ from data_eng_etl_electricity_meteo.transformations.registry import get_transfor
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo, download_to_file
 from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+from data_eng_etl_electricity_meteo.utils.progress import BatchProgressFactory
 from data_eng_etl_electricity_meteo.utils.remote_metadata import (
     RemoteFileMetadata,
     get_remote_file_metadata,
@@ -67,11 +69,11 @@ from data_eng_etl_electricity_meteo.utils.remote_metadata import (
 
 logger = get_logger("pipeline")
 
-# Callable that takes a landing directory and returns the path to
-# the downloaded file. Used to inject custom download logic (e.g.
-# multi-file merge for climatologie) instead of the standard
+# Callable that takes a landing directory and an optional progress factory,
+# and returns the path to the downloaded file. Used to inject custom download
+# logic (e.g. multi-file merge for climatologie) instead of the standard
 # single-URL download.
-CustomDownloadFunc = Callable[[Path], Path]
+CustomDownloadFunc = Callable[[Path, BatchProgressFactory | None], Path]
 
 
 @dataclass
@@ -227,15 +229,19 @@ class RemoteIngestionPipeline:
 
         logger.info("Running custom download", version=version)
 
+        progress: BatchProgressFactory | None = (
+            AirflowBatchProgress if settings.is_running_on_airflow else None
+        )
+
         try:
-            landing_path = self.custom_download(self.resolver.landing_dir)
+            landing_path = self.custom_download(self.resolver.landing_dir, progress)
         except Exception as err:
             raise DownloadStageError("Custom download failed") from err
 
         file_hash = FileHasher.hash_file(landing_path)
         size_mib = round(landing_path.stat().st_size / (1024 * 1024), 2)
 
-        logger.info("Custom download complete", size_mib=size_mib)
+        logger.info("Custom download complete", file_size_mib=size_mib)
 
         return PipelineContext(
             version=version,

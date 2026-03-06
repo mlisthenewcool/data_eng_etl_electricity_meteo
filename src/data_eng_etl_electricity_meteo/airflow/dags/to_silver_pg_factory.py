@@ -131,7 +131,7 @@ def _generate_all_dags() -> dict[str, DAG]:
         logger.info("to_silver_pg DAG created", dataset=dataset.name)
 
     total = len(catalog.get_remote_datasets())
-    logger.info("to_silver_pg factory complete", created=len(dags), total=total)
+    logger.info("to_silver_pg factory complete", created_count=len(dags), total_count=total)
 
     return dags
 

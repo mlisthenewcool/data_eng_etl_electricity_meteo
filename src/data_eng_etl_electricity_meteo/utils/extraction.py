@@ -196,6 +196,6 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.info("Extraction completed", target=target_filename, size_mib=size_mib)
+            logger.info("Extraction completed", target=target_filename, file_size_mib=size_mib)
 
             return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)

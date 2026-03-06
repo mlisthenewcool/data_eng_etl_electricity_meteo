@@ -1,14 +1,16 @@
-"""Airflow-aware progress reporters for download and extraction stages.
+"""Airflow-aware progress reporters for download, extraction, and batch stages.
 
 Used by ``RemoteIngestionPipeline`` to inject structured log progress into Airflow task
 logs instead of tqdm bars.
 
 Pass these classes (not instances) as the ``progress`` factory argument of
-:func:`~data_eng_etl_electricity_meteo.utils.download.download_to_file` and
-:func:`~data_eng_etl_electricity_meteo.utils.extraction.extract_7z`:
+:func:`~data_eng_etl_electricity_meteo.utils.download.download_to_file`,
+:func:`~data_eng_etl_electricity_meteo.utils.extraction.extract_7z`, and custom download
+callables:
 
     download_to_file(..., progress=AirflowDownloadProgress)
     extract_7z(..., progress=AirflowExtractProgress)
+    custom_download(dest_dir, progress=AirflowBatchProgress)
 """
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
@@ -51,6 +53,30 @@ class AirflowDownloadProgress:
 
     def close(self) -> None:
         """No-op: required by ``DownloadProgressReporter`` protocol."""
+
+
+class AirflowBatchProgress:
+    """Logs item-based batch progress via structlog.
+
+    Used by custom download functions (e.g. multi-department meteorology download) to
+    report progress under Airflow, where tqdm bars are not visible.
+    """
+
+    def __init__(self, total_items: int) -> None:
+        self._tracker = ThrottledProgressTracker(total_items)
+
+    def update(self, n: int) -> None:
+        """Accumulate *n* completed items and log if threshold crossed."""
+        if self._tracker.accumulate(n):
+            logger.info(
+                "Batch progress",
+                completed=self._tracker.processed,
+                total=self._tracker.total,
+                progress_pct=self._tracker.pct,
+            )
+
+    def close(self) -> None:
+        """No-op: required by progress reporter protocol."""
 
 
 class AirflowExtractProgress(BaseExtractCallback):

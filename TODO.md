@@ -109,6 +109,9 @@
 
 ## Terminé
 
+- [x] [Pipeline] _(2026-03-06)_ Ajouter le suivi de progression batch (Airflow)
+  pour les téléchargements custom, uniformiser les champs de log (`{subject}_count`,
+  `file_size_mib`) et améliorer le logging d'erreurs meteo_download
 - [x] [Données] _(2026-03-05)_ Améliorer les transformations : colonnes attendues
   explicites (`EXPECTED_SOURCE_COLUMNS`), `DataFrameModel` avec schémas typés,
   DuckDB justifié pour les centroids IGN (ST_Transform), calculs géographiques
