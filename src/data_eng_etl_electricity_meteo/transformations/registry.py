@@ -24,9 +24,11 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 # Re-export for convenience (single import point for consumers).
 __all__ = ["DatasetTransformSpec", "REGISTRY", "get_transform_spec"]
 
-# ---------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------
 # Registry
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 REGISTRY: dict[str, DatasetTransformSpec] = {
     spec.name: spec
@@ -48,6 +50,11 @@ def get_transform_spec(dataset_name: str) -> DatasetTransformSpec:
     ----------
     dataset_name
         Dataset identifier (must match a key in ``REGISTRY``).
+
+    Returns
+    -------
+    DatasetTransformSpec
+        The registered transform spec.
 
     Raises
     ------

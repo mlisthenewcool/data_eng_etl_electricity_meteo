@@ -1,22 +1,9 @@
-"""DAG factory for loading silver parquet files into Postgres.
+"""DAG factory for silver Postgres loading (silver file → silver PG).
 
-Generates one Airflow DAG per remote dataset declared in the data catalog.
-Each DAG is triggered automatically when the upstream silver file Asset is updated
-(i.e. when the corresponding ingestion DAG produces new data).
-
-Pipeline position::
-
-    [*_ingest]  →  silver file Asset  →  [*_load_pg]  →  silver PG Asset  →  [dbt]
-       ETL                                  LOAD                               ELT
-
-Each generated DAG:
-- **Inlet** : silver file Asset (``file://`` URI to ``current.parquet``)
-- **Task**  : load silver parquet → Postgres ``silver.{dataset}`` table
-- **Outlet**: silver PG Asset (``postgres://project/silver.{dataset}``)
-
-The load task uses an Airflow ``PostgresHook`` (connection id ``project_postgres``) so
-credentials come from the Airflow connection store, not from
-``open_standalone_connection()``.
+Generates one ``{dataset}_to_silver_pg`` DAG per remote dataset in the data catalog.
+Each DAG is triggered when its upstream ``to_silver`` DAG produces a new silver file
+Asset, and loads the parquet into Postgres ``silver.{dataset}`` via ``PostgresHook``
+(connection id ``project_postgres``).
 """
 
 from collections.abc import Generator
@@ -33,14 +20,25 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.loaders.pg_connection import open_airflow_hook_connection
 from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
 
-logger = get_logger("dag_factory.load_pg")
+logger = get_logger("dag.to_silver_pg")
+
+
+# --------------------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------------------
+
 
 TASK_LOAD = "load_silver_to_postgres"
 TASK_LOAD_TIMEOUT = timedelta(minutes=20)
 
 
+# --------------------------------------------------------------------------------------
+# DAG factory
+# --------------------------------------------------------------------------------------
+
+
 def _create_dag(
-    dataset_config: RemoteDatasetConfig,
+    dataset: RemoteDatasetConfig,
     silver_file_asset: Asset,
     silver_pg_asset: Asset,
 ) -> DAG:
@@ -48,7 +46,7 @@ def _create_dag(
 
     Parameters
     ----------
-    dataset_config
+    dataset
         Remote dataset configuration from the catalog.
     silver_file_asset
         Inlet: the silver ``file://`` Asset produced by the ingestion DAG.
@@ -62,7 +60,7 @@ def _create_dag(
     """
 
     @dag(
-        dag_id=f"{dataset_config.name}_load_pg",
+        dag_id=f"{dataset.name}_to_silver_pg",
         schedule=silver_file_asset,  # triggered by the ingestion DAG's outlet
         start_date=START_DATE,
         catchup=False,
@@ -87,7 +85,7 @@ def _create_dag(
 
             conn = open_airflow_hook_connection(PostgresHook("project_postgres"))
             try:
-                metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=conn)
+                metrics = load_silver_to_postgres(dataset=dataset, conn=conn)
             finally:
                 conn.close()
 
@@ -95,7 +93,7 @@ def _create_dag(
                 asset=silver_pg_asset,
                 extra={
                     "rows_loaded": metrics.rows_loaded,
-                    "strategy": metrics.strategy,
+                    "mode": metrics.mode,
                     "table": metrics.table,
                 },
             )
@@ -114,26 +112,29 @@ def _generate_all_dags() -> dict[str, DAG]:
         Mapping of dataset names to their load DAG objects.
     """
     try:
-        catalog = DataCatalog.load(settings.data_catalog_file_path)
+        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
     except InvalidCatalogError as e:
-        e.log(logger.exception)
+        e.log(logger.critical)
         return {}
 
     dags: dict[str, DAG] = {}
 
-    for dataset_config in catalog.get_remote_datasets():
+    for dataset in catalog.get_remote_datasets():
         try:
-            silver_file_asset = get_silver_file_asset(dataset_config.name)
-            silver_pg_asset = get_silver_pg_asset(dataset_config.name)
-            dags[dataset_config.name] = _create_dag(
-                dataset_config, silver_file_asset, silver_pg_asset
-            )
-            logger.info("Created load DAG", dag_id=f"{dataset_config.name}_load_pg")
+            silver_file_asset = get_silver_file_asset(dataset.name)
+            silver_pg_asset = get_silver_pg_asset(dataset.name)
         except ValueError:
-            logger.exception("Failed to create load DAG", dataset_name=dataset_config.name)
+            logger.exception("Invalid dataset configuration", dataset=dataset.name)
+            continue  # move to next dataset
+
+        dags[dataset.name] = _create_dag(dataset, silver_file_asset, silver_pg_asset)
+        logger.info("to_silver_pg DAG created", dataset=dataset.name)
+
+    total = len(catalog.get_remote_datasets())
+    logger.info("to_silver_pg factory complete", created=len(dags), total=total)
 
     return dags
 
 
-# Note: expose DAGs to Airflow
-_generate_all_dags()
+# Airflow discovers DAGs via @dag decorator; return value is intentionally unused.
+_ = _generate_all_dags()

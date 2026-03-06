@@ -14,9 +14,10 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 logger = get_logger("transform.meteo_france_stations")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Domain constants (measurement parameters)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 # Parameters relevant for solar energy production
 # Based on analysis in notebooks/03_meteo_france_info_stations.py
@@ -52,9 +53,10 @@ PARAMS_EOLIENS = [
 ]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver schema
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 ALL_SOURCE_COLUMNS: set[str] = {
     "bassin",
@@ -91,13 +93,13 @@ class SilverSchema(DataFrameModel):
     nb_parametres: Annotated[int, Column(dtype=pl.UInt32())]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
-    """Bronze transformation for Meteo France stations.
+    """Bronze transformation for Météo France stations.
 
     Simply reads JSON and converts to Parquet format.
 
@@ -118,17 +120,17 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     OSError
         If *landing_path* does not exist or is not readable.
     """
-    logger.debug("Reading JSON from landing", landing_path=landing_path)
+    logger.debug("Reading JSON from landing")
     return pl.read_json(landing_path).lazy()
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
-    """Silver transformation for Meteo France stations.
+    """Silver transformation for Météo France stations.
 
     Flattens nested structures and enriches with renewable energy flags.
 
@@ -153,8 +155,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     logger.debug("Filtering active stations", total_stations=len(df))
 
-    # Filter to active stations only
-    # Note: date_fin is the snake_case version of the original dateFin column.
+    # date_fin is the snake_case version of the original dateFin column.
     # Nested struct fields (inside positions/parametres lists) keep their
     # original names — only top-level columns are renamed by prepare_silver.
     df_active = df.filter((pl.col("date_fin").is_null()) | (pl.col("date_fin") == ""))
@@ -180,7 +181,6 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("current_position").struct.field("altitude").alias("altitude"),
     )
 
-    # Filter parameters to active ones only and extract names
     df_with_params = df_with_position.with_columns(
         pl.col("parametres")
         .list.eval(
@@ -196,7 +196,6 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         .alias("params_actifs_noms"),
     )
 
-    # Create solar and wind capability flags
     df_with_flags = df_with_params.with_columns(
         pl.col("params_actifs_noms")
         .list.eval(pl.element().is_in(PARAMS_SOLAIRES))
@@ -215,12 +214,10 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("params_actifs_noms").list.len().alias("nb_parametres"),
     )
 
-    # Convert date_debut to proper date type
     df_final = df_with_flags.with_columns(
         pl.col("date_debut").str.slice(0, 10).str.to_date("%Y-%m-%d"),
     )
 
-    # Select final columns
     result = df_final.select(
         pl.col("id"),
         pl.col("nom"),
@@ -239,18 +236,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     logger.debug(
         "Silver transformation completed",
-        n_stations=len(result),
-        n_mesure_solaire=result["mesure_solaire"].sum(),
-        n_mesure_eolien=result["mesure_eolien"].sum(),
+        rows_count=len(result),
+        solaire_count=result["mesure_solaire"].sum(),
+        eolien_count=result["mesure_eolien"].sum(),
     )
 
     SilverSchema.validate(result)
     return result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transform spec (collected by registry)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 SPEC = DatasetTransformSpec(
     name="meteo_france_stations",

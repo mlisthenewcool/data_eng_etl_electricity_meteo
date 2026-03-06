@@ -1,24 +1,7 @@
-# à ajouter ?
-#quality: "..."
-#schema: "..."
-#tags: "..."
-#owner: "..."
-#source:
-#  license: "..."
-#  documentation_url: "..."
-#ingestion:
-#  retention_days: "..."
-#  retention_versions: ".."
-#  filters:
-#    # "&refine.nature=Données+consolidées"
-#    lang: "fr"
-#    timezone: "Europe/Paris"
-#    refine.nature: "Données consolidées"
-
 datasets:
-  # ============================================================
+  # ------------------------------------------------------------------------------------
   # REMOTE DATASETS (Silver - from HTTP sources)
-  # ============================================================
+  # ------------------------------------------------------------------------------------
 
   ign_contours_iris:
     description: "La base de données de référence pour la diffusion infra-communale des résultats du recensement de la population par Iris, de précision décamétrique"
@@ -104,11 +87,11 @@ datasets:
     postgres:
       table: "fact_meteo_horaire"
 
-  # ============================================================
+  # ------------------------------------------------------------------------------------
   # DERIVED DATASETS (Gold - built from Silver sources)
-  # ============================================================
+  # ------------------------------------------------------------------------------------
 
-  installations_meteo:
+  installations_renouvelables_avec_stations_meteo:
     description: "Installations de production d'énergie renouvelable avec station météo la plus proche. Le lien géographique est assuré par la maille IRIS."
     source:
       depends_on:

@@ -21,9 +21,10 @@ logger = get_logger("transform.odre_eco2mix_tr")
 _NUMERIC_TEXT_COLUMNS = ["pompage", "stockage_batterie", "destockage_batterie"]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver schema
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 ALL_SOURCE_COLUMNS: set[str] = {
     "bioenergies",
@@ -95,9 +96,9 @@ class SilverSchema(DataFrameModel):
     tch_bioenergies: float
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
@@ -122,13 +123,13 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     OSError
         If *landing_path* does not exist or is not readable.
     """
-    logger.debug("Apply bronze transformations", landing_path=landing_path)
+    logger.debug("Apply bronze transformations")
     return pl.scan_parquet(landing_path)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
@@ -153,7 +154,8 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """
     validate_source_columns(df, ALL_SOURCE_COLUMNS, "odre_eco2mix_tr")
 
-    # Cast columns that contain non-numeric annotations to Int64
+    # -- Cast non-numeric text columns to Int64 ----------------------------------------
+
     for col in _NUMERIC_TEXT_COLUMNS:
         if col in df.columns:
             before_nulls = df[col].null_count()
@@ -162,21 +164,30 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
             if introduced > 0:
                 logger.warning("Cast introduced nulls", column=col, new_nulls=introduced)
 
+    # -- Deduplicate on composite key --------------------------------------------------
+
     df = deduplicate_on_composite_key(
         df,
         key_columns=["code_insee_region", "date_heure"],
         dataset_name="odre_eco2mix_tr",
     )
 
+    # -- Select, validate, return ------------------------------------------------------
+
     result = df.select(SilverSchema.polars_schema().names())
-    logger.debug("Silver transformation completed", row_count=len(result), columns=result.columns)
+    logger.debug(
+        "Silver transformation completed",
+        rows_count=len(result),
+        columns_count=len(result.columns),
+    )
     SilverSchema.validate(result)
     return result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transform spec (collected by registry)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 SPEC = DatasetTransformSpec(
     name="odre_eco2mix_tr",

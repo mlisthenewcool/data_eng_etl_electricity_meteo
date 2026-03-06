@@ -18,13 +18,12 @@ from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathReso
 logger = get_logger("file_manager")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Shared rotation / rollback helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _rotate(
-    dataset_name: str,
     current_path: Path,
     backup_path: Path,
     layer: MedallionLayer,
@@ -33,8 +32,6 @@ def _rotate(
 
     Parameters
     ----------
-    dataset_name
-        Dataset identifier (for log context).
     current_path
         Path to the current file.
     backup_path
@@ -50,23 +47,15 @@ def _rotate(
     if current_path.exists():
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current_path, backup_path)
-        logger.debug(
-            "Rotated files",
-            layer=layer,
-            dataset_name=dataset_name,
-            current=current_path,
-            backup=backup_path,
-        )
+        logger.debug("Rotated files", layer=layer)
     else:
         logger.warning(
             "Skipped rotation: no current file (expected on first run)",
             layer=layer,
-            dataset_name=dataset_name,
         )
 
 
 def _rollback(
-    dataset_name: str,
     current_path: Path,
     backup_path: Path,
     layer: MedallionLayer,
@@ -75,8 +64,6 @@ def _rollback(
 
     Parameters
     ----------
-    dataset_name
-        Dataset identifier (for log context).
     current_path
         Path to the current file.
     backup_path
@@ -98,24 +85,17 @@ def _rollback(
         logger.warning(
             "Cannot rollback: no backup exists",
             layer=layer,
-            dataset_name=dataset_name,
         )
         return False
 
     shutil.copy2(backup_path, current_path)
-    logger.debug(
-        "Rolled back to backup version",
-        layer=layer,
-        dataset_name=dataset_name,
-        backup=backup_path,
-        current=current_path,
-    )
+    logger.debug("Rolled back to backup version", layer=layer)
     return True
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Remote datasets (landing → bronze → silver)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -165,10 +145,7 @@ class RemoteFileManager:
 
             logger.debug(
                 "Updated bronze latest symlink",
-                dataset_name=self.resolver.dataset_name,
                 target_version=target_version,
-                symlink=latest_link,
-                target=relative_target,
             )
         except OSError:
             if temp_link.exists():
@@ -195,14 +172,13 @@ class RemoteFileManager:
         deleted = []
 
         for version_path in self.resolver.list_bronze_versions():
-            file_mtime = datetime.fromtimestamp(version_path.stat().st_mtime, tz=UTC)
+            file_mtime = datetime.fromtimestamp(timestamp=version_path.stat().st_mtime, tz=UTC)
 
             if file_mtime < cutoff_time:
                 version_path.unlink()
                 deleted.append(version_path)
                 logger.debug(
                     "Deleted old bronze version",
-                    dataset_name=self.resolver.dataset_name,
                     version=version_path.stem,
                     age_days=(now - file_mtime).days,
                 )
@@ -210,7 +186,6 @@ class RemoteFileManager:
         if deleted:
             logger.info(
                 "Bronze cleanup completed",
-                dataset_name=self.resolver.dataset_name,
                 deleted_count=len(deleted),
                 retention_days=retention_days,
             )
@@ -223,7 +198,6 @@ class RemoteFileManager:
         Call **before** writing new current. No-op if current doesn't exist.
         """
         _rotate(
-            self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
             MedallionLayer.SILVER,
@@ -238,7 +212,6 @@ class RemoteFileManager:
             ``True`` if rollback succeeded, ``False`` if no backup exists.
         """
         return _rollback(
-            self.resolver.dataset_name,
             self.resolver.silver_current_path,
             self.resolver.silver_backup_path,
             MedallionLayer.SILVER,

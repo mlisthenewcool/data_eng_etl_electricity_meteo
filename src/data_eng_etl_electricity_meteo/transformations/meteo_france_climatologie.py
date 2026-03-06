@@ -23,9 +23,10 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 logger = get_logger("transform.meteo_france_climatologie")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze: column selection + typing
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 BRONZE_COLUMNS: dict[str, pl.DataType | type[pl.DataType]] = {
     "NUM_POSTE": pl.Utf8,
@@ -46,9 +47,11 @@ BRONZE_COLUMNS: dict[str, pl.DataType | type[pl.DataType]] = {
     "PMER": pl.Float64,
 }
 
-# ---------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------
 # Silver: column mapping (snake_case after prepare_silver) → target
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 COLUMNS_MAPPING: dict[str, str] = {
     "num_poste": "id_station",
@@ -70,9 +73,10 @@ COLUMNS_MAPPING: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver schema
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 ALL_SOURCE_COLUMNS: set[str] = set(COLUMNS_MAPPING.keys())
 
@@ -104,9 +108,9 @@ class SilverSchema(DataFrameModel):
     pression_mer: float
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
@@ -133,8 +137,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     columns = list(BRONZE_COLUMNS.keys())
     logger.debug(
         "Reading merged parquet from landing (lazy)",
-        landing_path=landing_path,
-        columns_selected=len(columns),
+        columns_count=len(columns),
     )
 
     # Read schema eagerly (no data loaded) to detect which columns are still strings
@@ -159,9 +162,9 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
@@ -192,15 +195,18 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """
     validate_source_columns(df, ALL_SOURCE_COLUMNS, "meteo_france_climatologie")
 
-    logger.debug("Starting silver transform", input_rows=len(df), input_columns=len(df.columns))
+    logger.debug("Starting silver transform", rows_input=len(df), columns_count=len(df.columns))
 
-    # Select and rename columns
+    # -- Select and rename columns -----------------------------------------------------
+
     source_cols = list(COLUMNS_MAPPING.keys())
     target_cols = list(COLUMNS_MAPPING.values())
 
     df = df.select(source_cols).rename(COLUMNS_MAPPING)
 
-    # Parse date: "2026022815" → datetime(2026, 2, 28, 15, 0, 0, tzinfo=UTC)
+    # -- Parse date --------------------------------------------------------------------
+
+    # "2026022815" → datetime(2026, 2, 28, 15, 0, 0, tzinfo=UTC)
     # Polars requires both %H and %M, so we append "00" for minutes
     df = df.with_columns(
         (pl.col("date_heure") + "00")
@@ -208,29 +214,32 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         .alias("date_heure"),
     )
 
-    # Narrowing casts for integer-valued columns (values are whole numbers in source)
+    # -- Narrowing casts to Int16 ------------------------------------------------------
+
     df = df.with_columns(
         pl.col("nebulosite").cast(pl.Int16, strict=True),
         pl.col("direction_vent").cast(pl.Int16, strict=True),
         pl.col("humidite").cast(pl.Int16, strict=True),
     )
 
-    # Reorder columns to match the Postgres table schema
+    # -- Reorder columns to match Postgres table schema --------------------------------
+
     df = df.select(target_cols)
 
     logger.debug(
         "Silver transformation completed",
-        output_rows=len(df),
-        output_columns=df.columns,
+        rows_output=len(df),
+        columns_count=len(df.columns),
     )
 
     SilverSchema.validate(df)
     return df
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transform spec (collected by registry)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 SPEC = DatasetTransformSpec(
     name="meteo_france_climatologie",

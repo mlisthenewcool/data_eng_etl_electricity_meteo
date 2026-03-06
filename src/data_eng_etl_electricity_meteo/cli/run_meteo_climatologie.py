@@ -29,14 +29,14 @@ app = typer.Typer(no_args_is_help=True)
 def main(
     year_start: int | None = typer.Option(
         None,
-        min=1950,
-        max=2100,
+        min=2015,
+        max=2026,
         help="Start year for climatologie data (default: current year - 1).",
     ),
     year_end: int | None = typer.Option(
         None,
-        min=1950,
-        max=2100,
+        min=2015,
+        max=2026,
         help="End year for climatologie data (default: current year).",
     ),
     skip_postgres: bool = typer.Option(

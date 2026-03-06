@@ -26,11 +26,11 @@ def to_snake_case(name: str) -> str:
     str
         snake_case version of *name*.
     """
-    # Add underscore before uppercase letters preceded by lowercase/digit
+    # Separate camelCase boundaries (e.g. lastName → last_Name)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
-    # Handle acronyms (e.g. EPCICommune -> EPCI_Commune)
+    # Separate acronym boundaries (e.g. EPCICommune → EPCI_Commune)
     s = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", s)
-    # Lowercase and replace spaces/hyphens with underscores
+    # Normalize separators and casing
     return s.lower().replace(" ", "_").replace("-", "_")
 
 
@@ -119,9 +119,8 @@ def deduplicate_on_composite_key(
     if removed > 0:
         logger.info(
             "Deduplicated rows",
-            dataset_name=dataset_name,
-            removed=removed,
-            remaining=len(df),
+            rows_removed=removed,
+            rows_count=len(df),
             key_columns=key_columns,
         )
     return df
@@ -165,5 +164,9 @@ def prepare_silver(
         logger.warning("Dropping all-null columns from source", dropped_columns=null_cols)
         df = df.drop(null_cols)
 
-    logger.debug("Common silver pre-processing applied", dataset_name=dataset_name)
+    logger.debug(
+        "Silver pre-processing applied",
+        rows_count=len(df),
+        columns_count=len(df.columns),
+    )
     return df

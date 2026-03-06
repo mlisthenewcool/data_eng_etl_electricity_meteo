@@ -39,9 +39,9 @@ class BaseProjectException(Exception):
         log_method(str(self), **self.to_dict())
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Archive errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class ExtractionError(BaseProjectException):
@@ -74,9 +74,9 @@ class FileIntegrityError(ExtractionError):
         super().__init__("File integrity check failed.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Data catalog errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DataCatalogError(BaseProjectException):
@@ -114,9 +114,9 @@ class DatasetTypeError(DataCatalogError):
         super().__init__("Dataset has unexpected type.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Schema validation errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class SchemaValidationError(BaseProjectException):
@@ -142,9 +142,9 @@ class SourceSchemaDriftError(BaseProjectException):
         super().__init__("Source schema drift detected.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Airflow context errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class AirflowContextError(BaseProjectException):
@@ -162,9 +162,9 @@ class AirflowContextError(BaseProjectException):
         super().__init__("Invalid Airflow context.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transformation errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TransformNotFoundError(BaseProjectException):
@@ -184,9 +184,9 @@ class TransformValidationError(BaseProjectException):
         super().__init__("Transform validation failed.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Pipeline stage errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class PipelineStageError(BaseProjectException):
@@ -296,9 +296,9 @@ class GoldStageError(PipelineStageError):
         super().__init__(PipelineStage.GOLD, message, context or None)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Visual smoke test
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
@@ -318,9 +318,8 @@ if __name__ == "__main__":
     def _end() -> None:
         print("", file=sys.stderr)
 
-    # ---------------------------------------------------------------------------
-    # 1) DownloadStageError — httpx causes
-    # ---------------------------------------------------------------------------
+    # -- DownloadStageError — httpx causes ---------------------------------------------
+
     _section("DownloadStageError  <-  httpx.ConnectError")
     try:
         try:
@@ -359,9 +358,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 2) ExtractStageError — archive causes
-    # ---------------------------------------------------------------------------
+    # -- ExtractStageError — archive causes --------------------------------------------
+
     _section("ExtractStageError  <-  ArchiveNotFoundError")
     try:
         try:
@@ -398,9 +396,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 3) BronzeStageError — transform / duckdb / IO causes
-    # ---------------------------------------------------------------------------
+    # -- BronzeStageError — transform / duckdb / IO causes -----------------------------
+
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
@@ -433,9 +430,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 4) SilverStageError — transform / duckdb / IO causes
-    # ---------------------------------------------------------------------------
+    # -- SilverStageError — transform / duckdb / IO causes -----------------------------
+
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:
@@ -466,9 +462,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 5) New pattern — message + structured context
-    # ---------------------------------------------------------------------------
+    # -- New pattern — message + structured context ------------------------------------
+
     _section("PostgresLoadError  with message + context (no cause)")
     try:
         raise PostgresLoadError("SQL path escapes postgres directory", path="/etc/passwd")
@@ -478,7 +473,7 @@ if __name__ == "__main__":
 
     _section("ExtractStageError  with message + context (no cause)")
     try:
-        raise ExtractStageError("inner_file required for archive dataset", dataset=_DATASET)
+        raise ExtractStageError("inner_file required for archive dataset")
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()

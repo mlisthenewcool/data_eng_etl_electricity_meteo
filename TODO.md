@@ -57,6 +57,11 @@
 
 ## Plus tard
 
+- [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par
+  dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
+  `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
+  `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
+
 - [ ] [Airflow] Créer un DAG de maintenance (hebdomadaire) : nettoyage des fichiers
   bronze obsolètes (`cleanup_old_bronze_versions` existe, mais n'est appelé nulle
   part), validation de la cohérence état/disque (silver file existe ↔ métadonnées

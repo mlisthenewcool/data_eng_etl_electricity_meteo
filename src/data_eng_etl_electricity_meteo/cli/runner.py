@@ -3,10 +3,9 @@
 Encapsulates the sequential pipeline logic
 (download -> extract -> bronze -> silver -> Postgres) so that CLI wrappers remain thin.
 
-.. warning::
-
-    Do **not** raise ``SystemExit`` when running on Airflow.
-    Let Airflow handle exceptions.
+Warnings
+--------
+Do **not** raise ``SystemExit`` when running on Airflow. Let Airflow handle exceptions.
 """
 
 from datetime import UTC, datetime
@@ -50,10 +49,11 @@ def run_pipeline(
     """
     start_datetime = datetime.now(tz=UTC)
 
-    # -- Load catalog and dataset configuration --------------------------------
+    # -- Load catalog and dataset configuration ----------------------------------------
+
     try:
-        catalog = DataCatalog.load(settings.data_catalog_file_path)
-        dataset_config = catalog.get_remote_dataset(dataset_name)
+        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
+        dataset = catalog.get_remote_dataset(name=dataset_name)
     except DataCatalogError as error:
         error.log(logger.critical)
         raise SystemExit(1)
@@ -65,19 +65,21 @@ def run_pipeline(
     )
     logger.debug(
         "Dataset config loaded",
-        dataset_name=dataset_name,
-        dataset_type=type(dataset_config).__name__,
-        **dataset_config.model_dump(mode="json", exclude={"name"}),
+        dataset_type=type(dataset).__name__,
+        **dataset.model_dump(mode="json", exclude={"name"}),
     )
 
-    # -- Prepare version and pipeline ------------------------------------------
-    version = dataset_config.ingestion.frequency.format_datetime_as_version(start_datetime)
-    manager = RemoteIngestionPipeline(dataset=dataset_config, custom_download=custom_download)
+    # -- Prepare version and pipeline --------------------------------------------------
 
-    # -- Previous run metadata (not implemented yet) ---------------------------
+    version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
+    manager = RemoteIngestionPipeline(dataset=dataset, custom_download=custom_download)
+
+    # -- Load previous run metadata (not implemented yet) ------------------------------
+
     logger.warning("Load previous run metadata not yet implemented outside of Airflow")
 
-    # -- Download --------------------------------------------------------------
+    # -- Download ----------------------------------------------------------------------
+
     try:
         download_ctx = manager.download(version=version, previous_snapshot=None)
     except DownloadStageError as error:
@@ -88,8 +90,9 @@ def run_pipeline(
         logger.info("Pipeline skipped: content unchanged")
         return
 
-    # -- Extract (optional) ----------------------------------------------------
-    if dataset_config.source.format.is_archive:
+    # -- Extract (optional) ------------------------------------------------------------
+
+    if dataset.source.format.is_archive:
         try:
             extract_ctx = manager.extract_archive(context=download_ctx, previous_snapshot=None)
         except ExtractStageError as error:
@@ -100,35 +103,37 @@ def run_pipeline(
             logger.info("Pipeline skipped: extracted content unchanged")
             return
     else:
-        logger.info("Extraction skipped: format is not archive", dataset_name=dataset_name)
+        logger.info("Extraction skipped: format is not archive")
         extract_ctx = None
 
-    # -- Bronze ----------------------------------------------------------------
+    # -- Convert to Bronze -------------------------------------------------------------
+
     try:
         bronze_ctx = manager.to_bronze(context=extract_ctx or download_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
 
-    # -- Silver ----------------------------------------------------------------
+    # -- Silver ------------------------------------------------------------------------
+
     try:
         _ = manager.to_silver(context=bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
 
-    # -- Save run metadata (not implemented yet) -------------------------------
+    # -- Save run metadata (not implemented yet) ---------------------------------------
+
     logger.warning("Save run metadata not yet implemented outside of Airflow")
 
-    # -- Postgres load ---------------------------------------------------------
+    # -- Postgres load -----------------------------------------------------------------
+
     if skip_postgres:
         logger.info("Postgres loading skipped (--skip-postgres)")
         return
 
     try:
-        metrics = run_standalone_postgres_load(dataset_config)
+        _ = run_standalone_postgres_load(dataset)
     except PostgresLoadError as err:
         err.log(logger.critical)
         raise SystemExit(1)
-
-    logger.info("Load to Postgres ok", **metrics.model_dump())

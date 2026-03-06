@@ -14,9 +14,10 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 logger = get_logger("transform.odre_installations")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Domain constants
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 # Renewable energy filieres
 FILIERES_RENOUVELABLES = ["SOLAI", "EOLIE", "HYDLQ", "BIOEN", "MARIN", "GEOTH"]
@@ -36,9 +37,10 @@ TYPE_ENERGIE_MAPPING = {
 }
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver schema
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 # Source columns expected after prepare_silver (before computed columns are added).
 ALL_SOURCE_COLUMNS: set[str] = {
@@ -162,9 +164,9 @@ class SilverSchema(DataFrameModel):
     est_agregation: bool
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
@@ -189,13 +191,13 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     OSError
         If *landing_path* does not exist or is not readable.
     """
-    logger.debug("Reading parquet from landing", landing_path=landing_path)
+    logger.debug("Reading parquet from landing")
     return pl.scan_parquet(landing_path)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
@@ -225,9 +227,10 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     """
     validate_source_columns(df, ALL_SOURCE_COLUMNS, "odre_installations")
 
-    logger.debug("Applying transformations", n_rows=len(df), n_cols=len(df.columns))
+    logger.debug("Applying transformations", rows_count=len(df), columns_count=len(df.columns))
 
-    # --- Synthetic key for aggregated installations (id_peps is NULL) ----------
+    # -- Synthetic key for aggregated installations (id_peps is NULL) ------------------
+
     _geo_key = pl.coalesce(
         pl.concat_str([pl.lit("IRIS"), pl.col("code_iris")], separator="_"),
         pl.concat_str([pl.lit("COM"), pl.col("code_insee_commune")], separator="_"),
@@ -259,9 +262,13 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         .alias("id_peps")
     ).drop("_base_key")
 
-    logger.info("Synthetic keys generated for aggregated installations", n_synthetic=n_null_peps)
+    logger.info(
+        "Synthetic keys generated for aggregated installations",
+        synthetic_count=n_null_peps,
+    )
 
-    # --- Business flags -------------------------------------------------------
+    # -- Business flags ----------------------------------------------------------------
+
     df_with_flags = df.with_columns(
         pl.col("code_filiere").is_in(FILIERES_RENOUVELABLES).alias("est_renouvelable"),
         pl.col("code_filiere")
@@ -274,18 +281,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     logger.debug(
         "Silver transformation completed",
-        n_rows=len(result),
-        n_renouvelables=result["est_renouvelable"].sum(),
-        n_actifs=result["est_actif"].sum(),
+        rows_count=len(result),
+        renouvelables_count=result["est_renouvelable"].sum(),
+        actifs_count=result["est_actif"].sum(),
     )
 
     SilverSchema.validate(result)
     return result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transform spec (collected by registry)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 SPEC = DatasetTransformSpec(
     name="odre_installations",

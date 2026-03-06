@@ -35,9 +35,10 @@ def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
         yield conn
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver schema
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 ALL_SOURCE_COLUMNS: set[str] = {
     "cleabs",
@@ -68,9 +69,9 @@ class SilverSchema(DataFrameModel):
     centroid_lon: Annotated[float, Column(nullable=False, ge=-6.0, le=10.0)]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
@@ -101,9 +102,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     OSError
         If *landing_path* does not exist or cannot be copied to the temp location.
     """
-    logger.debug(
-        "Reading GeoPackage from landing", landing_path=landing_path, filename=landing_path.name
-    )
+    logger.debug("Reading GeoPackage from landing")
 
     # Copy .gpkg to a temp file to avoid SQLite/GDAL file lock contention
     # that causes intermittent hangs in Airflow (LocalExecutor).
@@ -121,13 +120,17 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
         FROM ST_read(?, layer = 'contours_iris')
         """
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
-            logger.debug("DuckDB spatial query completed", row_count=len(df), columns=df.columns)
+            logger.debug(
+                "DuckDB spatial query completed",
+                rows_count=len(df),
+                columns_count=len(df.columns),
+            )
     return df.lazy()
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Silver transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
@@ -203,14 +206,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         logger.debug("Computing centroids with DuckDB spatial extension")
         result = conn.execute(query).pl()
 
-    logger.debug("Silver transformation completed", row_count=len(result), columns=result.columns)
+    logger.debug(
+        "Silver transformation completed",
+        rows_count=len(result),
+        columns_count=len(result.columns),
+    )
     SilverSchema.validate(result)
     return result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transform spec (collected by registry)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 SPEC = DatasetTransformSpec(
     name="ign_contours_iris",

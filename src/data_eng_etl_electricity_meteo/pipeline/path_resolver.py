@@ -41,18 +41,14 @@ class _BasePathResolver:
 class RemotePathResolver(_BasePathResolver):
     """Path construction for remote datasets: landing → bronze → silver."""
 
-    # ---------------------------------------------------------------------------
-    # Landing Layer (Temporary)
-    # ---------------------------------------------------------------------------
+    # -- Landing Layer (Temporary) -----------------------------------------------------
 
     @property
     def landing_dir(self) -> Path:
         """Temporary storage dir, deleted after Bronze conversion."""
         return self.base_dir / "landing" / self.dataset_name
 
-    # ---------------------------------------------------------------------------
-    # Bronze Layer (Versioned History)
-    # ---------------------------------------------------------------------------
+    # -- Bronze Layer (Versioned History) ----------------------------------------------
 
     @property
     def _bronze_dir(self) -> Path:
@@ -118,9 +114,7 @@ class RemotePathResolver(_BasePathResolver):
 
         return sorted(versions, key=lambda p: p.name, reverse=True)
 
-    # ---------------------------------------------------------------------------
-    # Silver Layer (Current + Backup)
-    # ---------------------------------------------------------------------------
+    # -- Silver Layer (Current + Backup) -----------------------------------------------
 
     @property
     def _silver_dir(self) -> Path:
@@ -158,16 +152,17 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     for _dataset in _catalog.get_remote_datasets():
-        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
+        _run_version = _dataset.ingestion.frequency.format_datetime_as_version(
+            dt=datetime.now(tz=UTC)
+        )
 
         _resolver = RemotePathResolver(dataset_name=_dataset.name)
 
         logger.debug(
             "Remote dataset paths",
-            dataset_name=_dataset.name,
             run_version=_run_version,
             landing_dir=_resolver.landing_dir,
-            bronze_path=_resolver.bronze_path(_run_version),
+            bronze_path=_resolver.bronze_path(version=_run_version),
             bronze_latest_path=_resolver.bronze_latest_path,
             bronze_latest_version=_resolver.bronze_latest_version(),
             silver_backup_path=_resolver.silver_backup_path,

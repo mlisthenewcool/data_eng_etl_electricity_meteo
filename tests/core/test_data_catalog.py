@@ -25,9 +25,9 @@ def catalog() -> DataCatalog:
     return DataCatalog.load(_SAMPLE_CATALOG)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # SourceFormat
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -42,9 +42,9 @@ def test_source_format_is_archive(fmt: SourceFormat, expected: bool) -> None:
     assert fmt.is_archive is expected
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # IngestionFrequency
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -86,9 +86,11 @@ class TestIngestionFrequencyFormatDatetimeAsVersion:
         assert freq.format_datetime_as_version(self._DT, no_dash=no_dash) == expected
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _dataset_discriminator
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
+
 class TestDatasetDiscriminator:
     """Test the dict branches of the discriminator (our routing logic).
 
@@ -102,14 +104,16 @@ class TestDatasetDiscriminator:
         }
         assert _dataset_discriminator(v) == "remote"
 
-    def test_dict_without_url_is_gold(self) -> None:
+    def test_dict_without_url_is_derived(self) -> None:
         v: dict[str, object] = {"source": {"depends_on": ["other"]}}
         assert _dataset_discriminator(v) == "derived"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # DataCatalog.load — error handling and name injection
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
+
 class TestDataCatalogLoad:
     def test_missing_file_raises_invalid_catalog_error(self, tmp_path: Path) -> None:
         with pytest.raises(InvalidCatalogError):
@@ -132,9 +136,11 @@ class TestDataCatalogLoad:
         assert catalog.datasets["energy_weather"].name == "energy_weather"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # DataCatalog.get_dataset
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
+
 class TestDataCatalogGetDataset:
     def test_raises_dataset_not_found_error(self, catalog: DataCatalog) -> None:
         with pytest.raises(DatasetNotFoundError):

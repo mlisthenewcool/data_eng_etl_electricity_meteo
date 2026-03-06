@@ -64,7 +64,7 @@ class RemoteFileMetadata:
         return ChangeDetectionResult(True, "No matching metadata found to confirm identity")
 
     def _check_etag(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare ETags. Returns ``None`` if neither side has an ETag."""
+        """Compare ETags. Returns ``None`` if either side lacks an ETag."""
         if not (self.etag and other.etag):
             return None
         if self.etag != other.etag:
@@ -72,7 +72,7 @@ class RemoteFileMetadata:
         return ChangeDetectionResult(False, "ETag identical")
 
     def _check_last_modified(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare Last-Modified dates. Returns ``None`` if neither side has a date."""
+        """Compare Last-Modified dates. Returns ``None`` if either side lacks a date."""
         if not (self.last_modified and other.last_modified):
             return None
         if self.last_modified > other.last_modified:
@@ -126,10 +126,10 @@ def get_remote_file_metadata(
 
     headers = response.headers
 
-    # Parse ETag (remove quotes if present)
+    # ETags may be quoted per RFC 7232 §2.3
     etag = headers.get("etag", "").strip('"') or None
 
-    # Parse Last-Modified (RFC 2822 format)
+    # Parse Last-Modified (RFC 7231 HTTP-date format)
     last_modified = None
     if "last-modified" in headers:
         try:
@@ -141,7 +141,6 @@ def get_remote_file_metadata(
                 error=str(e),
             )
 
-    # Parse Content-Length
     content_length = None
     if "content-length" in headers:
         try:

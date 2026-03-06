@@ -17,9 +17,9 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.exceptions import SchemaValidationError
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Column descriptor
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +63,10 @@ class Column:
     isin: Sequence[Any] | None = None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 _TYPE_MAP: dict[type, pl.DataType] = {
     int: pl.Int64(),
@@ -101,9 +102,9 @@ def _parse_annotated(hint: Any) -> tuple[type, Column]:
     return hint, Column()
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Metaclass
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DataFrameModelMeta(type):
@@ -138,9 +139,9 @@ class DataFrameModelMeta(type):
         return cls
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Base model
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DataFrameModel(metaclass=DataFrameModelMeta):
@@ -210,7 +211,7 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
             raise SchemaValidationError(errors)
         return lf
 
-    # -- Pass 1: schema (works on LazyFrame) --------------------------------
+    # -- Pass 1: schema (works on LazyFrame) -------------------------------------------
 
     @classmethod
     def _check_schema(cls, schema: pl.Schema) -> list[str]:
@@ -228,7 +229,7 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
                 errors.append(f"{name}: expected {col.dtype}, got {schema[name]}")
         return errors
 
-    # -- Pass 2: values (DataFrame only) ------------------------------------
+    # -- Pass 2: values (DataFrame only) -----------------------------------------------
 
     @classmethod
     def _check_values(cls, df: pl.DataFrame) -> list[str]:

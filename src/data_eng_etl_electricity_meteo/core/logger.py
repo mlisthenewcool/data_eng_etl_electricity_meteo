@@ -36,9 +36,9 @@ from data_eng_etl_electricity_meteo.core.settings import LogLevel, settings
 OutputMode = Literal["airflow", "tty", "plain", "json"]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 _RESET = "\033[0m"
@@ -51,9 +51,9 @@ _EVENT_PAD = 50
 _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Shared helper — scalar value normalization
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _normalize_value(value: object) -> str | int | float:
@@ -80,9 +80,9 @@ def _normalize_value(value: object) -> str | int | float:
     return repr(value)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Console processors (tty / plain)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
@@ -203,7 +203,7 @@ def _prepend_logger_name(
         if pad_to:
             visual_len = _visual_len(full)
             if visual_len < pad_to:
-                full += " " * (pad_to - visual_len)
+                full += "." * (pad_to - visual_len)
         event_dict["event"] = full
         return event_dict
 
@@ -237,9 +237,9 @@ def _rich_traceback(
     )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Airflow processors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _walk(value: object) -> object:
@@ -299,9 +299,9 @@ def _setup_airflow_logger() -> None:
         structlog.configure(processors=processors)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Environment detection
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @cache
@@ -323,9 +323,9 @@ def _detect_output_mode() -> OutputMode:
     return "plain"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Global configuration
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _setup_logger(
@@ -353,7 +353,8 @@ def _setup_logger(
         _setup_airflow_logger()
         return
 
-    # Shared processors for all non-Airflow modes.
+    # -- Build shared processor chain for all non-Airflow modes ------------------------
+
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.StackInfoRenderer(),  # renders stack_info= kwarg if present
@@ -362,18 +363,23 @@ def _setup_logger(
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S %Z", utc=True),
     ]
 
+    # -- Build mode-specific renderer --------------------------------------------------
+
     if output in ("tty", "plain"):
         use_colors = output == "tty"
 
         console_chain: list[structlog.types.Processor] = [_flatten_and_normalize]
+
         if use_colors:
             level_styles = _build_level_styles()
             console_chain.append(_colorize_event(level_styles))
         else:
             level_styles = None
+
         console_chain.append(
             _prepend_logger_name(use_colors, pad_to=_EVENT_PAD if use_colors else 0)
         )
+
         console_chain.append(
             structlog.dev.ConsoleRenderer(
                 colors=use_colors,
@@ -399,8 +405,11 @@ def _setup_logger(
         logger_factory = structlog.BytesLoggerFactory()
 
     else:
+        # We should never reach this branch thanks to ``OutputMode``
         msg = f"Unknown output mode: {output!r}"
         raise ValueError(msg)
+
+    # -- Apply global structlog configuration ------------------------------------------
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(min_level=level),
@@ -414,9 +423,9 @@ def _setup_logger(
 _setup_logger()
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Public API
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def get_logger(name: str | None = None) -> BoundLogger:
@@ -442,9 +451,9 @@ def get_logger(name: str | None = None) -> BoundLogger:
     return structlog.get_logger(logger_name=name)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Manual smoke test
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 if __name__ == "__main__":

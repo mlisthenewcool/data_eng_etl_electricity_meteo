@@ -56,8 +56,10 @@ class Settings(BaseSettings):
 
     Computed path fields typed as ``DirectoryPath``
     (``data_dir_path``, ``postgres_dir_path``) validate that the target directory exists
-    at instantiation time. Instantiation will fail if those directories are absent.
+    on first access. Access will fail if those directories are absent.
     """
+
+    # -- Class internals ---------------------------------------------------------------
 
     # Project root resolved at class-definition time (before Pydantic
     # processes Field() defaults). Used by _SECRETS_DIR and model_config.
@@ -70,9 +72,8 @@ class Settings(BaseSettings):
         Path("/run/secrets") if Path("/run/secrets").exists() else _ROOT_DIR / "secrets"
     )
 
-    # ---------------------------------------------------------------------------
-    # Pydantic Config + source chain
-    # ---------------------------------------------------------------------------
+    # -- Pydantic settings -------------------------------------------------------------
+
     model_config = SettingsConfigDict(
         env_file=_ROOT_DIR / ".env",
         env_file_encoding="utf-8",
@@ -81,16 +82,14 @@ class Settings(BaseSettings):
         frozen=True,  # Immutable settings
     )
 
-    # ---------------------------------------------------------------------------
-    # General config
-    # ---------------------------------------------------------------------------
+    # -- General settings --------------------------------------------------------------
+
     logging_level: Annotated[
         LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
     ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
 
-    # ---------------------------------------------------------------------------
-    # Data config
-    # ---------------------------------------------------------------------------
+    # -- Data settings -----------------------------------------------------------------
+
     bronze_retention_days: int = Field(
         default=365,  # 1 year
         description="Number of days to retain bronze layer versions",
@@ -98,9 +97,8 @@ class Settings(BaseSettings):
         le=365 * 3,  # Max 3 years
     )
 
-    # ---------------------------------------------------------------------------
-    # Postgres connection
-    # ---------------------------------------------------------------------------
+    # -- Postgres connection -----------------------------------------------------------
+
     postgres_host: str = Field(default="localhost", description="Postgres host")
     postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)
     postgres_db_name: str = Field(default="default_db_name", description="Postgres database name")
@@ -119,9 +117,8 @@ class Settings(BaseSettings):
         description="Postgres password",
     )
 
-    # ---------------------------------------------------------------------------
-    # Airflow config
-    # ---------------------------------------------------------------------------
+    # -- Airflow settings --------------------------------------------------------------
+
     @computed_field
     @cached_property
     def is_running_on_airflow(self) -> bool:
@@ -132,16 +129,14 @@ class Settings(BaseSettings):
         """
         return "AIRFLOW_HOME" in os.environ
 
-    # ---------------------------------------------------------------------------
-    # Paths (derived from _ROOT_DIR, not configurable via env)
-    # NOTE: DirectoryPath (Pydantic) validates that the directory exists at
-    # access time. Use plain Path for directories that may not exist yet.
-    # ---------------------------------------------------------------------------
+    # -- Paths (derived from _ROOT_DIR, not configurable via env) ----------------------
+    # DirectoryPath (Pydantic) validates that the directory exists at access time.
+    # Use plain Path for directories that may not exist yet.
 
     @computed_field
     @cached_property
     def data_dir_path(self) -> DirectoryPath:
-        """Data directory (computed from root_dir)."""
+        """Data directory (computed from ``_ROOT_DIR``)."""
         return self._ROOT_DIR / "data"
 
     @computed_field
@@ -163,9 +158,8 @@ class Settings(BaseSettings):
         """Path to Postgres' queries and configuration directory."""
         return self._ROOT_DIR / "postgres"
 
-    # ---------------------------------------------------------------------------
-    # dbt config
-    # ---------------------------------------------------------------------------
+    # -- dbt settings ------------------------------------------------------------------
+
     dbt_target: str = Field(
         default="dev",
         description="dbt profile target name (override to 'docker' in containers)",
@@ -174,24 +168,23 @@ class Settings(BaseSettings):
     @computed_field
     @cached_property
     def dbt_project_dir(self) -> DirectoryPath:
-        """Dbt project directory (computed from root_dir)."""
+        """Path to the dbt project directory (computed from ``_ROOT_DIR``)."""
         return self._ROOT_DIR / "dbt"
 
     @computed_field
     @cached_property
     def dbt_log_path(self) -> Path:
-        """Dbt log output directory."""
+        """Path to the dbt log output directory."""
         return self.dbt_project_dir / "logs"
 
     @computed_field
     @cached_property
     def dbt_target_path(self) -> Path:
-        """Dbt target (compiled artifacts) directory."""
+        """Path to the dbt target (compiled artifacts) directory."""
         return self.dbt_project_dir / "target"
 
-    # ---------------------------------------------------------------------------
-    # Download Settings
-    # ---------------------------------------------------------------------------
+    # -- Download settings -------------------------------------------------------------
+
     download_chunk_size: int = Field(
         default=512 * 1024,  # 512 KB
         description="Chunk size for streaming downloads (bytes)",
@@ -231,9 +224,8 @@ class Settings(BaseSettings):
 
         return self
 
-    # ---------------------------------------------------------------------------
-    # Hash Settings
-    # ---------------------------------------------------------------------------
+    # -- Hash settings -----------------------------------------------------------------
+
     hash_algorithm: Literal["sha256", "sha512", "sha1", "md5"] = Field(
         default="sha256",
         description="Hashing algorithm for integrity checks (recommended: sha256)",
@@ -245,6 +237,8 @@ class Settings(BaseSettings):
         gt=0,
         le=1024 * 1024,  # Max 1 MB
     )
+
+    # -- Source chain ------------------------------------------------------------------
 
     @classmethod
     def settings_customise_sources(
@@ -277,12 +271,17 @@ class Settings(BaseSettings):
         )
 
 
+# --------------------------------------------------------------------------------------
+# Module-level singleton
+# --------------------------------------------------------------------------------------
+
+
 def _load_settings() -> Settings:
     """Instantiate settings, aborting with a clear message on validation error.
 
-    Uses ``print(stderr)`` instead of structlog because the project logger depends on
-    ``settings.logging_level`` (circular), and calling ``structlog.configure()`` here
-    would overwrite Airflow's own config.
+    Uses ``print(…, file=stderr)`` instead of structlog because the project logger
+    depends on ``settings.logging_level`` (circular), and calling
+    ``structlog.configure()`` here would overwrite Airflow's own config.
     """
     try:
         return Settings()

@@ -14,9 +14,9 @@ from data_eng_etl_electricity_meteo.transformations.meteo_france_climatologie im
     transform_silver,
 )
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Fixtures
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 def _make_bronze_df(  # noqa: PLR0913
@@ -53,9 +53,9 @@ def _make_bronze_df(  # noqa: PLR0913
     return pl.DataFrame(data)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Bronze transformation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestBronzeTransform:
@@ -112,7 +112,7 @@ class TestBronzeTransform:
             assert result[col].dtype == expected_type, f"Column {col} has wrong type"
 
     def test_sentinel_mq_becomes_null(self) -> None:
-        """Sentinel string "mq" should become null after strict=False cast."""
+        """Sentinel "mq" is replaced with null before the strict cast."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
             result = transform_bronze(path).collect()
@@ -122,7 +122,7 @@ class TestBronzeTransform:
         assert result["T"][1] is None
 
     def test_empty_string_becomes_null(self) -> None:
-        """Empty string "" should become null after strict=False cast."""
+        """Empty string "" is replaced with null before the strict cast."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
             result = transform_bronze(path).collect()
@@ -184,9 +184,9 @@ class TestBronzeTransform:
         assert result["AAAAMMJJHH"][0] == "2026022800"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Column selection and renaming
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestColumnSelection:
@@ -218,9 +218,9 @@ class TestColumnSelection:
         assert "another_column" in exc_info.value.added
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Date parsing
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestDateParsing:
@@ -255,9 +255,9 @@ class TestDateParsing:
         assert result["date_heure"].dtype == pl.Datetime("us", "UTC")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Narrowing casts
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestNarrowingCasts:
@@ -292,9 +292,9 @@ class TestNarrowingCasts:
         assert result["humidite"][2] is None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Values passthrough (no unit conversion)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestValuesPassthrough:
@@ -333,9 +333,9 @@ class TestValuesPassthrough:
         assert result["precipitations"][2] == pytest.approx(12.4)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # id_station type handling
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestIdStationType:
@@ -355,9 +355,9 @@ class TestIdStationType:
         assert result["id_station"][1] == "02345002"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Row count preservation
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestRowCount:

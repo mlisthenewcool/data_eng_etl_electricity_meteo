@@ -1,11 +1,12 @@
-"""DAG factory for remote dataset ingestion pipelines.
+"""DAG factory for silver file production (source HTTP → silver file).
 
-Generates one Airflow DAG per remote dataset declared in the data catalog.
-Each DAG follows the medallion architecture: landing -> bronze -> silver, with optional
-archive extraction between landing and bronze.
+Generates one ``{dataset}_to_silver`` DAG per remote dataset in the data catalog.
+Each DAG runs on its dataset's configured schedule and orchestrates: download →
+(extract) → bronze → silver, producing a silver file Asset.
 """
 
-from collections.abc import Generator
+from __future__ import annotations
+
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -28,13 +29,37 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from airflow.sdk.execution_time.context import InletEventsAccessors
 
-logger = get_logger("dag_factory.ingest")
+logger = get_logger("dag.to_silver")
+
+
+# --------------------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------------------
+
+
+TASK_DOWNLOAD = "download_to_landing"
+TASK_EXTRACT = "extract_archive_to_landing"
+TASK_BRONZE = "convert_landing_to_bronze"
+TASK_SILVER = "clean_bronze_to_silver"
+
+# Task-specific timeouts (override defaults)
+TASK_DOWNLOAD_TIMEOUT = timedelta(minutes=30)
+TASK_EXTRACT_TIMEOUT = timedelta(minutes=5)
+TASK_BRONZE_TIMEOUT = timedelta(minutes=3)
+TASK_SILVER_TIMEOUT = timedelta(minutes=10)
+
+
+# --------------------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------------------
 
 
 def _get_previous_snapshot(
-    inlet_events: "InletEventsAccessors | None", asset: Asset
+    inlet_events: InletEventsAccessors | None, asset: Asset
 ) -> PipelineRunSnapshot | None:
     """Extract the previous run snapshot from Airflow inlet events.
 
@@ -58,16 +83,9 @@ def _get_previous_snapshot(
     return PipelineRunSnapshot.from_metadata_dict(raw_metadata)
 
 
-TASK_DOWNLOAD = "download_to_landing"
-TASK_EXTRACT = "extract_archive_to_landing"
-TASK_BRONZE = "convert_landing_to_bronze"
-TASK_SILVER = "clean_bronze_to_silver"
-
-# Task-specific timeouts (override defaults)
-TASK_DOWNLOAD_TIMEOUT = timedelta(minutes=30)
-TASK_EXTRACT_TIMEOUT = timedelta(minutes=5)
-TASK_BRONZE_TIMEOUT = timedelta(minutes=3)
-TASK_SILVER_TIMEOUT = timedelta(minutes=10)
+# --------------------------------------------------------------------------------------
+# DAG factory
+# --------------------------------------------------------------------------------------
 
 
 def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
@@ -87,7 +105,7 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
     """
 
     @dag(
-        dag_id=f"{manager.dataset.name}_ingest",
+        dag_id=f"{manager.dataset.name}_to_silver",
         schedule=manager.dataset.ingestion.frequency.airflow_schedule,
         start_date=START_DATE,
         catchup=False,  # TODO[prod]: set to True
@@ -98,17 +116,11 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
         # max_active_runs=1 controlled globally
     )
     def _dag() -> None:
-        # ------------------------------------------------------------
-        # 1. DOWNLOAD WITH SHORT-CIRCUITS IF CONTENT IS UNCHANGED
-        #   HTTP HEAD - short-circuit with ETag / Last-modified
-        #   DOWNLOAD
-        #   COMPARE HASH (SHA256)
-        # ------------------------------------------------------------
         @task.short_circuit(
             task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT, inlets=[asset]
         )
         def download_task(
-            version: str, inlet_events: "InletEventsAccessors | None" = None
+            version: str, inlet_events: InletEventsAccessors | None = None
         ) -> XComArg | bool:
             """Download remote data to landing with short-circuit if unchanged.
 
@@ -128,14 +140,11 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
 
             return ingestion_result.model_dump(mode="json")
 
-        # ------------------------------------------------------------
-        # 2. (optional) EXTRACTION - only if remote data requires it
-        # ------------------------------------------------------------
         @task.short_circuit(
             task_id=TASK_EXTRACT, execution_timeout=TASK_EXTRACT_TIMEOUT, inlets=[asset]
         )
         def extract_task(
-            ctx: XComArg, inlet_events: "InletEventsAccessors | None" = None
+            ctx: XComArg, inlet_events: InletEventsAccessors | None = None
         ) -> XComArg | bool:
             """Extract archive; short-circuit if SHA256 is unchanged."""
             previous_snapshot = _get_previous_snapshot(inlet_events, asset)
@@ -149,26 +158,18 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
 
             return context.model_dump(mode="json")
 
-        # ------------------------------------------------------------
-        # 3. CONVERT TO BRONZE - parquet + column names normalisation
-        # ------------------------------------------------------------
         @task(task_id=TASK_BRONZE, execution_timeout=TASK_BRONZE_TIMEOUT)
         def bronze_task(ctx: XComArg) -> XComArg:
             """Convert landing file to versioned bronze Parquet."""
             result = manager.to_bronze(PipelineContext.model_validate(ctx))
             return result.model_dump(mode="json")
 
-        # ------------------------------------------------------------
-        # 4. TRANSFORM TO SILVER - Business Rules + Metadata
-        # ------------------------------------------------------------
         @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[asset])
         def silver_task(ctx: XComArg) -> Generator[Metadata]:
             """Apply business transformations and emit Asset metadata."""
             silver_result = manager.to_silver(PipelineContext.model_validate(ctx))
 
-            # Emit enriched metadata for Airflow UI
-            # These metadata fields will be visible in the Assets tab
-            # and will be used to short-circuit refresh on download_task
+            # Persisted in Asset metadata for smart-skip on next run
 
             yield Metadata(
                 asset=asset,
@@ -176,25 +177,16 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
                 extra=PipelineRunSnapshot.from_context(silver_result).model_dump(exclude_none=True),
             )
 
-        # ------------------------------------------------------------
-        # DAG's WORKFLOW : download > (extract) > bronze > silver
-        # ------------------------------------------------------------
+        # -- DAG workflow: download > (extract) > bronze > silver ----------------------
 
         # Version generated inside decorated function so Jinja template is resolved
         run_version = manager.dataset.ingestion.frequency.get_airflow_version_template()
 
-        # 1. DOWNLOAD
-        landing_ctx = download_task(run_version)
-
-        # 2. (optional) EXTRACT
+        landing_ctx = download_task(version=run_version)
         if manager.dataset.source.format.is_archive:
-            landing_ctx = extract_task(landing_ctx)
-
-        # 3. CONVERT TO BRONZE
-        bronze_ctx = bronze_task(landing_ctx)
-
-        # 4. TRANSFORM TO SILVER
-        _ = silver_task(bronze_ctx)
+            landing_ctx = extract_task(ctx=landing_ctx)
+        bronze_ctx = bronze_task(ctx=landing_ctx)
+        _ = silver_task(ctx=bronze_ctx)
 
     return _dag()
 
@@ -208,9 +200,9 @@ def _generate_all_dags() -> dict[str, DAG]:
         Mapping of dataset names to their ingestion DAG objects.
     """
     try:
-        catalog = DataCatalog.load(settings.data_catalog_file_path)
+        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
     except InvalidCatalogError as e:
-        e.log(logger.exception)
+        e.log(logger.critical)
         return {}
 
     pipelines: dict[str, DAG] = {}
@@ -219,20 +211,22 @@ def _generate_all_dags() -> dict[str, DAG]:
         try:
             asset = get_silver_file_asset(dataset.name)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
-            continue
+            logger.exception("Invalid dataset configuration", dataset=dataset.name)
+            continue  # move to next dataset
 
         try:
             manager = RemoteIngestionPipeline(
-                dataset=dataset,
-                custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
+                dataset=dataset, custom_download=CUSTOM_DOWNLOADS.get(dataset.name)
             )
         except TransformNotFoundError as error:
             error.log(logger.warning)
-            continue
+            continue  # move to next dataset
 
         pipelines[dataset.name] = _create_dag(manager, asset)
-        logger.info("Created dataset DAG", dag_id=f"{dataset.name}_ingest")
+        logger.info("to_silver DAG created", dataset=dataset.name)
+
+    total = len(catalog.get_remote_datasets())
+    logger.info("to_silver factory complete", created=len(pipelines), total=total)
 
     return pipelines
 

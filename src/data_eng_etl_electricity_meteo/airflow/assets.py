@@ -5,10 +5,10 @@ Airflow Assets represent data dependencies between DAGs / tasks.
 Two Asset families exist:
 
 - **File Assets** (``get_silver_file_asset``): ``file://`` URIs pointing to silver
-  Parquet files on disk. Produced by ingestion DAGs.
-- **Postgres Assets** (``get_silver_pg_asset``): ``postgres://`` URIs representing
-  tables in the project database.
-  Produced by load DAGs and consumed by the dbt transformation DAG.
+  Parquet files on disk. Produced by ``to_silver`` DAGs.
+- **Postgres Assets** (``get_silver_pg_asset``, ``get_gold_pg_asset``):
+  ``postgres://`` URIs representing tables in the project database.
+  Produced by ``to_silver_pg`` and ``to_gold`` DAGs.
 
 Assets are identified by URI.
 This module guarantees that repeated calls with the same arguments return the **same**
@@ -65,8 +65,8 @@ def get_silver_pg_asset(dataset_name: str) -> Asset:
     """Build an Airflow Asset for a dataset's Postgres silver table.
 
     These Assets represent data loaded into the ``silver`` schema of the project
-    Postgres database.
-    They serve as outlets for load DAGs and as inlets for the dbt transformation DAG.
+    Postgres database. They serve as outlets for ``to_silver_pg`` DAGs and as inlets for
+    the ``to_gold`` DAG.
 
     The URI is a logical marker — Airflow does not inspect the database; the outlet
     event is emitted by the load task upon successful completion.
@@ -99,7 +99,7 @@ def get_gold_pg_asset(dataset_name: str) -> Asset:
     """Build an Airflow Asset for a dataset's Postgres gold table.
 
     These Assets represent data produced by dbt in the ``gold`` schema of the project
-    Postgres database. They serve as outlets for the dbt DAG.
+    Postgres database. They serve as outlets for the ``to_gold`` DAG.
 
     Parameters
     ----------
