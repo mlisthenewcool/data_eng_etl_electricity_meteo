@@ -154,7 +154,6 @@ class RemoteIngestionPipeline:
 
         # After the guard above, remote_metadata_exists == silver_file_exists.
         # Checking previous_remote_file_info alone is sufficient.
-        # TODO: add If-None-Match header support for HTTP 304 responses
         if previous_remote_file_info:
             change_detection_result = current_remote_file_info.compare_with(
                 previous_remote_file_info
@@ -279,18 +278,40 @@ class RemoteIngestionPipeline:
         """
         logger.debug("Starting standard download", version=version)
 
-        # -- 1. Fetch current remote metadata (HEAD request) ---------------------------
-
-        try:
-            remote_file_info = get_remote_file_metadata(url=self.dataset.source.url_as_str)
-        except httpx.HTTPError as err:
-            raise DownloadStageError("HEAD metadata fetch failed") from err
-
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
         )
+        previous_etag = previous_remote_metadata.etag if previous_remote_metadata else None
 
-        # -- 2. Smart-skip #1: remote metadata comparison ------------------------------
+        # -- 1. Fetch current remote metadata (HEAD request) ---------------------------
+        # Send If-None-Match when we have a previous ETag so the server can
+        # short-circuit with 304 Not Modified.
+
+        try:
+            remote_file_info = get_remote_file_metadata(
+                url=self.dataset.source.url_as_str,
+                if_none_match=previous_etag,
+            )
+        except httpx.HTTPError as err:
+            raise DownloadStageError("HEAD metadata fetch failed") from err
+
+        # -- 2. Smart-skip #1: HTTP 304 or metadata comparison -------------------------
+
+        if remote_file_info is None:
+            # Server confirmed no change (304). Still need to check local state.
+            if self.resolver.silver_current_path.exists():
+                logger.info("Skipping ingestion: HTTP 304 Not Modified")
+                return None
+
+            # Silver file missing despite 304 — healing needed: re-fetch full metadata.
+            logger.warning("HTTP 304 but silver file missing, re-fetching metadata to heal")
+            try:
+                remote_file_info = get_remote_file_metadata(
+                    url=self.dataset.source.url_as_str,
+                )
+            except httpx.HTTPError as err:
+                raise DownloadStageError("HEAD metadata re-fetch failed") from err
+            assert remote_file_info is not None  # no If-None-Match → never 304
 
         ingestion_decision = self._decide_ingestion(
             current_remote_file_info=remote_file_info,
@@ -307,6 +328,7 @@ class RemoteIngestionPipeline:
                 url=self.dataset.source.url_as_str,
                 dest_dir=self.resolver.landing_dir,
                 fallback_filename=f"{version}.{self.dataset.source.format.value}",
+                timeout_seconds=settings.download_timeout_seconds,
                 progress=AirflowDownloadProgress if settings.is_running_on_airflow else None,
             )
         except httpx.HTTPError as err:
@@ -668,9 +690,9 @@ class RemoteIngestionPipeline:
         # -- Find changed rows (hash comparison) ---------------------------------------
 
         changed_pks = (
-            new_lf.select(pk + [hash_expr])
+            new_lf.select([*pk, hash_expr])
             .join(
-                old_lf.select(pk + [hash_expr]),
+                old_lf.select([*pk, hash_expr]),
                 on=pk,
                 how="inner",
                 suffix="_prev",

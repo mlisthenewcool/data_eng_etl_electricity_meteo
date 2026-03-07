@@ -52,7 +52,7 @@ datasets:
       format: "parquet"
     ingestion:
       frequency: "hourly"
-      mode: "snapshot" # TODO: à passer en incremental
+      mode: "snapshot" # TODO[prod]: switch to incremental
     postgres:
       table: "fact_eco2mix_tr"
 

@@ -5,7 +5,7 @@ import sys
 from enum import StrEnum
 from functools import cached_property
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar
 
 from pydantic import (
     AliasChoices,
@@ -15,7 +15,6 @@ from pydantic import (
     SecretStr,
     ValidationError,
     computed_field,
-    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -145,12 +144,11 @@ class Settings(BaseSettings):
         """Path to data catalog YAML file."""
         return self.data_dir_path / "catalog.yaml"
 
-    # TODO: Re-enable once the state directory is created as part of project setup.
-    # @computed_field
-    # @cached_property
-    # def data_state_dir_path(self) -> DirectoryPath:
-    #     """Path to pipeline state directory."""
-    #     return self.data_dir_path / "_state"
+    @computed_field
+    @cached_property
+    def data_state_dir_path(self) -> Path:
+        """Path to pipeline state directory (created on first write)."""
+        return self.data_dir_path / "_state"
 
     @computed_field
     @cached_property
@@ -185,57 +183,11 @@ class Settings(BaseSettings):
 
     # -- Download settings -------------------------------------------------------------
 
-    download_chunk_size: int = Field(
-        default=512 * 1024,  # 512 KB
-        description="Chunk size for streaming downloads (bytes)",
-        gt=0,
-        le=10 * 1024 * 1024,  # Max 10 MB
-    )
-
-    download_timeout_total: int = Field(
+    download_timeout_seconds: int = Field(
         default=600,
-        description="Maximum time for entire download (seconds)",
+        description="Maximum total time for a single file download",
         gt=0,
         le=3600,  # Max 1 hour
-    )
-
-    download_timeout_connect: int = Field(
-        default=10,
-        description="Maximum time to establish connection (seconds)",
-        gt=0,
-        le=60,
-    )
-
-    download_timeout_sock_read: int = Field(
-        default=30,
-        description="Maximum time between data packets (seconds)",
-        gt=0,
-        le=300,
-    )
-
-    @model_validator(mode="after")
-    def validate_timeout_hierarchy(self) -> Self:
-        """Ensure total timeout exceeds connect and read timeouts."""
-        if self.download_timeout_total <= self.download_timeout_connect:
-            raise ValueError("download_timeout_total must be > download_timeout_connect")
-
-        if self.download_timeout_total <= self.download_timeout_sock_read:
-            raise ValueError("download_timeout_total must be > download_timeout_sock_read")
-
-        return self
-
-    # -- Hash settings -----------------------------------------------------------------
-
-    hash_algorithm: Literal["sha256", "sha512", "sha1", "md5"] = Field(
-        default="sha256",
-        description="Hashing algorithm for integrity checks (recommended: sha256)",
-    )
-
-    hash_chunk_size: int = Field(
-        default=128 * 1024,  # 128 KB
-        description="Chunk size for file hashing (bytes)",
-        gt=0,
-        le=1024 * 1024,  # Max 1 MB
     )
 
     # -- Source chain ------------------------------------------------------------------

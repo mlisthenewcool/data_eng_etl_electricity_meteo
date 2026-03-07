@@ -8,8 +8,8 @@ import pytest
 
 from data_eng_etl_electricity_meteo.core.exceptions import SourceSchemaDriftError
 from data_eng_etl_electricity_meteo.transformations.meteo_france_climatologie import (
-    BRONZE_COLUMNS,
-    COLUMNS_MAPPING,
+    _BRONZE_COLUMNS,
+    _COLUMNS_MAPPING,
     transform_bronze,
     transform_silver,
 )
@@ -92,14 +92,14 @@ class TestBronzeTransform:
         return path
 
     def test_column_pruning(self) -> None:
-        """Bronze should select only the 16 columns from BRONZE_COLUMNS."""
+        """Bronze should select only the 16 columns from _BRONZE_COLUMNS."""
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_landing_parquet(Path(tmp))
             result = transform_bronze(path).collect()
             assert isinstance(result, pl.DataFrame)
 
         assert len(result.columns) == 16
-        assert set(result.columns) == set(BRONZE_COLUMNS.keys())
+        assert set(result.columns) == set(_BRONZE_COLUMNS.keys())
 
     def test_numeric_columns_are_float64(self) -> None:
         """Numeric columns should be cast to Float64."""
@@ -108,7 +108,7 @@ class TestBronzeTransform:
             result = transform_bronze(path).collect()
             assert isinstance(result, pl.DataFrame)
 
-        for col, expected_type in BRONZE_COLUMNS.items():
+        for col, expected_type in _BRONZE_COLUMNS.items():
             assert result[col].dtype == expected_type, f"Column {col} has wrong type"
 
     def test_sentinel_mq_becomes_null(self) -> None:
@@ -176,7 +176,7 @@ class TestBronzeTransform:
             assert isinstance(result, pl.DataFrame)
 
         # All columns should match target types
-        for col, expected_type in BRONZE_COLUMNS.items():
+        for col, expected_type in _BRONZE_COLUMNS.items():
             assert result[col].dtype == expected_type, f"Column {col} has wrong type"
 
         # AAAAMMJJHH (originally Int64) should now be Utf8
@@ -197,7 +197,7 @@ class TestColumnSelection:
         df = _make_bronze_df()
         result = transform_silver(df)
 
-        expected_columns = list(COLUMNS_MAPPING.values())
+        expected_columns = list(_COLUMNS_MAPPING.values())
         assert result.columns == expected_columns
 
     def test_output_column_count(self) -> None:

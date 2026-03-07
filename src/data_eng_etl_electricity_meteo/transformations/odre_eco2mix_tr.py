@@ -26,7 +26,7 @@ _NUMERIC_TEXT_COLUMNS = ["pompage", "stockage_batterie", "destockage_batterie"]
 # --------------------------------------------------------------------------------------
 
 
-ALL_SOURCE_COLUMNS: set[str] = {
+_ALL_SOURCE_COLUMNS: set[str] = {
     "bioenergies",
     "code_insee_region",
     "consommation",
@@ -59,7 +59,7 @@ ALL_SOURCE_COLUMNS: set[str] = {
 }
 
 # All source columns are used in the silver output.
-USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS
+_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
@@ -152,7 +152,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Deduplicated DataFrame ready for the silver layer.
     """
-    validate_source_columns(df, ALL_SOURCE_COLUMNS, "odre_eco2mix_tr")
+    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "odre_eco2mix_tr")
 
     # -- Cast non-numeric text columns to Int64 ----------------------------------------
 
@@ -171,6 +171,18 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         key_columns=["code_insee_region", "date_heure"],
         dataset_name="odre_eco2mix_tr",
     )
+
+    # -- Normalize date_heure to naive UTC microseconds --------------------------------
+    # Source may send tz-aware (e.g. Europe/Berlin) or naive datetimes depending on the
+    # export format. Normalize to naive UTC µs for a consistent silver schema.
+
+    dh_dtype = df["date_heure"].dtype
+    if isinstance(dh_dtype, pl.Datetime) and dh_dtype.time_zone is not None:
+        df = df.with_columns(
+            pl.col("date_heure").dt.convert_time_zone("UTC").dt.replace_time_zone(None)
+        )
+    if isinstance(dh_dtype, pl.Datetime) and dh_dtype.time_unit != "us":
+        df = df.with_columns(pl.col("date_heure").cast(pl.Datetime("us")))
 
     # -- Select, validate, return ------------------------------------------------------
 
@@ -193,7 +205,7 @@ SPEC = DatasetTransformSpec(
     name="odre_eco2mix_tr",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
     silver_schema=SilverSchema,
 )

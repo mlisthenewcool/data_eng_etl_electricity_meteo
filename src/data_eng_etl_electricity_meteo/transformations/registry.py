@@ -2,7 +2,7 @@
 
 Each dataset module defines a ``SPEC`` — an immutable ``DatasetTransformSpec`` that
 bundles its bronze/silver transforms, source column sets, and silver schema.
-This module collects those specs into a single ``REGISTRY`` dict.
+This module collects those specs into a private registry dict.
 
 Adding a dataset to the catalog without registering its spec will fail fast in
 ``RemoteIngestionPipeline.__post_init__``.
@@ -21,16 +21,12 @@ from data_eng_etl_electricity_meteo.transformations import (
 )
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
-# Re-export for convenience (single import point for consumers).
-__all__ = ["DatasetTransformSpec", "REGISTRY", "get_transform_spec"]
-
-
 # --------------------------------------------------------------------------------------
 # Registry
 # --------------------------------------------------------------------------------------
 
 
-REGISTRY: dict[str, DatasetTransformSpec] = {
+_REGISTRY: dict[str, DatasetTransformSpec] = {
     spec.name: spec
     for spec in (
         ign_contours_iris.SPEC,
@@ -49,7 +45,7 @@ def get_transform_spec(dataset_name: str) -> DatasetTransformSpec:
     Parameters
     ----------
     dataset_name
-        Dataset identifier (must match a key in ``REGISTRY``).
+        Dataset identifier (must match a key in the registry).
 
     Returns
     -------
@@ -62,6 +58,6 @@ def get_transform_spec(dataset_name: str) -> DatasetTransformSpec:
         If no spec is registered for *dataset_name*.
     """
     try:
-        return REGISTRY[dataset_name]
+        return _REGISTRY[dataset_name]
     except KeyError:
         raise TransformNotFoundError(dataset_name=dataset_name) from None

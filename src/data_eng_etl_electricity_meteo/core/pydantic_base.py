@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 class StrictModel(BaseModel):
     """Base model that forbids extra fields to prevent typos and configuration drift."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 def format_pydantic_errors(pydantic_errors: ValidationError) -> dict[str, str]:

@@ -10,7 +10,7 @@ DataCatalog
             │   ├── source: RemoteSourceConfig (url, provider, format)
             │   ├── ingestion: IngestionPolicy (frequency, mode)
             │   ├── postgres: PostgresConfig (table name)
-            │   └── primary_key: list[str] | None (natural key columns)
+            │   └── primary_key: tuple[str, ...] (natural key columns)
             └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
                 └── source: GoldSourceConfig (depends_on)
@@ -78,13 +78,13 @@ class IngestionFrequency(StrEnum):
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
         """Return the Airflow Jinja template for versioning.
 
-        Hourly    -> ``{{ ts }}`` / ``{{ ts_nodash }}``.
-        Otherwise -> ``{{ ds }}`` / ``{{ ds_nodash }}``.
+        Hourly versions are truncated to the hour
+        (minutes/seconds are always ``00`` for ``@hourly`` schedules).
 
         Parameters
         ----------
         no_dash
-            If ``True``, return the ``_nodash`` variant.
+            If ``True``, return compact format without separators.
 
         Returns
         -------
@@ -104,14 +104,16 @@ class IngestionFrequency(StrEnum):
             )
 
         if self == IngestionFrequency.HOURLY:
-            # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
-            #  or "{{ ts_nodash[:11] }}"
-            return "{{ ts_nodash }}" if no_dash else "{{ ts }}"
+            if no_dash:
+                return "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
+            return "{{ data_interval_start.strftime('%Y-%m-%dT%H') }}"
 
         return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
 
     def format_datetime_as_version(self, dt: datetime, no_dash: bool = False) -> str:
         """Format *dt* as a version string (non-Airflow contexts).
+
+        Hourly versions are truncated to the hour (minutes/seconds dropped).
 
         Parameters
         ----------
@@ -123,12 +125,11 @@ class IngestionFrequency(StrEnum):
         Returns
         -------
         str
-            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+) or
-            ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
-            ``no_dash=True``: ``%Y%m%d`` (daily+) or ``%Y%m%dT%H%M%S`` (hourly).
+            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+) or ``%Y-%m-%dT%H``
+            (hourly). ``no_dash=True``: ``%Y%m%d`` (daily+) or ``%Y%m%dT%H`` (hourly).
         """
         if self == IngestionFrequency.HOURLY:
-            return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
+            return dt.strftime("%Y%m%dT%H" if no_dash else "%Y-%m-%dT%H")
 
         # All non-hourly frequencies are date-only — no time component needed.
         return dt.strftime("%Y%m%d" if no_dash else "%Y-%m-%d")
@@ -196,7 +197,7 @@ class GoldSourceConfig(StrictModel):
         Silver dataset names this Gold dataset is built from.
     """
 
-    depends_on: list[str]
+    depends_on: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_depends_on_not_empty(self) -> Self:
@@ -275,7 +276,9 @@ class RemoteDatasetConfig(StrictModel):
     source: RemoteSourceConfig
     ingestion: IngestionPolicy
     postgres: PostgresConfig
-    primary_key: Annotated[list[str], BeforeValidator(lambda v: [v] if isinstance(v, str) else v)]
+    primary_key: Annotated[
+        tuple[str, ...], BeforeValidator(lambda v: (v,) if isinstance(v, str) else tuple(v))
+    ]
 
 
 class GoldDatasetConfig(StrictModel):

@@ -63,7 +63,7 @@ def _create_dag(
         dag_id=f"{dataset.name}_to_silver_pg",
         schedule=silver_file_asset,  # triggered by the ingestion DAG's outlet
         start_date=START_DATE,
-        catchup=False,
+        catchup=False,  # TODO[prod]: set to True
         default_args=DEFAULT_ARGS,
         tags=["load", "postgres", "silver"],
         doc_md=__doc__,
@@ -121,8 +121,8 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_remote_datasets():
         try:
-            silver_file_asset = get_silver_file_asset(dataset.name)
-            silver_pg_asset = get_silver_pg_asset(dataset.name)
+            silver_file_asset = get_silver_file_asset(dataset)
+            silver_pg_asset = get_silver_pg_asset(dataset)
         except ValueError:
             logger.exception("Invalid dataset configuration", dataset=dataset.name)
             continue  # move to next dataset

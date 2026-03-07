@@ -1,5 +1,6 @@
 """Remote file change detection via HTTP HEAD metadata."""
 
+import http
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -94,8 +95,13 @@ def get_remote_file_metadata(
     url: str,
     timeout: int = 30,
     follow_redirects: bool = True,
-) -> RemoteFileMetadata:
+    if_none_match: str | None = None,
+) -> RemoteFileMetadata | None:
     """Fetch ETag, Last-Modified, and Content-Length via HTTP HEAD.
+
+    When *if_none_match* is provided, sends an ``If-None-Match`` header.
+    If the server responds with **304 Not Modified**, returns ``None``
+    (the remote file has not changed since the ETag was issued).
 
     Parameters
     ----------
@@ -105,23 +111,36 @@ def get_remote_file_metadata(
         Request timeout in seconds.
     follow_redirects
         Whether to follow HTTP redirects.
+    if_none_match
+        ETag value from a previous run.
+        Sent as ``If-None-Match`` header to enable HTTP 304 short-circuit.
 
     Returns
     -------
-    RemoteFileMetadata
-        Parsed metadata from HTTP HEAD response headers.
+    RemoteFileMetadata | None
+        Parsed metadata from HTTP HEAD response headers, or ``None`` if the server
+        returned 304 Not Modified.
 
     Raises
     ------
     httpx.HTTPStatusError
-        If the server returns an error status (4xx/5xx).
+        If the server returns an error status (4xx/5xx, excluding 304).
     httpx.TimeoutException
         If the request times out.
     """
     logger.debug("Checking remote file metadata", url=url)
 
+    request_headers: dict[str, str] = {}
+    if if_none_match is not None:
+        request_headers["If-None-Match"] = f'"{if_none_match}"'
+
     with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, http2=True) as client:
-        response = client.head(url)
+        response = client.head(url, headers=request_headers)
+
+        if response.status_code == http.HTTPStatus.NOT_MODIFIED:
+            logger.debug("HTTP 304 Not Modified", url=url)
+            return None
+
         response.raise_for_status()
 
     headers = response.headers

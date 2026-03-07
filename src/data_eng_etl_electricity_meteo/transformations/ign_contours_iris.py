@@ -40,7 +40,7 @@ def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
 # --------------------------------------------------------------------------------------
 
 
-ALL_SOURCE_COLUMNS: set[str] = {
+_ALL_SOURCE_COLUMNS: set[str] = {
     "cleabs",
     "code_insee",
     "code_iris",
@@ -52,7 +52,7 @@ ALL_SOURCE_COLUMNS: set[str] = {
 }
 
 # cleabs (internal IGN id) and iris (redundant with code_iris) are not used.
-USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS - {"cleabs", "iris"}
+_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS - {"cleabs", "iris"}
 
 
 class SilverSchema(DataFrameModel):
@@ -161,7 +161,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     duckdb.Error
         On DuckDB spatial query failure (missing extension, etc.).
     """
-    validate_source_columns(df, ALL_SOURCE_COLUMNS, "ign_contours_iris")
+    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "ign_contours_iris")
 
     # Use DuckDB for spatial operations on the WKB geometry
     with _duckdb_spatial_conn() as conn:
@@ -224,7 +224,7 @@ SPEC = DatasetTransformSpec(
     name="ign_contours_iris",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
     silver_schema=SilverSchema,
 )

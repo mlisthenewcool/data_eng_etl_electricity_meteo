@@ -16,11 +16,18 @@ import httpx
 from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 from data_eng_etl_electricity_meteo.utils.progress import DownloadProgressReporter
 
 logger = get_logger("download")
+
+# Optimal streaming chunk size (bytes). Benchmarked sweet spot is 256 KB–1 MB;
+# below 64 KB syscall overhead dominates, above 1 MB RAM grows with no speed gain.
+_CHUNK_SIZE = 512 * 1024
+
+# Standard timeouts (seconds) for TCP connect and socket read.
+_CONNECT_TIMEOUT = 10
+_READ_TIMEOUT = 30
 
 
 # --------------------------------------------------------------------------------------
@@ -101,13 +108,12 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 # --------------------------------------------------------------------------------------
 
 
-# TODO: accept timeout and chunk_size as function parameters instead of
-#  reading directly from settings (download_timeout_total,
-#  download_timeout_connect, download_timeout_sock_read, download_chunk_size)
 def download_to_file(
     url: str,
     dest_dir: Path,
     fallback_filename: str,
+    *,
+    timeout_seconds: int,
     progress: Callable[[int], DownloadProgressReporter] | None = None,
 ) -> HttpDownloadInfo:
     """Stream a file from *url* to *dest_dir* with progress and integrity hash.
@@ -120,6 +126,9 @@ def download_to_file(
         Destination directory (created if needed).
     fallback_filename
         Fallback filename if none could be extracted from the response.
+    timeout_seconds
+        Maximum total time for the entire download. Connect and read timeouts use
+        module-level defaults (``_CONNECT_TIMEOUT``, ``_READ_TIMEOUT``).
     progress
         Factory called with ``total_bytes`` (``0`` if unknown) that returns a
         `DownloadProgressReporter`.
@@ -144,14 +153,10 @@ def download_to_file(
     logger.info("Starting download", url=_short_url(url))
     logger.debug("Download URL", url=url, dest_dir=dest_dir)
 
-    # TODO: document and expose write/pool timeout parameters
-
-    # -- Configure HTTP client and timeout ---------------------------------------------
-
     timeout = httpx.Timeout(
-        timeout=settings.download_timeout_total,
-        connect=settings.download_timeout_connect,
-        read=settings.download_timeout_sock_read,
+        timeout=timeout_seconds,
+        connect=_CONNECT_TIMEOUT,
+        read=_READ_TIMEOUT,
         write=None,
         pool=None,
     )
@@ -206,7 +211,7 @@ def download_to_file(
 
             try:
                 with dest_path.open("wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=settings.download_chunk_size):
+                    for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
                         f.write(chunk)
                         hasher.update(chunk)
                         chunk_len = len(chunk)

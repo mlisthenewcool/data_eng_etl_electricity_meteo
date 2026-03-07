@@ -121,7 +121,7 @@ def _create_dag(
         dag_id=f"{dataset.name}_to_gold",
         schedule=schedule,
         start_date=START_DATE,
-        catchup=False,
+        catchup=False,  # TODO[prod]: set to True
         default_args=DEFAULT_ARGS,
         tags=["dbt", "gold", "postgres"],
         description=dataset.description[:200] if dataset.description else None,
@@ -146,7 +146,7 @@ def _create_dag(
             """Execute ``dbt test --select {model}``."""
             _run_dbt(subcommand="test", extra_args=["--select", dataset.name])
 
-        dbt_run() >> dbt_test()  # type: ignore[operator]  # for IDE
+        dbt_run() >> dbt_test()  # for IDE
 
     return _dag()
 
@@ -169,8 +169,11 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_gold_datasets():
         try:
-            gold_asset = get_gold_pg_asset(dataset.name)
-            upstream_assets = [get_silver_pg_asset(dep) for dep in dataset.source.depends_on]
+            gold_asset = get_gold_pg_asset(dataset)
+            upstream_assets = [
+                get_silver_pg_asset(catalog.get_remote_dataset(dep))
+                for dep in dataset.source.depends_on
+            ]
             schedule: Asset | AssetAll = (
                 upstream_assets[0] if len(upstream_assets) == 1 else AssetAll(*upstream_assets)
             )

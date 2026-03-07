@@ -26,6 +26,8 @@ from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
     CustomDownloadFunc,
     RemoteIngestionPipeline,
 )
+from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
+from data_eng_etl_electricity_meteo.pipeline.types import PipelineRunSnapshot
 
 logger = get_logger("cli")
 
@@ -74,14 +76,14 @@ def run_pipeline(
     version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
     manager = RemoteIngestionPipeline(dataset=dataset, custom_download=custom_download)
 
-    # -- Load previous run metadata (not implemented yet) ------------------------------
+    # -- Load previous run state -------------------------------------------------------
 
-    logger.warning("Load previous run metadata not yet implemented outside of Airflow")
+    previous_snapshot = load_local_snapshot(dataset_name)
 
     # -- Download ----------------------------------------------------------------------
 
     try:
-        download_ctx = manager.download(version=version, previous_snapshot=None)
+        download_ctx = manager.download(version=version, previous_snapshot=previous_snapshot)
     except DownloadStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
@@ -94,7 +96,9 @@ def run_pipeline(
 
     if dataset.source.format.is_archive:
         try:
-            extract_ctx = manager.extract_archive(context=download_ctx, previous_snapshot=None)
+            extract_ctx = manager.extract_archive(
+                context=download_ctx, previous_snapshot=previous_snapshot
+            )
         except ExtractStageError as error:
             error.log(logger.critical)
             raise SystemExit(1)
@@ -117,14 +121,14 @@ def run_pipeline(
     # -- Silver ------------------------------------------------------------------------
 
     try:
-        _ = manager.to_silver(context=bronze_ctx)
+        silver_ctx = manager.to_silver(context=bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
 
-    # -- Save run metadata (not implemented yet) ---------------------------------------
+    # -- Save run state ----------------------------------------------------------------
 
-    logger.warning("Save run metadata not yet implemented outside of Airflow")
+    save_local_snapshot(dataset_name, PipelineRunSnapshot.from_context(silver_ctx))
 
     # -- Postgres load -----------------------------------------------------------------
 

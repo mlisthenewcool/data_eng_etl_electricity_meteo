@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import httpx
 
-from data_eng_etl_electricity_meteo.utils import meteo_download
+from data_eng_etl_electricity_meteo.custom_downloads import meteo_climatologie as meteo_download
 
 # Reduced set: 6 departments instead of 95 (fast demo)
 _DEMO_DEPARTMENTS: set[str] = {"01", "02", "13", "69", "75", "93"}

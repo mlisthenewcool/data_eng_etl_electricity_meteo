@@ -5,10 +5,8 @@ Each DAG runs on its dataset's configured schedule and orchestrates: download �
 (extract) → bronze → silver, producing a silver file Asset.
 """
 
-from __future__ import annotations
-
+from collections.abc import Generator
 from datetime import timedelta
-from typing import TYPE_CHECKING
 
 from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, task
 
@@ -21,17 +19,10 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.pipeline.custom_downloads import CUSTOM_DOWNLOADS
+from data_eng_etl_electricity_meteo.custom_downloads.registry import CUSTOM_DOWNLOADS
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
-from data_eng_etl_electricity_meteo.pipeline.types import (
-    PipelineContext,
-    PipelineRunSnapshot,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-    from airflow.sdk.execution_time.context import InletEventsAccessors
+from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
+from data_eng_etl_electricity_meteo.pipeline.types import PipelineContext, PipelineRunSnapshot
 
 logger = get_logger("dag.to_silver")
 
@@ -51,36 +42,6 @@ TASK_DOWNLOAD_TIMEOUT = timedelta(minutes=30)
 TASK_EXTRACT_TIMEOUT = timedelta(minutes=5)
 TASK_BRONZE_TIMEOUT = timedelta(minutes=3)
 TASK_SILVER_TIMEOUT = timedelta(minutes=10)
-
-
-# --------------------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------------------
-
-
-def _get_previous_snapshot(
-    inlet_events: InletEventsAccessors | None, asset: Asset
-) -> PipelineRunSnapshot | None:
-    """Extract the previous run snapshot from Airflow inlet events.
-
-    Parameters
-    ----------
-    inlet_events
-        Inlet events accessor injected by Airflow, or ``None``.
-    asset
-        The Asset whose metadata to retrieve.
-
-    Returns
-    -------
-    PipelineRunSnapshot | None
-        Validated snapshot, or ``None`` if no previous event exists.
-    """
-    raw_metadata = (
-        inlet_events[asset][-1].extra
-        if inlet_events and asset in inlet_events and len(inlet_events[asset]) > 0
-        else None
-    )
-    return PipelineRunSnapshot.from_metadata_dict(raw_metadata)
 
 
 # --------------------------------------------------------------------------------------
@@ -116,20 +77,17 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
         # max_active_runs=1 controlled globally
     )
     def _dag() -> None:
-        @task.short_circuit(
-            task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT, inlets=[asset]
-        )
-        def download_task(
-            version: str, inlet_events: InletEventsAccessors | None = None
-        ) -> XComArg | bool:
+        @task.short_circuit(task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT)
+        def download_task(version: str) -> XComArg | bool:
             """Download remote data to landing with short-circuit if unchanged.
 
-            1. Retrieve metadata from remote.
-            2. Compare to previous run metadata — short-circuit if unchanged.
-            3. Download content to landing layer.
-            4. Compare SHA-256 hashes — short-circuit if identical.
+            1. Load previous run state from local JSON.
+            2. Retrieve metadata from remote.
+            3. Compare to previous run metadata — short-circuit if unchanged.
+            4. Download content to landing layer.
+            5. Compare SHA-256 hashes — short-circuit if identical.
             """
-            previous_snapshot = _get_previous_snapshot(inlet_events, asset)
+            previous_snapshot = load_local_snapshot(manager.dataset.name)
 
             ingestion_result = manager.download(
                 version=version, previous_snapshot=previous_snapshot
@@ -140,14 +98,10 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
 
             return ingestion_result.model_dump(mode="json")
 
-        @task.short_circuit(
-            task_id=TASK_EXTRACT, execution_timeout=TASK_EXTRACT_TIMEOUT, inlets=[asset]
-        )
-        def extract_task(
-            ctx: XComArg, inlet_events: InletEventsAccessors | None = None
-        ) -> XComArg | bool:
+        @task.short_circuit(task_id=TASK_EXTRACT, execution_timeout=TASK_EXTRACT_TIMEOUT)
+        def extract_task(ctx: XComArg) -> XComArg | bool:
             """Extract archive; short-circuit if SHA256 is unchanged."""
-            previous_snapshot = _get_previous_snapshot(inlet_events, asset)
+            previous_snapshot = load_local_snapshot(manager.dataset.name)
 
             context = manager.extract_archive(
                 PipelineContext.model_validate(ctx), previous_snapshot=previous_snapshot
@@ -166,15 +120,17 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
 
         @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[asset])
         def silver_task(ctx: XComArg) -> Generator[Metadata]:
-            """Apply business transformations and emit Asset metadata."""
+            """Apply business transformations, save state, and emit Asset metadata."""
             silver_result = manager.to_silver(PipelineContext.model_validate(ctx))
+            snapshot = PipelineRunSnapshot.from_context(silver_result)
 
-            # Persisted in Asset metadata for smart-skip on next run
+            # Persist to local JSON (single source of truth for smart-skip)
+            save_local_snapshot(manager.dataset.name, snapshot)
 
+            # Emit Asset metadata (UI observability + downstream triggering)
             yield Metadata(
                 asset=asset,
-                # exclude={"path", "extracted_file_path"}
-                extra=PipelineRunSnapshot.from_context(silver_result).model_dump(exclude_none=True),
+                extra=snapshot.model_dump(exclude_none=True),
             )
 
         # -- DAG workflow: download > (extract) > bronze > silver ----------------------
@@ -209,7 +165,7 @@ def _generate_all_dags() -> dict[str, DAG]:
 
     for dataset in catalog.get_remote_datasets():
         try:
-            asset = get_silver_file_asset(dataset.name)
+            asset = get_silver_file_asset(dataset)
         except ValueError:
             logger.exception("Invalid dataset configuration", dataset=dataset.name)
             continue  # move to next dataset

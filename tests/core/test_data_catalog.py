@@ -72,11 +72,11 @@ class TestIngestionFrequencyFormatDatetimeAsVersion:
     @pytest.mark.parametrize(
         argnames="freq, no_dash, expected",
         argvalues=[
-            pytest.param(_F.HOURLY,  True,  "20240315T103000",       id="hourly_no_dash"),
-            pytest.param(_F.HOURLY,  False, "2024-03-15-T-10-30-00", id="hourly_with_dash"),
-            pytest.param(_F.DAILY,   True,  "20240315",              id="daily_no_dash"),
-            pytest.param(_F.DAILY,   False, "2024-03-15",            id="daily_with_dash"),
-            pytest.param(_F.WEEKLY,  True,  "20240315",              id="non_daily_date_only"),
+            pytest.param(_F.HOURLY, True,  "20240315T10",   id="hourly_no_dash"),
+            pytest.param(_F.HOURLY, False, "2024-03-15T10", id="hourly_with_dash"),
+            pytest.param(_F.DAILY,  True,  "20240315",      id="daily_no_dash"),
+            pytest.param(_F.DAILY,  False, "2024-03-15",    id="daily_with_dash"),
+            pytest.param(_F.WEEKLY, True,  "20240315",      id="non_daily_date_only"),
         ],
     )
     # fmt: on

@@ -1,33 +1,44 @@
-# --- Notes
 # PostGIS 17-x.x extends Postgres 17 with spatial functions (ST_Distance, KNN via <->).
-# Postgres 17 is the latest supported version by Airflow.
+# Postgres 17 is the latest version supported by Airflow.
 
 services:
+
+  # ------------------------------------------------------------------------------------
+  # Postgres (PostGIS)
+  # ------------------------------------------------------------------------------------
+
   postgres_service:
     container_name: postgres_container
     image: postgis/postgis:17-3.5
     restart: always
-    shm_size: 256mb # Shared memory for Postgres operations, TODO: OK in prod ?
+    shm_size: 256mb # TODO[prod]: benchmark with real workload (memory for Postgres operations)
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro # init scripts are executed only on empty volume
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro # executed only on empty volume
+
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_root_password
       POSTGRES_USER_FILE: /run/secrets/postgres_root_username
       POSTGRES_DB: "${AIRFLOW_DB_NAME}"
-      POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}" # used by custom init script (postgres/init/...)
+      POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}" # read by custom init script (postgres/init/)
+
     healthcheck:
-      # Check both databases are ready
       test: [ "CMD-SHELL", "USER=$$(cat /run/secrets/postgres_root_username); pg_isready -U $$USER -d ${AIRFLOW_DB_NAME} && pg_isready -U $$USER -d ${POSTGRES_DB_NAME}" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
     secrets:
       - postgres_root_password
       - postgres_root_username
+
+  # ------------------------------------------------------------------------------------
+  # Airflow (standalone: scheduler + webserver + triggerer)
+  # ------------------------------------------------------------------------------------
 
   airflow_service:
     container_name: airflow_container
@@ -43,62 +54,66 @@ services:
     depends_on:
       postgres_service:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    # -- Environment (contextual config, varies between dev / prod) --------------------
+    # Structural config lives in airflow.Dockerfile (ENV).
+
     environment:
-      # Config contextuelle qui peut varier selon l'environnement (logging, connexions, secrets, feature flags dev/prod)
 
-      # Airflow root logger level (scheduler, webserver, executor internals)
-      AIRFLOW__LOGGING__LOGGING_LEVEL: "${LOGGING_LEVEL}"
-
-      # TODO: vérifier ces affirmations
-      # Format de chaque ligne de log. Le timestamp (ISO 8601) et le level sont
-      # fournis par Airflow via structlog ; les loggers applicatifs ne doivent
-      # émettre que le message brut pour éviter les doublons.
-      # Note Airflow 3 : le format de date est hardcodé en ISO 8601 dans le
-      # ProcessorFormatter de structlog (MaybeTimeStamper(fmt="iso")).
-
-      # Le format principal utilisé par les loggers Airflow (scheduler, webserver, et task logs dans l'UI web).
-      # C'est celui qui est appliqué par le FileTaskHandler quand il écrit les logs de vos tasks.
-      AIRFLOW__LOGGING__LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
-
-      # Format simplifié utilisé pour les messages de logging pendant la phase de boot/init d'Airflow (avant que la config complète ne soit chargée).
-      # Typiquement, c'est le format des premiers messages au démarrage. Peu critique pour vos tasks.
-      AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
-
-      # --- Variables de logging documentées (non utilisées) ---
-      # TASK_LOG_PREFIX_TEMPLATE : template Jinja en préfixe de chaque tentative de task dans le webserver.
-      # TASK_LOG_READER          : classe qui lit les logs dans le webserver (défaut: "task"). À changer uniquement pour du remote logging (S3, GCS…).
-      # LOG_FORMATTER_CLASS      : dead config dans Airflow 3 — remplacé par structlog ProcessorFormatter.
-      # LOGGING_CONFIG_CLASS     : dict Python remplaçant DEFAULT_LOGGING_CONFIG (ou LOGGING_CONFIG ?)
-      #   Dans Airflow 3, les formatters/handlers sont écrasés par structlog — utilité limitée.
-
-      # printf "%s" avoids interpreting % characters in secrets as format specifiers
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}/${AIRFLOW_DB_NAME}\"'"
-      AIRFLOW__API__SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
-      # JWT signing key shared by all Airflow components (scheduler log server ↔ api-server).
-      # Without this, each component derives its own ephemeral key → Signature verification failed.
-      AIRFLOW__API_AUTH__JWT_SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
-      AIRFLOW__API_AUTH__JWT_ISSUER: "http://airflow-standalone"
-
-      # Project database connection (read by pydantic Settings → loaders/postgres.py)
+      # -- Project database (pydantic Settings → loaders/postgres.py) ------------------
       POSTGRES_HOST: "${POSTGRES_HOST}"
       POSTGRES_PORT: "${POSTGRES_PORT}"
       POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}"
       DBT_TARGET: "docker"
 
-      # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD is).
-      # AIRFLOW_CONN_PROJECT_POSTGRES is instead exported in the command below,
-      # built at container startup from Docker secrets — no plaintext credentials in compose.
+      # -- Logging ---------------------------------------------------------------------
+      # Airflow 3 logging (vérifié sur 3.1.7) :
+      #   - Timestamp ISO 8601 + level ajoutés par structlog
+      #     (MaybeTimeStamper(fmt="iso") + add_log_level). Les loggers
+      #     applicatifs ne doivent émettre que le message brut.
+      #   - Task logs transitent par pipe JSON vers le supervisor.
+      #   - LOG_FORMATTER_CLASS est dead config (remplacé par structlog).
+      #   - LOGGING_CONFIG_CLASS : utilité limitée (écrasé par structlog).
 
-    ports:
-      - "127.0.0.1:8080:8080"
+      AIRFLOW__LOGGING__LOGGING_LEVEL: "${LOGGING_LEVEL}"
 
-    # TODO: modifier les bind volumes pour la mise en production
+      # Percent-style → PercentFormatRender.
+      # Si absent → ConsoleRenderer (aligné, coloré).
+      # AIRFLOW__LOGGING__LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
+
+      # Format pour les commandes CLI (backfill, task run) et daemon.
+      # AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
+
+      # -- Airflow internal database ---------------------------------------------------
+      # printf "%s" avoids interpreting % in secrets as format specifiers
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${AIRFLOW_DB_NAME}\"'"
+
+      # -- Authentication & API --------------------------------------------------------
+      AIRFLOW__API__SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
+      # JWT key shared by all components (scheduler log server ↔ api-server).
+      # Without this, each derives its own ephemeral key → signature failure.
+      AIRFLOW__API_AUTH__JWT_SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
+      AIRFLOW__API_AUTH__JWT_ISSUER: "http://airflow-standalone"
+
+      # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD).
+      # AIRFLOW_CONN_PROJECT_POSTGRES is exported in the startup command below,
+      # built from Docker secrets at runtime — no plaintext credentials in compose.
+
+    # -- Volumes -----------------------------------------------------------------------
+
+    # TODO[prod]: replace bind mounts with named volumes (airflow_data, etc.)
+    # and configure AIRFLOW__CORE__DAGS_FOLDER instead of bind-mounting dags/
     volumes:
-      - ./src/data_eng_etl_electricity_meteo/airflow/dags:/opt/airflow/dags # TODO: AIRFLOW__CORE__DAGS_FOLDER
+      - ./src/data_eng_etl_electricity_meteo/airflow/dags:/opt/airflow/dags
       - ./src:/opt/airflow/src:ro
-      - ./data:/opt/airflow/data # TODO: remplacer par airflow_data:/opt/airflow/data en prod + dans volumes en bas
-      - ./postgres:/opt/airflow/postgres # we need this to execute Postgres' ingestion queries through Airflow
+      - ./data:/opt/airflow/data
+      - ./postgres:/opt/airflow/postgres # ingestion SQL queries via Airflow
       - ./dbt:/opt/airflow/dbt
+
+    # -- Health check ------------------------------------------------------------------
+
     healthcheck:
       # https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html
       test: [ "CMD-SHELL", "curl -sf http://localhost:8080/api/v2/monitor/health || exit 1" ]
@@ -106,6 +121,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+    # -- Startup (exports secrets then launches Airflow) -------------------------------
+
     command:
       - bash
       - -c
@@ -114,10 +132,15 @@ services:
         export POSTGRES_USER="$(cat /run/secrets/postgres_root_username)"
         export POSTGRES_PASSWORD="$(cat /run/secrets/postgres_root_password)"
         exec airflow standalone
+
     secrets:
       - postgres_root_password
       - postgres_root_username
       - airflow_api_secret_key
+
+# --------------------------------------------------------------------------------------
+# Secrets (Docker secrets from local files)
+# --------------------------------------------------------------------------------------
 
 secrets:
   postgres_root_password:
@@ -127,6 +150,10 @@ secrets:
   airflow_api_secret_key:
     file: secrets/airflow_api_secret_key
 
+# --------------------------------------------------------------------------------------
+# Volumes
+# --------------------------------------------------------------------------------------
+
 volumes:
   postgres_data:
-  # airflow_data: # TODO: ajouter en prod
+  # airflow_data: # TODO[prod]: enable named volume for data persistence

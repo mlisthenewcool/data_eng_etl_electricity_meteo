@@ -8,6 +8,7 @@
 
 ## Maintenant
 
+- [ ] [Misc] Résoudre tous les TODO dans le code
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
   météo à requêter (meilleure station à moins de 20 km par exemple).
 
@@ -32,16 +33,9 @@
 - [ ] [Pipeline] Gérer les cas où les données sont là, mais pas les métadonnées : plutôt
   demander à l'utilisateur de choisir au lieu de relancer tout le téléchargement des
   données + tout le pipeline
-- [ ] [Pipeline] Implémenter la persistance locale du state (JSON par dataset) pour le
-  smart-skip hors Airflow (`cli/run_pipeline.py`). Pistes d'implémentation (ancien
-  `state.py`) : modèle pydantic `DatasetPipelineState` avec `current_version`,
-  `last_successful_run` (timestamp + métriques silver), `FailedRunRecord`
-  (stage_failed, error, traceback) ; sérialisation via `model_dump_json` /
-  `model_validate_json` dans `data/_state/{dataset_name}.json`
 - [ ] [Pipeline] Permettre à l'utilisateur de choisir une action lors d'une
   incohérence (par exemple celle de l'état incohérent entre métadonnées et fichiers).
   À faire pour Airflow et en local avec confirmation cli
-- [ ] [Pipeline] Vérifier la cohérence des timezones (SQL, Airflow, local)
 - [ ] [Pipeline] Vérifier la cohérence des types entre Postgres et Polars
 - [ ] [Postgres] Ajouter extension DuckDB : https://github.com/duckdb/pg_duckdb
 - [ ] [Postgres] Résoudre l'accès concurrent au load dans Postgres
@@ -109,6 +103,11 @@
 
 ## Terminé
 
+- [x] [Pipeline] _(2026-03-07)_ Unifier toutes les timezones sous UTC (Airflow,
+  CLI, données, logs) et corriger l'incohérence `Europe/Paris` dans le Dockerfile
+- [x] [Pipeline] _(2026-03-07)_ Implémenter la persistance locale du state (JSON
+  par dataset dans `data/_state/`) pour le smart-skip hors Airflow
+  (`pipeline/state.py`, `cli/runner.py`)
 - [x] [Pipeline] _(2026-03-06)_ Ajouter le suivi de progression batch (Airflow)
   pour les téléchargements custom, uniformiser les champs de log (`{subject}_count`,
   `file_size_mib`) et améliorer le logging d'erreurs meteo_download

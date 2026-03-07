@@ -54,11 +54,22 @@ PARAMS_EOLIENS = [
 
 
 # --------------------------------------------------------------------------------------
+# Geographic bounds (metropolitan France bounding box)
+# --------------------------------------------------------------------------------------
+
+
+_METRO_LAT_MIN = 41.0
+_METRO_LAT_MAX = 52.0
+_METRO_LON_MIN = -6.0
+_METRO_LON_MAX = 10.0
+
+
+# --------------------------------------------------------------------------------------
 # Silver schema
 # --------------------------------------------------------------------------------------
 
 
-ALL_SOURCE_COLUMNS: set[str] = {
+_ALL_SOURCE_COLUMNS: set[str] = {
     "bassin",
     "date_debut",
     "date_fin",
@@ -67,11 +78,12 @@ ALL_SOURCE_COLUMNS: set[str] = {
     "nom",
     "parametres",
     "positions",
-    "type_station",
+    "producteurs",
+    "types_poste",
 }
 
-# type_station is not used in the silver transform.
-USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS - {"type_station"}
+# producteurs and types_poste are not used in the silver transform.
+_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS - {"producteurs", "types_poste"}
 
 
 class SilverSchema(DataFrameModel):
@@ -82,9 +94,10 @@ class SilverSchema(DataFrameModel):
     lieu_dit: str
     bassin: str
     date_debut: date
-    # Metropolitan France only (overseas territories excluded at source level)
-    latitude: Annotated[float, Column(nullable=False, ge=41.0, le=52.0)]
-    longitude: Annotated[float, Column(nullable=False, ge=-6.0, le=10.0)]
+    # Includes overseas territories; geographic bounds removed.
+    # Stations without position are filtered out upstream.
+    latitude: Annotated[float, Column(nullable=False)]
+    longitude: Annotated[float, Column(nullable=False)]
     altitude: int
     mesure_solaire: bool
     mesure_eolien: bool
@@ -151,7 +164,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Flattened DataFrame with measurement capability flags.
     """
-    validate_source_columns(df, ALL_SOURCE_COLUMNS, "meteo_france_stations")
+    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "meteo_france_stations")
 
     logger.debug("Filtering active stations", total_stations=len(df))
 
@@ -180,6 +193,26 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("current_position").struct.field("longitude").alias("longitude"),
         pl.col("current_position").struct.field("altitude").alias("altitude"),
     )
+
+    # Drop stations without coordinates (unusable for spatial joins)
+    no_position = df_with_position.filter(pl.col("latitude").is_null())
+    if len(no_position) > 0:
+        logger.warning("Dropping stations without position", stations_count=len(no_position))
+        df_with_position = df_with_position.filter(pl.col("latitude").is_not_null())
+
+    # Warn about overseas stations (no electricity production data for DOM-TOM)
+    overseas = df_with_position.filter(
+        (pl.col("latitude") < _METRO_LAT_MIN)
+        | (pl.col("latitude") > _METRO_LAT_MAX)
+        | (pl.col("longitude") < _METRO_LON_MIN)
+        | (pl.col("longitude") > _METRO_LON_MAX)
+    )
+    if len(overseas) > 0:
+        logger.warning(
+            "Dataset includes overseas stations (no electricity data available)",
+            overseas_count=len(overseas),
+            metropolitan_count=len(df_with_position) - len(overseas),
+        )
 
     df_with_params = df_with_position.with_columns(
         pl.col("parametres")
@@ -254,7 +287,7 @@ SPEC = DatasetTransformSpec(
     name="meteo_france_stations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
     silver_schema=SilverSchema,
 )

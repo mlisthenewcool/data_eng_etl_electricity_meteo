@@ -105,7 +105,6 @@ class RemotePathResolver(_BasePathResolver):
             return []
 
         # Exclude symlink and only include regular files
-        # TODO: speed vs security (alternative: p.stem != "latest")
         versions: list[Path] = [
             path
             for path in self._bronze_dir.glob("*.parquet")

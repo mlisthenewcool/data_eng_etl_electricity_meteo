@@ -13,7 +13,7 @@ Usage::
 import typer
 
 from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
-from data_eng_etl_electricity_meteo.pipeline.custom_downloads import CUSTOM_DOWNLOADS
+from data_eng_etl_electricity_meteo.custom_downloads.registry import CUSTOM_DOWNLOADS
 
 app = typer.Typer(no_args_is_help=True)
 

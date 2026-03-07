@@ -445,9 +445,6 @@ def get_logger(name: str | None = None) -> BoundLogger:
     if name is None:
         return structlog.get_logger()
 
-    # TODO: auto-shorten dotted module paths to allow __name__ usage
-    # short = name.rsplit(".", maxsplit=1)[-1]
-
     return structlog.get_logger(logger_name=name)
 
 

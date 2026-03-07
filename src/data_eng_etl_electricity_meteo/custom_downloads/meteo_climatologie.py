@@ -37,11 +37,11 @@ logger = get_logger("download.meteo_climatologie")
 
 # data.gouv.fr API for the Météo France HOR (hourly) dataset
 # Resources endpoint requires API v2 (v1 returns 405 on /resources/)
-DATASET_ID = "6569b4473bedf2e7abad3b72"
-RESOURCES_API_URL = f"https://www.data.gouv.fr/api/2/datasets/{DATASET_ID}/resources/"
+_DATASET_ID = "6569b4473bedf2e7abad3b72"
+_RESOURCES_API_URL = f"https://www.data.gouv.fr/api/2/datasets/{_DATASET_ID}/resources/"
 
 # Direct download base URL (used for CSV.gz fallback when API is unavailable)
-BASE_URL = "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR"
+_BASE_URL = "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR"
 
 # Metropolitan France departments: 01-19, 20 (Corse), 21-95 (95 total)
 # data.gouv.fr uses "20" for Corse — "2A"/"2B" files do not exist (HTTP 404)
@@ -52,7 +52,7 @@ DEPARTMENTS: set[str] = {
 }
 
 # Landing output filename
-MERGED_FILENAME = "merged.parquet"
+_MERGED_FILENAME = "merged.parquet"
 
 # Columns retained at download time (aligned with BRONZE_COLUMNS in
 # meteo_france_climatologie.py). Pruning 196 → 16 columns here avoids
@@ -126,7 +126,7 @@ def _fetch_department_resources(
 
     while True:
         response = client.get(
-            RESOURCES_API_URL,
+            _RESOURCES_API_URL,
             params={
                 "q": f"periode_{period}",
                 "page_size": _API_PAGE_SIZE,
@@ -194,7 +194,7 @@ def _build_fallback_resources(
     return [
         {
             "dept": dept,
-            "csv_url": f"{BASE_URL}/H_{dept}_latest-{year_start}-{year_end}.csv.gz",
+            "csv_url": f"{_BASE_URL}/H_{dept}_latest-{year_start}-{year_end}.csv.gz",
             "parquet_url": None,
         }
         for dept in sorted(DEPARTMENTS)
@@ -440,11 +440,7 @@ def download_climatologie(
     tmp_dir = dest_dir / "_tmp_departments"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    timeout = httpx.Timeout(
-        timeout=settings.download_timeout_total,
-        connect=settings.download_timeout_connect,
-        read=settings.download_timeout_sock_read,
-    )
+    timeout = httpx.Timeout(timeout=settings.download_timeout_seconds)
 
     # -- Build resource list (fallback + API discovery) --------------------------------
 
@@ -475,7 +471,7 @@ def download_climatologie(
 
     # Lazy scan all temporary parquets and write the merged result.
     # This avoids loading all departments into memory simultaneously.
-    merged_path = dest_dir / MERGED_FILENAME
+    merged_path = dest_dir / _MERGED_FILENAME
     lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
     lazy_frames.sink_parquet(merged_path)
 

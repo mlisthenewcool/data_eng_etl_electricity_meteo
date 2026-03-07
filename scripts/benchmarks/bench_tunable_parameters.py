@@ -50,14 +50,14 @@ PARAMETERS: list[TunableParameter] = [
     TunableParameter(
         name="download_chunk_size",
         current_value="512 KB",
-        source_file="core/settings.py",
-        source_line=170,
+        source_file="utils/download.py",
+        source_line=26,
         priority=1,
-        test_values=["256 KB", "512 KB", "1 MB", "2 MB", "5 MB"],
+        test_values=["64 KB", "256 KB", "512 KB", "1 MB"],
         description=(
-            "httpx streaming read size. Larger chunks reduce syscall overhead but"
-            " increase memory per concurrent download. Affects climatologie (95"
-            " parallel department files) the most."
+            "httpx streaming read size (module constant _CHUNK_SIZE)."
+            " Benchmarked sweet spot: 256 KB–1 MB. Below 64 KB syscall overhead"
+            " dominates (+100% time), above 1 MB RAM grows with no speed gain."
         ),
     ),
     TunableParameter(
@@ -90,8 +90,8 @@ PARAMETERS: list[TunableParameter] = [
     TunableParameter(
         name="hash_chunk_size",
         current_value="128 KB",
-        source_file="core/settings.py",
-        source_line=217,
+        source_file="utils/file_hash.py",
+        source_line=7,
         priority=1,
         test_values=["64 KB", "128 KB", "256 KB", "512 KB", "1 MB"],
         description=(
@@ -102,48 +102,25 @@ PARAMETERS: list[TunableParameter] = [
     ),
     # --- Priority 2: Network and timeouts ---
     TunableParameter(
-        name="download_timeout_total",
+        name="download_timeout_seconds",
         current_value="600s",
         source_file="core/settings.py",
-        source_line=177,
+        source_line=188,
         priority=2,
         test_values=["300s", "600s", "900s"],
         description=(
-            "Total httpx timeout for a single file download. Must cover the slowest"
-            " dataset (eco2mix_cons_def ~260 MB). Too tight = intermittent failures"
-            " on slow connections."
-        ),
-    ),
-    TunableParameter(
-        name="download_timeout_connect",
-        current_value="10s",
-        source_file="core/settings.py",
-        source_line=184,
-        priority=2,
-        test_values=["5s", "10s", "20s"],
-        description=(
-            "TCP connection timeout. Affects how fast a down server is detected."
-            " data.gouv.fr occasionally has slow DNS resolution."
-        ),
-    ),
-    TunableParameter(
-        name="download_timeout_sock_read",
-        current_value="30s",
-        source_file="core/settings.py",
-        source_line=191,
-        priority=2,
-        test_values=["15s", "30s", "60s"],
-        description=(
-            "Socket read timeout between chunks. A stall longer than this aborts"
-            " the download. Météo France API can be bursty."
+            "Total httpx timeout for a single file download (configurable via"
+            " settings). Must cover the slowest dataset (eco2mix_cons_def ~260 MB)."
+            " Connect (10s) and read (30s) timeouts are module constants in"
+            " utils/download.py."
         ),
     ),
     # --- Priority 3: Algorithmic choices ---
     TunableParameter(
         name="hash_algorithm",
         current_value="sha256",
-        source_file="core/settings.py",
-        source_line=212,
+        source_file="utils/file_hash.py",
+        source_line=6,
         priority=3,
         test_values=["md5", "sha1", "sha256", "sha512"],
         description=(
@@ -266,7 +243,7 @@ def list_params() -> None:
         if not params:
             continue
 
-        logger.info(f"Priority {priority}: {PRIORITY_LABELS[priority]}")
+        logger.info("Tunable parameters", priority=priority, label=PRIORITY_LABELS[priority])
 
         for p in params:
             logger.info(

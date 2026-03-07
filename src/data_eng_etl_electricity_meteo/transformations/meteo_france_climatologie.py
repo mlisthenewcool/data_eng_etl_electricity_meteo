@@ -1,7 +1,8 @@
 """Transformations for Météo France climatologie dataset.
 
-Bronze reads the merged parquet produced by ``utils.meteo_download`` (already pruned to
-16 columns at download time) and casts all columns to the target types (Utf8 / Float64).
+Bronze reads the merged parquet produced by ``custom_downloads.meteo_climatologie``
+(already pruned to 16 columns at download time) and casts all columns to the target
+types (Utf8 / Float64).
 
 Silver renames columns, parses dates, and applies narrowing casts.
 
@@ -28,7 +29,7 @@ logger = get_logger("transform.meteo_france_climatologie")
 # --------------------------------------------------------------------------------------
 
 
-BRONZE_COLUMNS: dict[str, pl.DataType | type[pl.DataType]] = {
+_BRONZE_COLUMNS: dict[str, pl.DataType | type[pl.DataType]] = {
     "NUM_POSTE": pl.Utf8,
     "AAAAMMJJHH": pl.Utf8,
     "GLO": pl.Float64,
@@ -53,7 +54,7 @@ BRONZE_COLUMNS: dict[str, pl.DataType | type[pl.DataType]] = {
 # --------------------------------------------------------------------------------------
 
 
-COLUMNS_MAPPING: dict[str, str] = {
+_COLUMNS_MAPPING: dict[str, str] = {
     "num_poste": "id_station",
     "aaaammjjhh": "date_heure",
     "glo": "rayonnement_global",
@@ -78,10 +79,10 @@ COLUMNS_MAPPING: dict[str, str] = {
 # --------------------------------------------------------------------------------------
 
 
-ALL_SOURCE_COLUMNS: set[str] = set(COLUMNS_MAPPING.keys())
+_ALL_SOURCE_COLUMNS: set[str] = set(_COLUMNS_MAPPING.keys())
 
 # All source columns are used (1:1 mapping to silver output).
-USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS
+_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
@@ -134,7 +135,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     pl.LazyFrame
         LazyFrame with 16 typed columns ready for the bronze layer.
     """
-    columns = list(BRONZE_COLUMNS.keys())
+    columns = list(_BRONZE_COLUMNS.keys())
     logger.debug(
         "Reading merged parquet from landing (lazy)",
         columns_count=len(columns),
@@ -145,7 +146,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     sentinel_values = ["", "mq"]
     string_numeric_cols = [
         c
-        for c, t in BRONZE_COLUMNS.items()
+        for c, t in _BRONZE_COLUMNS.items()
         if t != pl.Utf8 and file_schema.get(c) in (pl.String, pl.Utf8)
     ]
 
@@ -158,7 +159,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
         )
 
     return lf.with_columns(
-        *(pl.col(c).cast(t, strict=True).alias(c) for c, t in BRONZE_COLUMNS.items())
+        *(pl.col(c).cast(t, strict=True).alias(c) for c, t in _BRONZE_COLUMNS.items())
     )
 
 
@@ -193,16 +194,16 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Transformed DataFrame with 16 columns ready for the silver layer.
     """
-    validate_source_columns(df, ALL_SOURCE_COLUMNS, "meteo_france_climatologie")
+    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "meteo_france_climatologie")
 
     logger.debug("Starting silver transform", rows_input=len(df), columns_count=len(df.columns))
 
     # -- Select and rename columns -----------------------------------------------------
 
-    source_cols = list(COLUMNS_MAPPING.keys())
-    target_cols = list(COLUMNS_MAPPING.values())
+    source_cols = list(_COLUMNS_MAPPING.keys())
+    target_cols = list(_COLUMNS_MAPPING.values())
 
-    df = df.select(source_cols).rename(COLUMNS_MAPPING)
+    df = df.select(source_cols).rename(_COLUMNS_MAPPING)
 
     # -- Parse date --------------------------------------------------------------------
 
@@ -245,7 +246,7 @@ SPEC = DatasetTransformSpec(
     name="meteo_france_climatologie",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
     silver_schema=SilverSchema,
 )

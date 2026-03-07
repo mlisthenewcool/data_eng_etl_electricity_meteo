@@ -43,7 +43,7 @@ TYPE_ENERGIE_MAPPING = {
 
 
 # Source columns expected after prepare_silver (before computed columns are added).
-ALL_SOURCE_COLUMNS: set[str] = {
+_ALL_SOURCE_COLUMNS: set[str] = {
     "capacite_reservoir",
     "code_combustible",
     "code_departement",
@@ -98,7 +98,7 @@ ALL_SOURCE_COLUMNS: set[str] = {
 }
 
 # All source columns are used (directly or for computed flags).
-USED_SOURCE_COLUMNS: set[str] = ALL_SOURCE_COLUMNS
+_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
@@ -225,7 +225,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Enriched DataFrame with energy type flags.
     """
-    validate_source_columns(df, ALL_SOURCE_COLUMNS, "odre_installations")
+    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "odre_installations")
 
     logger.debug("Applying transformations", rows_count=len(df), columns_count=len(df.columns))
 
@@ -299,7 +299,7 @@ SPEC = DatasetTransformSpec(
     name="odre_installations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(USED_SOURCE_COLUMNS),
+    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
+    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
     silver_schema=SilverSchema,
 )

@@ -13,12 +13,15 @@ Usage::
         --year-start 2024 --year-end 2025
 """
 
+from datetime import UTC, datetime
 from functools import partial
 
 import typer
 
 from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
-from data_eng_etl_electricity_meteo.utils.meteo_download import download_climatologie
+from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
+    download_climatologie,
+)
 
 DATASET_NAME = "meteo_france_climatologie"
 
@@ -30,13 +33,13 @@ def main(
     year_start: int | None = typer.Option(
         None,
         min=2015,
-        max=2026,
+        max=datetime.now(tz=UTC).year,
         help="Start year for climatologie data (default: current year - 1).",
     ),
     year_end: int | None = typer.Option(
         None,
         min=2015,
-        max=2026,
+        max=datetime.now(tz=UTC).year,
         help="End year for climatologie data (default: current year).",
     ),
     skip_postgres: bool = typer.Option(
