@@ -14,7 +14,7 @@ from data_eng_etl_electricity_meteo.transformations.shared import (
 )
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
-logger = get_logger("transform.odre_eco2mix_tr")
+logger = get_logger("transform")
 
 # Columns that contain non-numeric annotations in the real-time source API.
 # Cast to Int64 (BIGINT) in silver; non-castable values become null.

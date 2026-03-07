@@ -81,7 +81,7 @@ def _benchmark_one(
 
     start = time.perf_counter()
     try:
-        metrics = load_silver_to_postgres(dataset, conn)
+        metrics = load_silver_to_postgres(dataset, conn=conn)
         elapsed = time.perf_counter() - start
         rows_per_sec = round(stats["rows"] / elapsed) if elapsed > 0 else 0
 

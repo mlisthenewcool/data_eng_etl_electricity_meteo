@@ -20,6 +20,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.custom_downloads.registry import CUSTOM_DOWNLOADS
+from data_eng_etl_electricity_meteo.custom_metadata.registry import CUSTOM_METADATA
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
 from data_eng_etl_electricity_meteo.pipeline.types import PipelineContext, PipelineRunSnapshot
@@ -49,7 +50,7 @@ TASK_SILVER_TIMEOUT = timedelta(minutes=10)
 # --------------------------------------------------------------------------------------
 
 
-def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
+def _create_dag(manager: RemoteIngestionPipeline, *, asset: Asset) -> DAG:
     """Create a production-ready DAG for a dataset.
 
     Parameters
@@ -125,7 +126,7 @@ def _create_dag(manager: RemoteIngestionPipeline, asset: Asset) -> DAG:
             snapshot = PipelineRunSnapshot.from_context(silver_result)
 
             # Persist to local JSON (single source of truth for smart-skip)
-            save_local_snapshot(manager.dataset.name, snapshot)
+            save_local_snapshot(manager.dataset.name, snapshot=snapshot)
 
             # Emit Asset metadata (UI observability + downstream triggering)
             yield Metadata(
@@ -172,17 +173,19 @@ def _generate_all_dags() -> dict[str, DAG]:
 
         try:
             manager = RemoteIngestionPipeline(
-                dataset=dataset, custom_download=CUSTOM_DOWNLOADS.get(dataset.name)
+                dataset=dataset,
+                custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
+                custom_metadata=CUSTOM_METADATA.get(dataset.name),
             )
         except TransformNotFoundError as error:
             error.log(logger.warning)
             continue  # move to next dataset
 
-        pipelines[dataset.name] = _create_dag(manager, asset)
+        pipelines[dataset.name] = _create_dag(manager, asset=asset)
         logger.info("to_silver DAG created", dataset=dataset.name)
 
     total = len(catalog.get_remote_datasets())
-    logger.info("to_silver factory complete", created_count=len(pipelines), total_count=total)
+    logger.info("to_silver factory completed", created_count=len(pipelines), total_count=total)
 
     return pipelines
 

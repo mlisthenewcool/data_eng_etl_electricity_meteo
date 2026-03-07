@@ -14,6 +14,7 @@ import typer
 
 from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
 from data_eng_etl_electricity_meteo.custom_downloads.registry import CUSTOM_DOWNLOADS
+from data_eng_etl_electricity_meteo.custom_metadata.registry import CUSTOM_METADATA
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -34,6 +35,7 @@ def main(
     run_pipeline(
         dataset_name=dataset_name,
         custom_download=CUSTOM_DOWNLOADS.get(dataset_name),
+        custom_metadata=CUSTOM_METADATA.get(dataset_name),
         skip_postgres=skip_postgres,
     )
 

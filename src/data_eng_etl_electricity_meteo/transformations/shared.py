@@ -10,7 +10,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 
-logger = get_logger("transform.shared")
+logger = get_logger("transform")
 
 
 def to_snake_case(name: str) -> str:

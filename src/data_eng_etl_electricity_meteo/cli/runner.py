@@ -24,6 +24,7 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.loaders.pg_loader import run_standalone_postgres_load
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
     CustomDownloadFunc,
+    CustomMetadataFunc,
     RemoteIngestionPipeline,
 )
 from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
@@ -34,7 +35,9 @@ logger = get_logger("cli")
 
 def run_pipeline(
     dataset_name: str,
+    *,
     custom_download: CustomDownloadFunc | None = None,
+    custom_metadata: CustomMetadataFunc | None = None,
     skip_postgres: bool = False,
 ) -> None:
     """Run the full remote-ingestion pipeline for a single dataset.
@@ -46,6 +49,9 @@ def run_pipeline(
     custom_download
         Optional callable replacing the standard single-URL download
         (e.g. multi-file merge for climatologie).
+    custom_metadata
+        Optional callable providing remote metadata when the standard HTTP HEAD returns
+        no caching headers (e.g. OpenDataSoft catalog API).
     skip_postgres
         When ``True``, skip the final Postgres load step.
     """
@@ -74,7 +80,11 @@ def run_pipeline(
     # -- Prepare version and pipeline --------------------------------------------------
 
     version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
-    manager = RemoteIngestionPipeline(dataset=dataset, custom_download=custom_download)
+    manager = RemoteIngestionPipeline(
+        dataset=dataset,
+        custom_download=custom_download,
+        custom_metadata=custom_metadata,
+    )
 
     # -- Load previous run state -------------------------------------------------------
 
@@ -89,7 +99,7 @@ def run_pipeline(
         raise SystemExit(1)
 
     if download_ctx is None:
-        logger.info("Pipeline skipped: content unchanged")
+        logger.debug("Pipeline skipped: content unchanged")
         return
 
     # -- Extract (optional) ------------------------------------------------------------
@@ -104,10 +114,10 @@ def run_pipeline(
             raise SystemExit(1)
 
         if extract_ctx is None:
-            logger.info("Pipeline skipped: extracted content unchanged")
+            logger.debug("Pipeline skipped: extracted content unchanged")
             return
     else:
-        logger.info("Extraction skipped: format is not archive")
+        logger.debug("Extraction skipped: format is not archive")
         extract_ctx = None
 
     # -- Convert to Bronze -------------------------------------------------------------
@@ -128,12 +138,12 @@ def run_pipeline(
 
     # -- Save run state ----------------------------------------------------------------
 
-    save_local_snapshot(dataset_name, PipelineRunSnapshot.from_context(silver_ctx))
+    save_local_snapshot(dataset_name, snapshot=PipelineRunSnapshot.from_context(silver_ctx))
 
     # -- Postgres load -----------------------------------------------------------------
 
     if skip_postgres:
-        logger.info("Postgres loading skipped (--skip-postgres)")
+        logger.info("Postgres load skipped: --skip-postgres")
         return
 
     try:

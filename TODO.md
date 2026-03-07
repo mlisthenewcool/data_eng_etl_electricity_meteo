@@ -8,7 +8,7 @@
 
 ## Maintenant
 
-- [ ] [Misc] Résoudre tous les TODO dans le code
+- [x] [Misc] Résoudre tous les TODO dans le code
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
   météo à requêter (meilleure station à moins de 20 km par exemple).
 
@@ -86,7 +86,7 @@
 - [ ] [Docs] Documenter les variables d'environnement qui configurent le logging
 - [ ] [Logging] Ajouter toutes les exceptions custom dans le smoke test visuel
 - [ ] [Logging] Rendre les messages d'erreur plus actionnables
-- [ ] [Logging] Uniformiser le logging entre exceptions custom et les autres modules
+
 - [ ] [Optimisation] Compression Parquet et suppression de la relecture du DataFrame
   bronze → silver
 - [ ] [Pipeline] Ajouter les options `--skip-download`, `--skip-bronze`,
@@ -103,6 +103,8 @@
 
 ## Terminé
 
+- [x] [Logging] _(2026-03-07)_ Uniformiser les logs (messages, niveaux, noms de
+  loggers) et le logging entre exceptions custom et les autres modules
 - [x] [Pipeline] _(2026-03-07)_ Unifier toutes les timezones sous UTC (Airflow,
   CLI, données, logs) et corriger l'incohérence `Europe/Paris` dans le Dockerfile
 - [x] [Pipeline] _(2026-03-07)_ Implémenter la persistance locale du state (JSON

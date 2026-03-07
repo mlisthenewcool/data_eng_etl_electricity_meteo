@@ -61,7 +61,7 @@ _DBT_LOG_LEVELS = {
 # --------------------------------------------------------------------------------------
 
 
-def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
+def _run_dbt(subcommand: str, *, extra_args: list[str] | None = None) -> None:
     """Run a dbt subcommand, streaming JSON log lines through structlog."""
     cmd = ["dbt", subcommand, *_DBT_COMMON_ARGS, *(extra_args or [])]
     logger.info("Starting dbt", dbt_cmd=subcommand)
@@ -87,7 +87,7 @@ def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
         logger.error("dbt failed", dbt_cmd=subcommand, returncode=proc.returncode)
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
-    logger.info("dbt finished successfully", dbt_cmd=subcommand)
+    logger.info("dbt completed", dbt_cmd=subcommand)
 
 
 # --------------------------------------------------------------------------------------
@@ -97,6 +97,7 @@ def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
 
 def _create_dag(
     dataset: GoldDatasetConfig,
+    *,
     gold_asset: Asset,
     schedule: Asset | AssetAll,
 ) -> DAG:
@@ -181,11 +182,11 @@ def _generate_all_dags() -> dict[str, DAG]:
             logger.exception("Invalid dataset configuration", dataset=dataset.name)
             continue  # move to next dataset
 
-        dags[dataset.name] = _create_dag(dataset, gold_asset, schedule)
+        dags[dataset.name] = _create_dag(dataset, gold_asset=gold_asset, schedule=schedule)
         logger.info("to_gold DAG created", dataset=dataset.name)
 
     total = len(catalog.get_gold_datasets())
-    logger.info("to_gold factory complete", created_count=len(dags), total_count=total)
+    logger.info("to_gold factory completed", created_count=len(dags), total_count=total)
 
     return dags
 

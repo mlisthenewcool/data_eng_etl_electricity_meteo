@@ -77,6 +77,7 @@ def _validate_sqlite_header(path: Path) -> None:
 
 def extract_7z(
     archive_path: Path,
+    *,
     target_filename: str,
     dest_dir: Path,
     validate_sqlite: bool = True,

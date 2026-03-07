@@ -25,6 +25,7 @@ logger = get_logger("file_manager")
 
 def _rotate(
     current_path: Path,
+    *,
     backup_path: Path,
     layer: MedallionLayer,
 ) -> None:
@@ -45,9 +46,12 @@ def _rotate(
         If the copy fails (permission error, disk full, etc.).
     """
     if current_path.exists():
+        previous_mtime = datetime.fromtimestamp(current_path.stat().st_mtime, tz=UTC).strftime(
+            "%Y-%m-%dT%H"
+        )
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current_path, backup_path)
-        logger.debug("Rotated files", layer=layer)
+        logger.debug("Rotated files", layer=layer, previous_mtime=previous_mtime)
     else:
         logger.warning(
             "Skipped rotation: no current file (expected on first run)",
@@ -57,6 +61,7 @@ def _rotate(
 
 def _rollback(
     current_path: Path,
+    *,
     backup_path: Path,
     layer: MedallionLayer,
 ) -> bool:
@@ -199,8 +204,8 @@ class RemoteFileManager:
         """
         _rotate(
             self.resolver.silver_current_path,
-            self.resolver.silver_backup_path,
-            MedallionLayer.SILVER,
+            backup_path=self.resolver.silver_backup_path,
+            layer=MedallionLayer.SILVER,
         )
 
     def rollback_silver(self) -> bool:
@@ -213,6 +218,6 @@ class RemoteFileManager:
         """
         return _rollback(
             self.resolver.silver_current_path,
-            self.resolver.silver_backup_path,
-            MedallionLayer.SILVER,
+            backup_path=self.resolver.silver_backup_path,
+            layer=MedallionLayer.SILVER,
         )

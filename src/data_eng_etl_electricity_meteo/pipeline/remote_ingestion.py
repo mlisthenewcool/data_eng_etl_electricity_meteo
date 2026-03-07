@@ -75,6 +75,11 @@ logger = get_logger("pipeline")
 # single-URL download.
 CustomDownloadFunc = Callable[[Path, BatchProgressFactory | None], Path]
 
+# Callable that takes (url, timeout) and returns remote file metadata.
+# Used as a fallback when the standard HTTP HEAD returns no caching headers
+# (e.g. OpenDataSoft export endpoints).
+CustomMetadataFunc = Callable[[str, int], RemoteFileMetadata]
+
 
 @dataclass
 class RemoteIngestionPipeline:
@@ -90,6 +95,10 @@ class RemoteIngestionPipeline:
         Optional download strategy. When set, replaces the standard HEAD check +
         single-URL download with custom logic. The callable receives the landing
         directory and must return the path to the produced file.
+    custom_metadata
+        Optional metadata strategy.
+        When set, called as a fallback when the standard HTTP HEAD returns no caching
+        headers (no ETag, Last-Modified, or Content-Length).
 
     Raises
     ------
@@ -99,6 +108,7 @@ class RemoteIngestionPipeline:
 
     dataset: RemoteDatasetConfig
     custom_download: CustomDownloadFunc | None = field(default=None, repr=False)
+    custom_metadata: CustomMetadataFunc | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Validate that transform spec exists for this dataset (fast-fail)."""
@@ -119,6 +129,7 @@ class RemoteIngestionPipeline:
     def _decide_ingestion(
         self,
         current_remote_file_info: RemoteFileMetadata,
+        *,
         previous_remote_file_info: RemoteFileMetadata | None,
     ) -> IngestionDecision:
         """Determine if ingestion is required based on remote metadata and local state.
@@ -140,27 +151,29 @@ class RemoteIngestionPipeline:
             used for the decision.
         """
         silver_file_exists = self.resolver.silver_current_path.exists()
-        remote_metadata_exists = previous_remote_file_info is not None
+        # Treat empty metadata (all None fields from stale state) as absent.
+        has_previous_metadata = (
+            previous_remote_file_info is not None and previous_remote_file_info.has_any_field()
+        )
 
-        if remote_metadata_exists != silver_file_exists:
+        if has_previous_metadata != silver_file_exists:
             logger.warning(
                 "Inconsistent state, forcing ingestion to heal",
                 silver_file_exists=silver_file_exists,
-                remote_metadata_exists=remote_metadata_exists,
+                has_previous_metadata=has_previous_metadata,
             )
             return IngestionDecision(
                 should_ingest=True, is_healing=True, remote_metadata=current_remote_file_info
             )
 
-        # After the guard above, remote_metadata_exists == silver_file_exists.
-        # Checking previous_remote_file_info alone is sufficient.
-        if previous_remote_file_info:
+        # After the guard above, has_previous_metadata == silver_file_exists.
+        if has_previous_metadata and previous_remote_file_info is not None:
             change_detection_result = current_remote_file_info.compare_with(
                 previous_remote_file_info
             )
             if not change_detection_result.has_changed:
                 logger.info(
-                    "Skipping ingestion: remote metadata unchanged",
+                    "Ingestion skipped: remote metadata unchanged",
                     reason=change_detection_result.reason,
                 )
                 return IngestionDecision(
@@ -226,7 +239,7 @@ class RemoteIngestionPipeline:
         """
         assert self.custom_download is not None  # type narrowing: guarded by download() dispatch
 
-        logger.info("Running custom download", version=version)
+        logger.info("Starting custom download", version=version)
 
         progress: BatchProgressFactory | None = (
             AirflowBatchProgress if settings.is_running_on_airflow else None
@@ -240,7 +253,7 @@ class RemoteIngestionPipeline:
         file_hash = FileHasher.hash_file(landing_path)
         size_mib = round(landing_path.stat().st_size / (1024 * 1024), 2)
 
-        logger.info("Custom download complete", file_size_mib=size_mib)
+        logger.info("Custom download completed", file_size_mib=size_mib)
 
         return PipelineContext(
             version=version,
@@ -295,12 +308,26 @@ class RemoteIngestionPipeline:
         except httpx.HTTPError as err:
             raise DownloadStageError("HEAD metadata fetch failed") from err
 
+        # -- 1b. Custom metadata fallback (e.g. OpenDataSoft catalog API) --------------
+        # When HEAD returns no caching headers and a custom strategy is registered,
+        # call it to obtain metadata from an alternative source.
+
+        if remote_file_info is not None and not remote_file_info.has_any_field():
+            if self.custom_metadata is not None:
+                try:
+                    remote_file_info = self.custom_metadata(self.dataset.source.url_as_str, 30)
+                except httpx.HTTPError as err:
+                    raise DownloadStageError("Custom metadata fetch failed") from err
+
         # -- 2. Smart-skip #1: HTTP 304 or metadata comparison -------------------------
 
         if remote_file_info is None:
             # Server confirmed no change (304). Still need to check local state.
             if self.resolver.silver_current_path.exists():
-                logger.info("Skipping ingestion: HTTP 304 Not Modified")
+                logger.info(
+                    "Ingestion skipped: remote metadata unchanged",
+                    reason="HTTP 304 Not Modified",
+                )
                 return None
 
             # Silver file missing despite 304 — healing needed: re-fetch full metadata.
@@ -434,10 +461,12 @@ class RemoteIngestionPipeline:
     # -- Helpers -----------------------------------------------------------------------
 
     @staticmethod
-    def _should_skip_on_hash(previous_hash: str | None, current_hash: str) -> bool:
+    def _should_skip_on_hash(*, previous_hash: str | None, current_hash: str) -> bool:
         """Return ``True`` if hashes match (content unchanged since last run)."""
         if previous_hash == current_hash:
-            logger.info("Skipping: content hash identical to previous run")
+            logger.info(
+                "Ingestion skipped: content hash identical to previous run",
+            )
             return True
         return False
 
@@ -473,7 +502,7 @@ class RemoteIngestionPipeline:
         bronze_path = self.resolver.bronze_path(context.version)
         bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info("Converting to bronze", version=context.version)
+        logger.info("Starting bronze conversion", version=context.version)
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
@@ -506,7 +535,7 @@ class RemoteIngestionPipeline:
         parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
 
         logger.info(
-            "Bronze conversion complete",
+            "Bronze conversion completed",
             rows_count=rows_count,
             columns_count=len(columns),
             file_size_mib=parquet_size,
@@ -552,7 +581,7 @@ class RemoteIngestionPipeline:
             On transform failure (DuckDB error, validation error) or I/O error during
             silver file rotation or write.
         """
-        logger.info("Transforming to silver", version=context.version)
+        logger.info("Starting silver transformation", version=context.version)
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
@@ -618,7 +647,7 @@ class RemoteIngestionPipeline:
                 rows_unchanged=diff_metrics.rows_unchanged,
             )
 
-        logger.info("Silver transformation complete", **log_kwargs)
+        logger.info("Silver transformation completed", **log_kwargs)
 
         return PipelineContext(
             version=context.version,

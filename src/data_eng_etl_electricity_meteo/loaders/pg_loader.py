@@ -39,7 +39,7 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
     LoadPostgresMetrics,
 )
 
-logger = get_logger("loaders.pg_loader")
+logger = get_logger("pg_loader")
 
 _COPY_BUFFER_SIZE = 65_536  # 64 KB — psycopg recommended sweet spot
 # 128 MB — CSV kept in RAM below, spilled to disk above
@@ -76,6 +76,7 @@ _POLARS_TO_PG_COMPATIBLE: dict[str, set[str]] = {
 
 def load_silver_to_postgres(
     dataset: RemoteDatasetConfig,
+    *,
     conn: psycopg.Connection[Any],
     diff: IncrementalDiffMetrics | None = None,
 ) -> LoadPostgresMetrics:
@@ -119,8 +120,8 @@ def load_silver_to_postgres(
 
     try:
         ddl_sql = _format_sql_template(
-            "tables",
             dataset.name,
+            subdir="tables",
             schema=_SILVER_SCHEMA,
             table=pg_table,
         )
@@ -149,7 +150,7 @@ def load_silver_to_postgres(
 
     if mode == IngestionMode.INCREMENTAL and len(df) == 0:
         logger.info(
-            "No new or changed rows, skipping Postgres load",
+            "Postgres load skipped: no new or changed rows",
             table=qualified_table,
         )
         return LoadPostgresMetrics(
@@ -164,12 +165,12 @@ def load_silver_to_postgres(
     try:
         with conn.cursor() as cur:
             cur.execute(ddl_sql)
-            _validate_columns(cur, df, pg_table)
+            _validate_columns(df, cur=cur, pg_table=pg_table)
 
             if mode == IngestionMode.SNAPSHOT:
-                rows = _load_snapshot(cur, df, pg_table)
+                rows = _load_snapshot(df, cur=cur, pg_table=pg_table)
             else:
-                rows = _load_incremental(cur, df, dataset.name, pg_table)
+                rows = _load_incremental(df, cur=cur, dataset_name=dataset.name, pg_table=pg_table)
 
         conn.commit()
     except (SchemaValidationError, FileNotFoundError) as err:
@@ -192,7 +193,9 @@ def load_silver_to_postgres(
     # -- Post-load sync verification for incremental datasets --------------------------
 
     if mode == IngestionMode.INCREMENTAL:
-        fallback_rows = _verify_and_maybe_full_refresh(conn, resolver, ddl_sql, pg_table)
+        fallback_rows = _verify_and_maybe_full_refresh(
+            resolver, conn=conn, ddl_sql=ddl_sql, pg_table=pg_table
+        )
         if fallback_rows is not None:
             rows = fallback_rows
 
@@ -209,7 +212,7 @@ def load_silver_to_postgres(
 # --------------------------------------------------------------------------------------
 
 
-def _read_sql_file(subdir: str, dataset_name: str) -> str:
+def _read_sql_file(dataset_name: str, *, subdir: str) -> str:
     """Read ``postgres/{subdir}/{dataset_name}.sql``."""
     path = (settings.postgres_dir_path / subdir / f"{dataset_name}.sql").resolve()
 
@@ -223,17 +226,17 @@ def _read_sql_file(subdir: str, dataset_name: str) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def _format_sql_template(subdir: str, dataset_name: str, **identifiers: str) -> psql.Composed:
+def _format_sql_template(dataset_name: str, *, subdir: str, **identifiers: str) -> psql.Composed:
     """Read a SQL template and resolve ``{schema}``, ``{table}``, etc. placeholders.
 
     Each keyword argument is wrapped in ``psql.Identifier`` for safe quoting.
     """
     # Safe cast: SQL comes from trusted template files on disk, not user input
-    template = cast("LiteralString", _read_sql_file(subdir, dataset_name))
+    template = cast("LiteralString", _read_sql_file(dataset_name, subdir=subdir))
     return psql.SQL(template).format(**{k: psql.Identifier(v) for k, v in identifiers.items()})
 
 
-def _validate_columns(cur: psycopg.Cursor[Any], df: pl.DataFrame, pg_table: str) -> None:
+def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], pg_table: str) -> None:
     """Raise ``SchemaValidationError`` if DataFrame and PG table columns diverge.
 
     Checks both column **names** (extra / missing) and **type compatibility**
@@ -312,7 +315,7 @@ def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(exprs) if exprs else df
 
 
-def _copy_df(cur: psycopg.Cursor[Any], df: pl.DataFrame, copy_sql: psql.Composed) -> None:
+def _copy_df(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], copy_sql: psql.Composed) -> None:
     """Serialize ``df`` to CSV and stream it via COPY in 64 KB chunks.
 
     Uses a ``SpooledTemporaryFile`` to keep small DataFrames in memory and spill large
@@ -328,11 +331,18 @@ def _copy_df(cur: psycopg.Cursor[Any], df: pl.DataFrame, copy_sql: psql.Composed
 
 
 def _verify_sync(
-    cur: psycopg.Cursor[Any],
     pg_table: str,
+    *,
+    cur: psycopg.Cursor[Any],
     expected_count: int,
-) -> bool:
-    """Verify that Postgres row count matches expected silver count."""
+) -> int | None:
+    """Verify that Postgres row count matches expected silver count.
+
+    Returns
+    -------
+    int | None
+        Actual Postgres row count if there is a mismatch, ``None`` if in sync.
+    """
     cur.execute(
         psql.SQL("SELECT COUNT(*) FROM {table}").format(
             table=psql.Identifier(_SILVER_SCHEMA, pg_table)
@@ -342,18 +352,14 @@ def _verify_sync(
     assert row is not None  # COUNT(*) always returns a row
     actual: int = row[0]
     if actual != expected_count:
-        logger.warning(
-            "Row count mismatch after incremental load",
-            pg_count=actual,
-            silver_count=expected_count,
-        )
-        return False
-    return True
+        return actual
+    return None
 
 
 def _verify_and_maybe_full_refresh(
-    conn: psycopg.Connection[Any],
     resolver: RemotePathResolver,
+    *,
+    conn: psycopg.Connection[Any],
     ddl_sql: psql.Composed,
     pg_table: str,
 ) -> int | None:
@@ -361,10 +367,10 @@ def _verify_and_maybe_full_refresh(
 
     Parameters
     ----------
-    conn
-        Open psycopg connection (already committed after initial load).
     resolver
         Path resolver for reading the full silver snapshot.
+    conn
+        Open psycopg connection (already committed after initial load).
     ddl_sql
         Pre-formatted DDL SQL for table creation.
     pg_table
@@ -383,13 +389,19 @@ def _verify_and_maybe_full_refresh(
 
     try:
         with conn.cursor() as cur:
-            if _verify_sync(cur, pg_table, expected_count=len(silver_full)):
+            pg_count = _verify_sync(pg_table, cur=cur, expected_count=len(silver_full))
+            if pg_count is None:
                 return None
 
             # Mismatch → full refresh from current.parquet
-            logger.warning("Full refresh triggered by row count mismatch", table=pg_table)
+            logger.warning(
+                "Full refresh triggered by row count mismatch",
+                table=pg_table,
+                pg_rows=pg_count,
+                parquet_rows=len(silver_full),
+            )
             cur.execute(ddl_sql)
-            rows = _load_snapshot(cur, silver_full, pg_table)
+            rows = _load_snapshot(silver_full, cur=cur, pg_table=pg_table)
 
         conn.commit()
     except psycopg.Error as err:
@@ -403,24 +415,27 @@ def _verify_and_maybe_full_refresh(
     return rows
 
 
-def _load_snapshot(cur: psycopg.Cursor[Any], df: pl.DataFrame, pg_table: str) -> int:
+def _load_snapshot(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], pg_table: str) -> int:
     """TRUNCATE then COPY all rows."""
     tid = psql.Identifier(_SILVER_SCHEMA, pg_table)
     cols = psql.SQL(", ").join(psql.Identifier(col) for col in df.columns)
 
     cur.execute(psql.SQL("TRUNCATE {table}").format(table=tid))
     _copy_df(
-        cur,
         _prepare_for_copy(df),
-        psql.SQL("COPY {table} ({cols}) FROM STDIN (FORMAT CSV)").format(table=tid, cols=cols),
+        cur=cur,
+        copy_sql=psql.SQL("COPY {table} ({cols}) FROM STDIN (FORMAT CSV)").format(
+            table=tid, cols=cols
+        ),
     )
 
     return len(df)
 
 
 def _load_incremental(
-    cur: psycopg.Cursor[Any],
     df: pl.DataFrame,
+    *,
+    cur: psycopg.Cursor[Any],
     dataset_name: str,
     pg_table: str,
 ) -> int:
@@ -433,8 +448,8 @@ def _load_incremental(
     # -- Prepare SQL templates and identifiers -----------------------------------------
 
     upsert_sql = _format_sql_template(
-        "upsert",
         dataset_name,
+        subdir="upsert",
         schema=_SILVER_SCHEMA,
         table=pg_table,
         staging=staging_name,
@@ -454,9 +469,9 @@ def _load_incremental(
     )
 
     _copy_df(
-        cur,
         _prepare_for_copy(df),
-        psql.SQL("COPY {staging} ({cols}) FROM STDIN (FORMAT CSV)").format(
+        cur=cur,
+        copy_sql=psql.SQL("COPY {staging} ({cols}) FROM STDIN (FORMAT CSV)").format(
             staging=staging_id, cols=cols
         ),
     )

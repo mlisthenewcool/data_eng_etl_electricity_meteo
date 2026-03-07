@@ -9,7 +9,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -49,10 +49,30 @@ class HttpDownloadInfo:
 # --------------------------------------------------------------------------------------
 
 
+_GENERIC_PATH_SEGMENTS = frozenset(
+    {
+        "exports",
+        "export",
+        "download",
+        "parquet",
+        "json",
+        "csv",
+    }
+)
+
+
 def _short_url(url: str) -> str:
-    """Shorten a URL to ``hostname/…/last_segment`` for log readability."""
+    """Shorten a URL to ``hostname/…/meaningful_segment`` for log readability.
+
+    Skips generic path segments (``exports``, ``parquet``, …) to surface the most
+    informative part of the URL.
+    """
     parsed = urlparse(url)
-    name = Path(unquote(parsed.path)).name or parsed.path
+    parts = [p for p in PurePosixPath(unquote(parsed.path)).parts if p != "/"]
+    for part in reversed(parts):
+        if part.lower() not in _GENERIC_PATH_SEGMENTS:
+            return f"{parsed.hostname}/…/{part}"
+    name = PurePosixPath(unquote(parsed.path)).name or parsed.path
     return f"{parsed.hostname}/…/{name}"
 
 
@@ -110,9 +130,9 @@ def _extract_filename(response: httpx.Response, url: str) -> str | None:
 
 def download_to_file(
     url: str,
+    *,
     dest_dir: Path,
     fallback_filename: str,
-    *,
     timeout_seconds: int,
     progress: Callable[[int], DownloadProgressReporter] | None = None,
 ) -> HttpDownloadInfo:

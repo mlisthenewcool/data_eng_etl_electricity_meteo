@@ -39,6 +39,7 @@ TASK_LOAD_TIMEOUT = timedelta(minutes=20)
 
 def _create_dag(
     dataset: RemoteDatasetConfig,
+    *,
     silver_file_asset: Asset,
     silver_pg_asset: Asset,
 ) -> DAG:
@@ -127,11 +128,13 @@ def _generate_all_dags() -> dict[str, DAG]:
             logger.exception("Invalid dataset configuration", dataset=dataset.name)
             continue  # move to next dataset
 
-        dags[dataset.name] = _create_dag(dataset, silver_file_asset, silver_pg_asset)
+        dags[dataset.name] = _create_dag(
+            dataset, silver_file_asset=silver_file_asset, silver_pg_asset=silver_pg_asset
+        )
         logger.info("to_silver_pg DAG created", dataset=dataset.name)
 
     total = len(catalog.get_remote_datasets())
-    logger.info("to_silver_pg factory complete", created_count=len(dags), total_count=total)
+    logger.info("to_silver_pg factory completed", created_count=len(dags), total_count=total)
 
     return dags
 

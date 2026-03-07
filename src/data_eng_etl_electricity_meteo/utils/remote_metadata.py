@@ -33,7 +33,7 @@ class RemoteFileMetadata:
     last_modified: datetime | None = None
     content_length: int | None = None
 
-    def _has_any_field(self) -> bool:
+    def has_any_field(self) -> bool:
         """Check if at least one metadata field is populated."""
         return any(v is not None for v in [self.etag, self.last_modified, self.content_length])
 
@@ -55,7 +55,7 @@ class RemoteFileMetadata:
             confirm identity; ``False`` only when at least one field matches
             conclusively.
         """
-        if not self._has_any_field() or not other._has_any_field():
+        if not self.has_any_field() or not other.has_any_field():
             return ChangeDetectionResult(True, "Missing metadata on current or previous state")
 
         for check in (self._check_etag, self._check_last_modified, self._check_content_length):
@@ -93,6 +93,7 @@ class RemoteFileMetadata:
 
 def get_remote_file_metadata(
     url: str,
+    *,
     timeout: int = 30,
     follow_redirects: bool = True,
     if_none_match: str | None = None,

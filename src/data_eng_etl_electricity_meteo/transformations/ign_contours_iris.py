@@ -16,7 +16,7 @@ from data_eng_etl_electricity_meteo.transformations.dataframe_model import Colum
 from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
-logger = get_logger("transform.ign_contours_iris")
+logger = get_logger("transform")
 
 
 @contextmanager

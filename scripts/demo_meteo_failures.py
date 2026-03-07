@@ -22,7 +22,7 @@ _DEMO_DEPARTMENTS: set[str] = {"01", "02", "13", "69", "75", "93"}
 _real_stream = meteo_download._stream_to_file
 
 
-def _patched_stream(client: httpx.Client, url: str, path: Path) -> None:
+def _patched_stream(url: str, *, client: httpx.Client, path: Path) -> None:
     """Inject failures for specific departments via temp file name."""
     name = path.name
 
@@ -40,7 +40,7 @@ def _patched_stream(client: httpx.Client, url: str, path: Path) -> None:
             request=httpx.Request("GET", url),
         )
 
-    _real_stream(client, url, path)
+    _real_stream(url, client=client, path=path)
 
 
 def main() -> None:

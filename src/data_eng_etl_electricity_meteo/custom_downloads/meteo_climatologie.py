@@ -33,7 +33,7 @@ from data_eng_etl_electricity_meteo.utils.progress import (
     DownloadProgressReporter,
 )
 
-logger = get_logger("download.meteo_climatologie")
+logger = get_logger("dl.meteo_clim")
 
 # data.gouv.fr API for the Météo France HOR (hourly) dataset
 # Resources endpoint requires API v2 (v1 returns 405 on /resources/)
@@ -87,6 +87,7 @@ _DOWNLOAD_MAX_WORKERS = 8
 
 
 def _fetch_department_resources(
+    *,
     client: httpx.Client,
     year_start: int,
     year_end: int,
@@ -170,6 +171,7 @@ def _fetch_department_resources(
 
 
 def _build_fallback_resources(
+    *,
     year_start: int,
     year_end: int,
 ) -> list[dict[str, str | None]]:
@@ -206,15 +208,15 @@ def _build_fallback_resources(
 # --------------------------------------------------------------------------------------
 
 
-def _stream_to_file(client: httpx.Client, url: str, path: Path) -> None:
+def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
     """Stream-download a URL to a local file.
 
     Parameters
     ----------
-    client
-        HTTP client.
     url
         URL to download.
+    client
+        HTTP client.
     path
         Local file path to write.
     """
@@ -226,8 +228,9 @@ def _stream_to_file(client: httpx.Client, url: str, path: Path) -> None:
 
 
 def _download_department(
-    client: httpx.Client,
     resource: dict[str, str | None],
+    *,
+    client: httpx.Client,
     tmp_dir: Path,
 ) -> int:
     """Download a single department, preferring Parquet to CSV.gz.
@@ -237,10 +240,10 @@ def _download_department(
 
     Parameters
     ----------
-    client
-        HTTP client.
     resource
         Dict with ``dept``, ``csv_url``, ``parquet_url`` keys.
+    client
+        HTTP client.
     tmp_dir
         Temporary directory for intermediate files.
 
@@ -260,7 +263,7 @@ def _download_department(
     if parquet_url:
         tmp_path = tmp_dir / f"{dept}_hydra.parquet"
         try:
-            _stream_to_file(client, parquet_url, tmp_path)
+            _stream_to_file(parquet_url, client=client, path=tmp_path)
             # Column projection: 196 → 16 columns at read time
             df = pl.read_parquet(tmp_path, columns=_LANDING_COLUMNS)
             # Cast to Utf8 for uniform schema across departments
@@ -281,7 +284,7 @@ def _download_department(
     if df is None:
         tmp_path = tmp_dir / f"{dept}.csv.gz"
         try:
-            _stream_to_file(client, csv_url, tmp_path)
+            _stream_to_file(csv_url, client=client, path=tmp_path)
             # Column projection + infer_schema=False → 16 Utf8 columns
             df = pl.read_csv(tmp_path, separator=";", infer_schema=False, columns=_LANDING_COLUMNS)
             logger.debug("Downloaded CSV.gz", department=dept, rows_count=len(df))
@@ -317,8 +320,9 @@ class _BatchResult:
 
 
 def _download_all_departments(
-    client: httpx.Client,
     resources: dict[str, dict[str, str | None]],
+    *,
+    client: httpx.Client,
     tmp_dir: Path,
     progress: BatchProgressFactory | None = None,
 ) -> _BatchResult:
@@ -326,10 +330,10 @@ def _download_all_departments(
 
     Parameters
     ----------
-    client
-        Thread-safe HTTP client with shared connection pool.
     resources
         Mapping ``dept → resource dict`` with download URLs.
+    client
+        Thread-safe HTTP client with shared connection pool.
     tmp_dir
         Temporary directory for per-department Parquet files.
     progress
@@ -347,7 +351,7 @@ def _download_all_departments(
 
     with ThreadPoolExecutor(max_workers=_DOWNLOAD_MAX_WORKERS) as pool:
         futures = {
-            pool.submit(_download_department, client, resource, tmp_dir): resource
+            pool.submit(_download_department, resource, client=client, tmp_dir=tmp_dir): resource
             for resource in resources.values()
         }
 
@@ -446,7 +450,7 @@ def download_climatologie(
 
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         # Base: CSV.gz for all 95 departments (always works, no API needed)
-        fallback = _build_fallback_resources(year_start, year_end)
+        fallback = _build_fallback_resources(year_start=year_start, year_end=year_end)
         resources_by_dept: dict[str, dict[str, str | None]] = {}
         for r in fallback:
             dept = r["dept"]
@@ -455,13 +459,17 @@ def download_climatologie(
 
         # Enrich with API discovery (adds Parquet URLs where available)
         try:
-            api_resources = _fetch_department_resources(client, year_start, year_end)
+            api_resources = _fetch_department_resources(
+                client=client, year_start=year_start, year_end=year_end
+            )
             resources_by_dept.update(api_resources)
         except httpx.HTTPError as err:
             logger.warning("API discovery failed, using hardcoded CSV URLs only", error=str(err))
 
         # httpx.Client is thread-safe — parallel downloads with shared connection pool
-        result = _download_all_departments(client, resources_by_dept, tmp_dir, progress)
+        result = _download_all_departments(
+            resources_by_dept, client=client, tmp_dir=tmp_dir, progress=progress
+        )
 
     # -- Merge temporary parquets into final file --------------------------------------
 
@@ -483,6 +491,8 @@ def download_climatologie(
     }
     if result.failed_count > 0:
         log_kwargs["failed_count"] = result.failed_count
-    logger.info("Merged climatologie data", **log_kwargs)
+        logger.warning("Climatologie merge completed with failures", **log_kwargs)
+    else:
+        logger.info("Climatologie merge completed", **log_kwargs)
 
     return merged_path
