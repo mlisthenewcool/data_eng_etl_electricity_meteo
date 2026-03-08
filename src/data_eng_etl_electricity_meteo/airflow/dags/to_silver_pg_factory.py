@@ -1,22 +1,9 @@
-"""DAG factory for loading silver parquet files into Postgres.
+"""DAG factory for silver Postgres loading (silver file → silver PG).
 
-Generates one Airflow DAG per remote dataset declared in the data catalog.
-Each DAG is triggered automatically when the upstream silver file Asset is updated
-(i.e. when the corresponding ingestion DAG produces new data).
-
-Pipeline position::
-
-    [*_ingest]  →  silver file Asset  →  [*_load_pg]  →  silver PG Asset  →  [dbt]
-       ETL                                  LOAD                               ELT
-
-Each generated DAG:
-- **Inlet** : silver file Asset (``file://`` URI to ``current.parquet``)
-- **Task**  : load silver parquet → Postgres ``silver.{dataset}`` table
-- **Outlet**: silver PG Asset (``postgres://project/silver.{dataset}``)
-
-The load task uses an Airflow ``PostgresHook`` (connection id ``project_postgres``) so
-credentials come from the Airflow connection store, not from
-``open_standalone_connection()``.
+Generates one ``{dataset}_to_silver_pg`` DAG per remote dataset in the data catalog.
+Each DAG is triggered when its upstream ``to_silver`` DAG produces a new silver file
+Asset, and loads the parquet into Postgres ``silver.{dataset}`` via ``PostgresHook``
+(connection id ``project_postgres``).
 """
 
 from collections.abc import Generator
@@ -33,27 +20,39 @@ from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.loaders.pg_connection import open_airflow_hook_connection
 from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
 
-logger = get_logger("dag_factory.load_pg")
+logger = get_logger("dag.to_silver_pg")
+
+
+# --------------------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------------------
+
 
 TASK_LOAD = "load_silver_to_postgres"
 TASK_LOAD_TIMEOUT = timedelta(minutes=20)
 
 
+# --------------------------------------------------------------------------------------
+# DAG factory
+# --------------------------------------------------------------------------------------
+
+
 def _create_dag(
-    dataset_config: RemoteDatasetConfig,
-    silver_file_asset: Asset,
-    silver_pg_asset: Asset,
+    dataset: RemoteDatasetConfig,
+    *,
+    schedule: Asset,
+    outlet: Asset,
 ) -> DAG:
     """Create a load DAG for a single dataset.
 
     Parameters
     ----------
-    dataset_config
+    dataset
         Remote dataset configuration from the catalog.
-    silver_file_asset
-        Inlet: the silver ``file://`` Asset produced by the ingestion DAG.
-    silver_pg_asset
-        Outlet: the silver Postgres Asset emitted after a successful load.
+    schedule
+        The silver ``file://`` Asset that triggers this DAG.
+    outlet
+        The silver Postgres Asset emitted after a successful load.
 
     Returns
     -------
@@ -62,10 +61,10 @@ def _create_dag(
     """
 
     @dag(
-        dag_id=f"{dataset_config.name}_load_pg",
-        schedule=silver_file_asset,  # triggered by the ingestion DAG's outlet
+        dag_id=f"{dataset.name}_to_silver_pg",
+        schedule=schedule,
         start_date=START_DATE,
-        catchup=False,
+        catchup=False,  # TODO[prod]: set to True
         default_args=DEFAULT_ARGS,
         tags=["load", "postgres", "silver"],
         doc_md=__doc__,
@@ -74,7 +73,7 @@ def _create_dag(
         @task(
             task_id=TASK_LOAD,
             execution_timeout=TASK_LOAD_TIMEOUT,
-            outlets=[silver_pg_asset],
+            outlets=[outlet],
         )
         def load_task() -> Generator[Metadata]:
             """Load silver parquet into the Postgres silver schema.
@@ -87,15 +86,15 @@ def _create_dag(
 
             conn = open_airflow_hook_connection(PostgresHook("project_postgres"))
             try:
-                metrics = load_silver_to_postgres(dataset_config=dataset_config, conn=conn)
+                metrics = load_silver_to_postgres(dataset, conn=conn)
             finally:
                 conn.close()
 
             yield Metadata(
-                asset=silver_pg_asset,
+                asset=outlet,
                 extra={
                     "rows_loaded": metrics.rows_loaded,
-                    "strategy": metrics.strategy,
+                    "mode": metrics.mode,
                     "table": metrics.table,
                 },
             )
@@ -116,24 +115,31 @@ def _generate_all_dags() -> dict[str, DAG]:
     try:
         catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as e:
-        e.log(logger.exception)
+        e.log(logger.critical)
         return {}
 
+    remote_datasets = catalog.get_remote_datasets()
     dags: dict[str, DAG] = {}
 
-    for dataset_config in catalog.get_remote_datasets():
+    for dataset in remote_datasets:
         try:
-            silver_file_asset = get_silver_file_asset(dataset_config.name)
-            silver_pg_asset = get_silver_pg_asset(dataset_config.name)
-            dags[dataset_config.name] = _create_dag(
-                dataset_config, silver_file_asset, silver_pg_asset
-            )
-            logger.info("Created load DAG", dag_id=f"{dataset_config.name}_load_pg")
+            silver_file_asset = get_silver_file_asset(dataset)
+            silver_pg_asset = get_silver_pg_asset(dataset)
         except ValueError:
-            logger.exception("Failed to create load DAG", dataset_name=dataset_config.name)
+            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
+            continue  # move to next dataset
+
+        dags[dataset.name] = _create_dag(
+            dataset, schedule=silver_file_asset, outlet=silver_pg_asset
+        )
+        logger.debug("to_silver_pg DAG created", dataset_name=dataset.name)
+
+    logger.info(
+        "to_silver_pg factory completed", created_count=len(dags), total_count=len(remote_datasets)
+    )
 
     return dags
 
 
-# Note: expose DAGs to Airflow
-_generate_all_dags()
+# Airflow discovers DAGs via @dag decorator; return value is intentionally unused.
+_ = _generate_all_dags()

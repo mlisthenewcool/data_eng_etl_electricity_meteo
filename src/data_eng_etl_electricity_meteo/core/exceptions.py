@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Protocol
 
-from data_eng_etl_electricity_meteo.core.enums import MedallionLayer, PipelineStage
+from data_eng_etl_electricity_meteo.core.enums import PipelineStage
 
 
 class _LogMethod(Protocol):
@@ -39,9 +39,9 @@ class BaseProjectException(Exception):
         log_method(str(self), **self.to_dict())
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Archive errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class ExtractionError(BaseProjectException):
@@ -74,9 +74,9 @@ class FileIntegrityError(ExtractionError):
         super().__init__("File integrity check failed.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Data catalog errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DataCatalogError(BaseProjectException):
@@ -114,31 +114,37 @@ class DatasetTypeError(DataCatalogError):
         super().__init__("Dataset has unexpected type.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Schema validation errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class SchemaValidationError(BaseProjectException):
-    """Raised when DataFrame columns don't match the Postgres table schema."""
+    """Schema mismatch (columns, types, or value constraints)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("Schema validation failed.")
+
+
+class SourceSchemaDriftError(BaseProjectException):
+    """Source API columns changed (added or removed)."""
 
     def __init__(
         self,
-        table: str,
-        extra_columns: list[str] | None = None,
-        missing_columns: list[str] | None = None,
-        type_mismatches: list[str] | None = None,
+        dataset_name: str,
+        added: list[str],
+        removed: list[str],
     ) -> None:
-        self.table = table
-        self.extra_columns = extra_columns or []
-        self.missing_columns = missing_columns or []
-        self.type_mismatches = type_mismatches or []
-        super().__init__("Schema mismatch between Parquet and Postgres.")
+        self.dataset_name = dataset_name
+        self.added = added
+        self.removed = removed
+        super().__init__("Source schema drift detected.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Airflow context errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class AirflowContextError(BaseProjectException):
@@ -156,18 +162,17 @@ class AirflowContextError(BaseProjectException):
         super().__init__("Invalid Airflow context.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Transformation errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TransformNotFoundError(BaseProjectException):
-    """Raised when no transformation is registered for a dataset/layer pair."""
+    """Raised when no transformation spec is registered for a dataset."""
 
-    def __init__(self, dataset_name: str, layer: MedallionLayer) -> None:
+    def __init__(self, dataset_name: str) -> None:
         self.dataset_name = dataset_name
-        self.layer = layer
-        super().__init__("Transform not found for dataset.")
+        super().__init__("Transform spec not found for dataset.")
 
 
 class TransformValidationError(BaseProjectException):
@@ -179,9 +184,9 @@ class TransformValidationError(BaseProjectException):
         super().__init__("Transform validation failed.")
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Pipeline stage errors
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class PipelineStageError(BaseProjectException):
@@ -223,9 +228,10 @@ class PipelineStageError(BaseProjectException):
         if cause is None:
             log_method(str(self), **self.to_dict())
         elif isinstance(cause, BaseProjectException):
+            cause_data = {f"cause_{k}": v for k, v in cause.to_dict().items()}
             log_method(
                 str(self),
-                **self.to_dict() | cause.to_dict(),
+                **self.to_dict() | cause_data,
                 cause_type=type(cause).__qualname__,
             )
         else:
@@ -290,9 +296,9 @@ class GoldStageError(PipelineStageError):
         super().__init__(PipelineStage.GOLD, message, context or None)
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Visual smoke test
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
@@ -312,9 +318,8 @@ if __name__ == "__main__":
     def _end() -> None:
         print("", file=sys.stderr)
 
-    # ---------------------------------------------------------------------------
-    # 1) DownloadStageError — httpx causes
-    # ---------------------------------------------------------------------------
+    # -- DownloadStageError — httpx causes ---------------------------------------------
+
     _section("DownloadStageError  <-  httpx.ConnectError")
     try:
         try:
@@ -353,9 +358,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 2) ExtractStageError — archive causes
-    # ---------------------------------------------------------------------------
+    # -- ExtractStageError — archive causes --------------------------------------------
+
     _section("ExtractStageError  <-  ArchiveNotFoundError")
     try:
         try:
@@ -392,13 +396,12 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 3) BronzeStageError — transform / duckdb / IO causes
-    # ---------------------------------------------------------------------------
+    # -- BronzeStageError — transform / duckdb / IO causes -----------------------------
+
     _section("BronzeStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.BRONZE)
+            raise TransformNotFoundError(dataset_name=_DATASET)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise BronzeStageError() from err
     except BronzeStageError as error:
@@ -427,13 +430,12 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 4) SilverStageError — transform / duckdb / IO causes
-    # ---------------------------------------------------------------------------
+    # -- SilverStageError — transform / duckdb / IO causes -----------------------------
+
     _section("SilverStageError  <-  TransformNotFoundError")
     try:
         try:
-            raise TransformNotFoundError(dataset_name=_DATASET, layer=MedallionLayer.SILVER)
+            raise TransformNotFoundError(dataset_name=_DATASET)
         except (TransformNotFoundError, duckdb.Error, OSError) as err:
             raise SilverStageError() from err
     except SilverStageError as error:
@@ -460,9 +462,8 @@ if __name__ == "__main__":
         error.log(_logger.critical)
     _end()
 
-    # ---------------------------------------------------------------------------
-    # 5) New pattern — message + structured context
-    # ---------------------------------------------------------------------------
+    # -- New pattern — message + structured context ------------------------------------
+
     _section("PostgresLoadError  with message + context (no cause)")
     try:
         raise PostgresLoadError("SQL path escapes postgres directory", path="/etc/passwd")
@@ -472,7 +473,7 @@ if __name__ == "__main__":
 
     _section("ExtractStageError  with message + context (no cause)")
     try:
-        raise ExtractStageError("inner_file required for archive dataset", dataset=_DATASET)
+        raise ExtractStageError("inner_file required for archive dataset")
     except ExtractStageError as error:
         error.log(_logger.critical)
     _end()

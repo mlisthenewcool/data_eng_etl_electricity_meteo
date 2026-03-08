@@ -21,7 +21,7 @@ def _():
         RemotePathResolver,
     )
 
-    logger = get_logger("notebook.odre_installations")
+    logger = get_logger("notebook")
 
     return (
         DataCatalog,

@@ -10,7 +10,7 @@ DataCatalog
             │   ├── source: RemoteSourceConfig (url, provider, format)
             │   ├── ingestion: IngestionPolicy (frequency, mode)
             │   ├── postgres: PostgresConfig (table name)
-            │   └── primary_key: list[str] | None (natural key columns)
+            │   └── primary_key: tuple[str, ...] (natural key columns)
             └── GoldDatasetConfig (Gold, built from Silver)
                 ├── name, description
                 └── source: GoldSourceConfig (depends_on)
@@ -78,13 +78,13 @@ class IngestionFrequency(StrEnum):
     def get_airflow_version_template(self, no_dash: bool = False) -> str:
         """Return the Airflow Jinja template for versioning.
 
-        Hourly    -> ``{{ ts }}`` / ``{{ ts_nodash }}``.
-        Otherwise -> ``{{ ds }}`` / ``{{ds_nodash }}``.
+        Hourly versions are truncated to the hour
+        (minutes/seconds are always ``00`` for ``@hourly`` schedules).
 
         Parameters
         ----------
         no_dash
-            If ``True``, return the ``_nodash`` variant.
+            If ``True``, return compact format without separators.
 
         Returns
         -------
@@ -104,14 +104,16 @@ class IngestionFrequency(StrEnum):
             )
 
         if self == IngestionFrequency.HOURLY:
-            # TODO: "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
-            #  or "{{ ts_nodash[:11] }}"
-            return "{{ ts_nodash }}" if no_dash else "{{ ts }}"
+            if no_dash:
+                return "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
+            return "{{ data_interval_start.strftime('%Y-%m-%dT%H') }}"
 
         return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
 
     def format_datetime_as_version(self, dt: datetime, no_dash: bool = False) -> str:
         """Format *dt* as a version string (non-Airflow contexts).
+
+        Hourly versions are truncated to the hour (minutes/seconds dropped).
 
         Parameters
         ----------
@@ -123,12 +125,11 @@ class IngestionFrequency(StrEnum):
         Returns
         -------
         str
-            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+) or
-            ``%Y-%m-%d-T-%H-%M-%S`` (hourly).
-            ``no_dash=True``: ``%Y%m%d`` (daily+) or ``%Y%m%dT%H%M%S`` (hourly).
+            ``no_dash=False`` (default): ``%Y-%m-%d`` (daily+) or ``%Y-%m-%dT%H``
+            (hourly). ``no_dash=True``: ``%Y%m%d`` (daily+) or ``%Y%m%dT%H`` (hourly).
         """
         if self == IngestionFrequency.HOURLY:
-            return dt.strftime("%Y%m%dT%H%M%S" if no_dash else "%Y-%m-%d-T-%H-%M-%S")
+            return dt.strftime("%Y%m%dT%H" if no_dash else "%Y-%m-%dT%H")
 
         # All non-hourly frequencies are date-only — no time component needed.
         return dt.strftime("%Y%m%d" if no_dash else "%Y-%m-%d")
@@ -144,9 +145,9 @@ _AIRFLOW_SCHEDULES: dict[IngestionFrequency, str | None] = {
 }
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Source configs (split by dataset type)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class RemoteSourceConfig(StrictModel):
@@ -196,7 +197,7 @@ class GoldSourceConfig(StrictModel):
         Silver dataset names this Gold dataset is built from.
     """
 
-    depends_on: list[str]
+    depends_on: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_depends_on_not_empty(self) -> Self:
@@ -206,9 +207,9 @@ class GoldSourceConfig(StrictModel):
         return self
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Ingestion policy
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class PostgresConfig(StrictModel):
@@ -245,9 +246,9 @@ class IngestionPolicy(StrictModel):
     mode: IngestionMode
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Dataset configs (split by dataset type) + discriminated union
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class RemoteDatasetConfig(StrictModel):
@@ -275,7 +276,9 @@ class RemoteDatasetConfig(StrictModel):
     source: RemoteSourceConfig
     ingestion: IngestionPolicy
     postgres: PostgresConfig
-    primary_key: Annotated[list[str], BeforeValidator(lambda v: [v] if isinstance(v, str) else v)]
+    primary_key: Annotated[
+        tuple[str, ...], BeforeValidator(lambda v: (v,) if isinstance(v, str) else tuple(v))
+    ]
 
 
 class GoldDatasetConfig(StrictModel):
@@ -320,13 +323,13 @@ type DatasetConfig = Annotated[
 ]
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Catalog
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DataCatalog(StrictModel):
-    """Root catalog loaded from ``data_catalog.yaml``.
+    """Root catalog loaded from ``catalog.yaml``.
 
     Attributes
     ----------
@@ -366,7 +369,7 @@ class DataCatalog(StrictModel):
             File missing, invalid YAML, or Pydantic validation failure.
         """
         if not path.exists():
-            raise InvalidCatalogError(path=path, reason="file doesn't exist")
+            raise InvalidCatalogError(path, reason="file doesn't exist")
 
         try:
             with path.open() as f:
@@ -374,22 +377,20 @@ class DataCatalog(StrictModel):
 
             if data is None:
                 raise InvalidCatalogError(
-                    path=path,
-                    reason="catalog file is empty or contains only comments",
+                    path, reason="catalog file is empty or contains only comments"
                 )
 
             return cls.model_validate(data)
 
         except yaml.YAMLError as yaml_error:
             raise InvalidCatalogError(
-                path=path,
-                reason=f"error parsing YAML: {yaml_error}",
+                path, reason=f"error parsing YAML: {yaml_error}"
             ) from yaml_error
         except ValidationError as pydantic_errors:
             # Suppress pydantic internals from traceback (raise ... from None);
             # details are captured in validation_errors.
             raise InvalidCatalogError(
-                path=path,
+                path,
                 reason="Pydantic validation errors",
                 validation_errors=format_pydantic_errors(pydantic_errors),
             ) from None
@@ -415,10 +416,10 @@ class DataCatalog(StrictModel):
         """
         dataset = self.datasets.get(name)
         if dataset is None:
-            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+            raise DatasetNotFoundError(name, available_datasets=list(self.datasets.keys()))
         if not isinstance(dataset, RemoteDatasetConfig):
             raise DatasetTypeError(
-                name=name, expected="RemoteDatasetConfig", actual=type(dataset).__name__
+                name, expected="RemoteDatasetConfig", actual=type(dataset).__name__
             )
         return dataset
 
@@ -443,10 +444,10 @@ class DataCatalog(StrictModel):
         """
         dataset = self.datasets.get(name)
         if dataset is None:
-            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+            raise DatasetNotFoundError(name, available_datasets=list(self.datasets.keys()))
         if not isinstance(dataset, GoldDatasetConfig):
             raise DatasetTypeError(
-                name=name, expected="GoldDatasetConfig", actual=type(dataset).__name__
+                name, expected="GoldDatasetConfig", actual=type(dataset).__name__
             )
         return dataset
 

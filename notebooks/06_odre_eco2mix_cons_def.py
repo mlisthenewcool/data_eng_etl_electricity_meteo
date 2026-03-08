@@ -38,6 +38,19 @@ def _(mo):
     (eco2mix-regional-cons-def). Compares data from OpenDataSoft and
     data.gouv.fr, then analyzes temporal coverage and data nature
     (definitive vs consolidated).
+
+    ## ODRE API query pattern (for future delta fetch)
+
+    The OpenDataSoft API supports datetime filtering via `where` clauses,
+    which could be used for incremental fetching instead of full downloads:
+
+    ```
+    GET https://odre.opendatasoft.com/api/explore/v2.1/catalog/datasets/{dataset}/exports/json
+    params:
+      where: "date_heure >= '2026-01-02T10:00:00Z' AND date_heure <= '2026-01-02T10:59:59Z'"
+      timezone: "Europe/Berlin"
+      limit: -1
+    ```
     """)
     return
 

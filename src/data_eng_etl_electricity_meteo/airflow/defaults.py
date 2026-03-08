@@ -1,21 +1,22 @@
 """Shared Airflow defaults for all DAG factories.
 
-Centralises production settings (retries, timeouts, start date) so that
-``ingest_factory`` and ``load_pg_factory`` stay in sync.
+Centralizes production settings (retries, timeouts, start date) so that
+``to_silver_factory``, ``to_silver_pg_factory`` and ``to_gold_factory`` stay in sync.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # DAG start date
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
-START_DATE = datetime(year=2026, month=1, day=24)
 
-# ---------------------------------------------------------------------------
+START_DATE = datetime(year=2026, month=1, day=24, tzinfo=UTC)
+
+# --------------------------------------------------------------------------------------
 # Default task arguments
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 DEFAULT_ARGS: dict[str, Any] = {
     "owner": "data-engineering",

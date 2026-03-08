@@ -23,12 +23,12 @@ from data_eng_etl_electricity_meteo.core.logger import (
 
 # Sentinel values for unused structlog processor parameters.
 _LOGGER = None
-_METHOD = "info"
+_METHOD_NAME = "info"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _normalize_value
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestNormalizeValue:
@@ -69,9 +69,9 @@ class TestNormalizeValue:
         assert repr(obj) in result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _flatten_dict
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 # fmt: off
@@ -89,33 +89,33 @@ def test_flatten_dict(prefix: str, mapping: dict[str, Any], expected: dict[str, 
     assert _flatten_dict(prefix, mapping) == expected
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _flatten_and_normalize
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestFlattenAndNormalize:
     def test_internal_keys_are_preserved(self) -> None:
         event_dict = {key: f"val_{key}" for key in _STRUCTLOG_INTERNAL_KEYS}
-        result = _flatten_and_normalize(_LOGGER, _METHOD, event_dict)
+        result = _flatten_and_normalize(_LOGGER, _METHOD_NAME, event_dict)
         assert result == event_dict
 
     def test_external_keys_are_flattened_and_normalized(self) -> None:
         event_dict: dict[str, Any] = {"event": "hello", "src": {"provider": "IGN"}, "flag": True}
-        result = _flatten_and_normalize(_LOGGER, _METHOD, event_dict)
+        result = _flatten_and_normalize(_LOGGER, _METHOD_NAME, event_dict)
         assert result["src.provider"] == "IGN"
         assert result["flag"] == "True"
 
     def test_internal_none_is_preserved(self) -> None:
         # Internal keys bypass normalization — even if None.
         event_dict: dict[str, Any] = {"event": "hello", "level": None}
-        result = _flatten_and_normalize(_LOGGER, _METHOD, event_dict)
+        result = _flatten_and_normalize(_LOGGER, _METHOD_NAME, event_dict)
         assert result["level"] is None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _visual_len
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 # fmt: off
 @pytest.mark.parametrize(
@@ -132,9 +132,9 @@ def test_visual_len(s: str, expected: int) -> None:
     assert _visual_len(s) == expected
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _build_level_styles
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -148,34 +148,34 @@ def test_level_style(level: str, expected: str) -> None:
     assert _build_level_styles()[level] == expected
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _colorize_event
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestColorizeEvent:
     def test_known_level_wraps_event_with_ansi(self) -> None:
         level = "warning"
-        styles = _build_level_styles()
-        processor = _colorize_event(styles)
+        level_styles = _build_level_styles()
+        processor = _colorize_event(level_styles)
         event_dict = {"level": level, "event": "hello"}
-        processor(_LOGGER, _METHOD, event_dict)
-        assert event_dict["event"].startswith(styles[level])
+        processor(_LOGGER, _METHOD_NAME, event_dict)
+        assert event_dict["event"].startswith(level_styles[level])
         assert event_dict["event"].endswith(_RESET)
         assert "hello" in event_dict["event"]
 
     def test_info_level_leaves_event_unchanged(self) -> None:
         # "info" maps to "" (empty string) — falsy, no color applied.
-        styles = _build_level_styles()
-        processor = _colorize_event(styles)
+        level_styles = _build_level_styles()
+        processor = _colorize_event(level_styles)
         event_dict = {"level": "info", "event": "hello"}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         assert event_dict["event"] == "hello"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _prepend_logger_name
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPrependLoggerName:
@@ -183,28 +183,28 @@ class TestPrependLoggerName:
         name, msg = "myapp", "msg"
         processor = _prepend_logger_name(use_colors=False)
         event_dict = {"logger_name": name, "event": msg}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         assert event_dict["event"] == f"[{name}] {msg}"
         assert "logger_name" not in event_dict
 
     def test_without_name(self) -> None:
         processor = _prepend_logger_name(use_colors=False)
         event_dict = {"event": "msg"}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         assert event_dict["event"] == "msg"
 
     def test_with_colors_wraps_name_in_cyan(self) -> None:
         name = "myapp"
         processor = _prepend_logger_name(use_colors=True)
         event_dict = {"logger_name": name, "event": "msg"}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         assert name in event_dict["event"]
         assert _CYAN in event_dict["event"]
 
     def test_padding_pads_short_string(self) -> None:
         processor = _prepend_logger_name(use_colors=False, pad_to=20)
         event_dict = {"logger_name": "a", "event": "b"}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         # "[a] b" = 5 chars, padded to 20
         assert len(event_dict["event"]) == 20
 
@@ -212,13 +212,13 @@ class TestPrependLoggerName:
         name, msg = "long_name", "long_event"
         processor = _prepend_logger_name(use_colors=False, pad_to=5)
         event_dict = {"logger_name": name, "event": msg}
-        processor(_LOGGER, _METHOD, event_dict)
+        processor(_LOGGER, _METHOD_NAME, event_dict)
         assert event_dict["event"] == f"[{name}] {msg}"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # _walk
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestWalk:

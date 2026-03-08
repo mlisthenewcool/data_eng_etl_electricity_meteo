@@ -5,7 +5,7 @@ import sys
 from enum import StrEnum
 from functools import cached_property
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar
 
 from pydantic import (
     AliasChoices,
@@ -15,7 +15,6 @@ from pydantic import (
     SecretStr,
     ValidationError,
     computed_field,
-    model_validator,
 )
 from pydantic_settings import (
     BaseSettings,
@@ -56,8 +55,10 @@ class Settings(BaseSettings):
 
     Computed path fields typed as ``DirectoryPath``
     (``data_dir_path``, ``postgres_dir_path``) validate that the target directory exists
-    at instantiation time. Instantiation will fail if those directories are absent.
+    on first access. Access will fail if those directories are absent.
     """
+
+    # -- Class internals ---------------------------------------------------------------
 
     # Project root resolved at class-definition time (before Pydantic
     # processes Field() defaults). Used by _SECRETS_DIR and model_config.
@@ -70,9 +71,8 @@ class Settings(BaseSettings):
         Path("/run/secrets") if Path("/run/secrets").exists() else _ROOT_DIR / "secrets"
     )
 
-    # ---------------------------------------------------------------------------
-    # Pydantic Config + source chain
-    # ---------------------------------------------------------------------------
+    # -- Pydantic settings -------------------------------------------------------------
+
     model_config = SettingsConfigDict(
         env_file=_ROOT_DIR / ".env",
         env_file_encoding="utf-8",
@@ -81,16 +81,14 @@ class Settings(BaseSettings):
         frozen=True,  # Immutable settings
     )
 
-    # ---------------------------------------------------------------------------
-    # General config
-    # ---------------------------------------------------------------------------
+    # -- General settings --------------------------------------------------------------
+
     logging_level: Annotated[
         LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
     ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
 
-    # ---------------------------------------------------------------------------
-    # Data config
-    # ---------------------------------------------------------------------------
+    # -- Data settings -----------------------------------------------------------------
+
     bronze_retention_days: int = Field(
         default=365,  # 1 year
         description="Number of days to retain bronze layer versions",
@@ -98,9 +96,8 @@ class Settings(BaseSettings):
         le=365 * 3,  # Max 3 years
     )
 
-    # ---------------------------------------------------------------------------
-    # Postgres connection
-    # ---------------------------------------------------------------------------
+    # -- Postgres connection -----------------------------------------------------------
+
     postgres_host: str = Field(default="localhost", description="Postgres host")
     postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)
     postgres_db_name: str = Field(default="default_db_name", description="Postgres database name")
@@ -119,9 +116,8 @@ class Settings(BaseSettings):
         description="Postgres password",
     )
 
-    # ---------------------------------------------------------------------------
-    # Airflow config
-    # ---------------------------------------------------------------------------
+    # -- Airflow settings --------------------------------------------------------------
+
     @computed_field
     @cached_property
     def is_running_on_airflow(self) -> bool:
@@ -132,16 +128,14 @@ class Settings(BaseSettings):
         """
         return "AIRFLOW_HOME" in os.environ
 
-    # ---------------------------------------------------------------------------
-    # Paths (derived from _ROOT_DIR, not configurable via env)
-    # NOTE: DirectoryPath (Pydantic) validates that the directory exists at
-    # access time. Use plain Path for directories that may not exist yet.
-    # ---------------------------------------------------------------------------
+    # -- Paths (derived from _ROOT_DIR, not configurable via env) ----------------------
+    # DirectoryPath (Pydantic) validates that the directory exists at access time.
+    # Use plain Path for directories that may not exist yet.
 
     @computed_field
     @cached_property
     def data_dir_path(self) -> DirectoryPath:
-        """Data directory (computed from root_dir)."""
+        """Data directory (computed from ``_ROOT_DIR``)."""
         return self._ROOT_DIR / "data"
 
     @computed_field
@@ -150,12 +144,11 @@ class Settings(BaseSettings):
         """Path to data catalog YAML file."""
         return self.data_dir_path / "catalog.yaml"
 
-    # TODO: Re-enable once the state directory is created as part of project setup.
-    # @computed_field
-    # @cached_property
-    # def data_state_dir_path(self) -> DirectoryPath:
-    #     """Path to pipeline state directory."""
-    #     return self.data_dir_path / "_state"
+    @computed_field
+    @cached_property
+    def data_state_dir_path(self) -> Path:
+        """Path to pipeline state directory (created on first write)."""
+        return self.data_dir_path / "_state"
 
     @computed_field
     @cached_property
@@ -163,62 +156,41 @@ class Settings(BaseSettings):
         """Path to Postgres' queries and configuration directory."""
         return self._ROOT_DIR / "postgres"
 
-    # ---------------------------------------------------------------------------
-    # Download Settings
-    # ---------------------------------------------------------------------------
-    download_chunk_size: int = Field(
-        default=512 * 1024,  # 512 KB
-        description="Chunk size for streaming downloads (bytes)",
-        gt=0,
-        le=10 * 1024 * 1024,  # Max 10 MB
+    # -- dbt settings ------------------------------------------------------------------
+
+    dbt_target: str = Field(
+        default="dev",
+        description="dbt profile target name (override to 'docker' in containers)",
     )
 
-    download_timeout_total: int = Field(
+    @computed_field
+    @cached_property
+    def dbt_project_dir(self) -> DirectoryPath:
+        """Path to the dbt project directory (computed from ``_ROOT_DIR``)."""
+        return self._ROOT_DIR / "dbt"
+
+    @computed_field
+    @cached_property
+    def dbt_log_path(self) -> Path:
+        """Path to the dbt log output directory."""
+        return self.dbt_project_dir / "logs"
+
+    @computed_field
+    @cached_property
+    def dbt_target_path(self) -> Path:
+        """Path to the dbt target (compiled artifacts) directory."""
+        return self.dbt_project_dir / "target"
+
+    # -- Download settings -------------------------------------------------------------
+
+    download_timeout_seconds: int = Field(
         default=600,
-        description="Maximum time for entire download (seconds)",
+        description="Maximum total time for a single file download",
         gt=0,
         le=3600,  # Max 1 hour
     )
 
-    download_timeout_connect: int = Field(
-        default=10,
-        description="Maximum time to establish connection (seconds)",
-        gt=0,
-        le=60,
-    )
-
-    download_timeout_sock_read: int = Field(
-        default=30,
-        description="Maximum time between data packets (seconds)",
-        gt=0,
-        le=300,
-    )
-
-    @model_validator(mode="after")
-    def validate_timeout_hierarchy(self) -> Self:
-        """Ensure total timeout exceeds connect and read timeouts."""
-        if self.download_timeout_total <= self.download_timeout_connect:
-            raise ValueError("download_timeout_total must be > download_timeout_connect")
-
-        if self.download_timeout_total <= self.download_timeout_sock_read:
-            raise ValueError("download_timeout_total must be > download_timeout_sock_read")
-
-        return self
-
-    # ---------------------------------------------------------------------------
-    # Hash Settings
-    # ---------------------------------------------------------------------------
-    hash_algorithm: Literal["sha256", "sha512", "sha1", "md5"] = Field(
-        default="sha256",
-        description="Hashing algorithm for integrity checks (recommended: sha256)",
-    )
-
-    hash_chunk_size: int = Field(
-        default=128 * 1024,  # 128 KB
-        description="Chunk size for file hashing (bytes)",
-        gt=0,
-        le=1024 * 1024,  # Max 1 MB
-    )
+    # -- Source chain ------------------------------------------------------------------
 
     @classmethod
     def settings_customise_sources(
@@ -251,12 +223,17 @@ class Settings(BaseSettings):
         )
 
 
+# --------------------------------------------------------------------------------------
+# Module-level singleton
+# --------------------------------------------------------------------------------------
+
+
 def _load_settings() -> Settings:
     """Instantiate settings, aborting with a clear message on validation error.
 
-    Uses ``print(stderr)`` instead of structlog because the project logger depends on
-    ``settings.logging_level`` (circular), and calling ``structlog.configure()`` here
-    would overwrite Airflow's own config.
+    Uses ``print(…, file=stderr)`` instead of structlog because the project logger
+    depends on ``settings.logging_level`` (circular), and calling
+    ``structlog.configure()`` here would overwrite Airflow's own config.
     """
     try:
         return Settings()

@@ -38,14 +38,11 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-include = ["src/**/*.py", "tests/**/*.py", "notebooks/**/*.py"]
-#src = ["src", "test"]
-
-#[tool.ruff.format]
-#docstring-code-line-length = 80
+include = ["notebooks/**/*.py", "scripts/**/*.py", "src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = [
+    "ANN", # flake8-annotations
     "I", # isort
     "E", # pycodestyle errors
     "W", # pycodestyle warnings
@@ -56,11 +53,10 @@ select = [
     "UP", # pyupgrade
     "TC", # flake8-type-checking
 ]
-
-# "D105", # Missing docstring in magic method (__post_init__, etc.)
-# "D107", # Missing docstring in __init__ (class docstring suffices)
-ignore = []
-#fixable = ["ALL"]
+ignore = [
+    "ANN401", # Allow `Any` (pydantic validators, protocols, **kwargs)
+]
+fixable = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104"]
@@ -75,28 +71,26 @@ ignore = []
     "TC001", # Move import into TYPE_CHECKING (not applicable in notebooks)
     "TC003", # Move import into TYPE_CHECKING (not applicable in notebooks)
     "PLR0913", # Too many arguments (marimo cells depend on many reactive vars)
+    "ANN001", # Argument annotations (marimo reactive dependencies, not real args)
+    "ANN202", # Private function return type (cells are all `def _()`)
 ]
 
 [tool.ruff.lint.pydocstyle]
-#convention = "google"
 convention = "numpy"
 
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 88
 
 [tool.ty.src]
-include = ["src", "tests"]
-#exclude = ["notebooks"]
+include = ["notebooks", "scripts", "src", "tests"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing --cov-report=html:tests/htmlcov"
 pythonpath = ["src"]
-#testpaths = ["tests"]
 
 [tool.coverage.run]
-branch = true                 # check if all branches of if/else statement are used
+branch = true # check if all branches of if/else statement are used
 data_file = "tests/.coverage"
-#source = ["data_eng_etl_electricity_meteo"]
 
 [tool.coverage.report]
 #fail_under = 90

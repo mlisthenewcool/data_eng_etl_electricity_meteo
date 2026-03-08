@@ -6,22 +6,22 @@ Airflow-agnostic.
 
 Two factories are provided:
 
-- ``open_standalone_connection()`` — for scripts and tests. Reads credentials from
-  pydantic-settings (env vars or Docker secrets).
-- ``open_airflow_hook_connection()`` — for Airflow tasks. Extracts a
-  ``psycopg.Connection`` from a ``PostgresHook``.
+- ``open_standalone_connection()`` — for scripts and tests.
+  Reads credentials from pydantic-settings (env vars or Docker secrets).
+- ``open_airflow_hook_connection()`` — for Airflow tasks.
+  Extracts a ``psycopg.Connection`` from a ``PostgresHook``.
 
 Both return a ``psycopg.Connection`` — callers are responsible for closing it.
 
-Why ``get_conn()`` instead of Hook convenience methods?
--------------------------------------------------------
-The loader needs a single atomic transaction spanning DDL, schema validation,
-TRUNCATE/staging, COPY streaming, and upsert. Hook methods (``run``, ``copy_expert``)
-are stateless per call and do not share a transaction. The Hook's ``get_conn()`` is the
-documented pattern for complex operations requiring fine-grained transaction control.
+``get_conn()`` is used instead of Hook convenience methods (``run``, ``copy_expert``)
+because the loader needs a single atomic transaction spanning DDL, schema validation,
+TRUNCATE/staging, COPY streaming, and upsert.
+Hook methods are stateless per call and do not share a transaction.
 """
 
-from typing import TYPE_CHECKING, Any, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import psycopg
 
@@ -34,7 +34,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.settings import settings
 
 
-def open_standalone_connection() -> psycopg.Connection[Any]:
+def open_standalone_connection() -> psycopg.Connection:
     """Open a psycopg connection using settings resolved at startup.
 
     Credentials (``settings.postgres_user`` / ``settings.postgres_password``) are
@@ -78,7 +78,7 @@ def open_standalone_connection() -> psycopg.Connection[Any]:
     )
 
 
-def open_airflow_hook_connection(hook: "PostgresHook") -> psycopg.Connection[Any]:
+def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection:
     """Extract a ``psycopg.Connection`` from an Airflow ``PostgresHook``.
 
     ``PostgresHook.get_conn()`` returns a psycopg3 connection wrapped in
@@ -86,8 +86,8 @@ def open_airflow_hook_connection(hook: "PostgresHook") -> psycopg.Connection[Any
     is ``True`` — which is guaranteed when psycopg3 and SQLAlchemy 2.x are both
     installed (always the case in this project).
 
-    The cast is necessary because ``CompatConnection`` is not recognized by type
-    checkers as a ``psycopg.Connection``.
+    The ``type: ignore[assignment]`` is necessary because ``CompatConnection`` is not
+    recognized by type checkers as a ``psycopg.Connection``.
 
     Parameters
     ----------
@@ -99,4 +99,5 @@ def open_airflow_hook_connection(hook: "PostgresHook") -> psycopg.Connection[Any
     psycopg.Connection
         Open connection. Caller must close it.
     """
-    return cast("psycopg.Connection[Any]", cast("object", hook.get_conn()))
+    conn: psycopg.Connection = hook.get_conn()  # type: ignore[assignment]
+    return conn

@@ -5,13 +5,13 @@ Airflow Assets represent data dependencies between DAGs / tasks.
 Two Asset families exist:
 
 - **File Assets** (``get_silver_file_asset``): ``file://`` URIs pointing to silver
-  Parquet files on disk. Produced by ingestion DAGs.
-- **Postgres Assets** (``get_silver_pg_asset``): ``postgres://`` URIs representing
-  tables in the project database.
-  Produced by load DAGs and consumed by the dbt transformation DAG.
+  Parquet files on disk. Produced by ``to_silver`` DAGs.
+- **Postgres Assets** (``get_silver_pg_asset``, ``get_gold_pg_asset``):
+  ``postgres://`` URIs representing tables in the project database.
+  Produced by ``to_silver_pg`` and ``to_gold`` DAGs.
 
 Assets are identified by URI.
-This module guarantees that repeated calls with the same arguments return the **same**
+This module guarantees that repeated calls for the same dataset return the **same**
 ``Asset`` instance (via ``@cache``), avoiding redundant object creation.
 """
 
@@ -19,15 +19,22 @@ from functools import cache
 
 from airflow.sdk import Asset
 
-from data_eng_etl_electricity_meteo.core.enums import MedallionLayer
+from data_eng_etl_electricity_meteo.core.data_catalog import (
+    GoldDatasetConfig,
+    RemoteDatasetConfig,
+)
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.pipeline.path_resolver import RemotePathResolver
 
-# TODO: add meaningful extras to Assets or remove them ?
+# Asset group constants — these describe storage targets, not data layers
+# (intentionally not in MedallionLayer which is a data-layer concept).
+SILVER_FILE_GROUP = "silver"
+SILVER_PG_GROUP = "silver_pg"
+GOLD_PG_GROUP = "gold_pg"
 
 
 @cache
-def get_silver_file_asset(dataset_name: str) -> Asset:
+def get_silver_file_asset(dataset: RemoteDatasetConfig) -> Asset:
     """Build an Airflow Asset for a dataset's silver Parquet file.
 
     Landing and bronze are internal pipeline stages with no downstream consumers.
@@ -35,8 +42,8 @@ def get_silver_file_asset(dataset_name: str) -> Asset:
 
     Parameters
     ----------
-    dataset_name
-        Dataset identifier (must match a catalog key).
+    dataset
+        Remote dataset configuration from the catalog.
 
     Returns
     -------
@@ -44,62 +51,68 @@ def get_silver_file_asset(dataset_name: str) -> Asset:
         Airflow Asset with a ``file://`` URI pointing to
         ``silver/{dataset_name}/current.parquet``.
     """
-    resolver = RemotePathResolver(dataset_name)
-    uri = resolver.silver_current_path.as_uri()
+    uri = RemotePathResolver(dataset.name).silver_current_path.as_uri()
 
     return Asset(
-        name=f"{dataset_name}__{MedallionLayer.SILVER}",
+        name=f"{dataset.name}__{SILVER_FILE_GROUP}",
         uri=uri,
-        group=MedallionLayer.SILVER,
-        extra={"dataset_name": dataset_name},
+        group=SILVER_FILE_GROUP,
+        extra={
+            "provider": dataset.source.provider,
+            "format": str(dataset.source.format),
+            "ingestion_mode": str(dataset.ingestion.mode),
+        },
     )
 
 
 @cache
-def get_silver_pg_asset(dataset_name: str) -> Asset:
+def get_silver_pg_asset(dataset: RemoteDatasetConfig) -> Asset:
     """Build an Airflow Asset for a dataset's Postgres silver table.
 
     These Assets represent data loaded into the ``silver`` schema of the project
     Postgres database.
-    They serve as outlets for load DAGs and as inlets for the dbt transformation DAG.
+    They serve as outlets for ``to_silver_pg`` DAGs and as inlets for ``to_gold``.
 
     The URI is a logical marker — Airflow does not inspect the database; the outlet
     event is emitted by the load task upon successful completion.
 
     Parameters
     ----------
-    dataset_name
-        Dataset identifier (must match a catalog key).
+    dataset
+        Remote dataset configuration from the catalog.
 
     Returns
     -------
     Asset
         Airflow Asset with a ``postgres://`` URI identifying the silver table.
     """
-    # URI format required by apache-airflow-providers-postgres: postgres://host:port/db/schema/table
     uri = (
         f"postgres://{settings.postgres_host}:{settings.postgres_port}"
-        f"/{settings.postgres_db_name}/silver/{dataset_name}"
+        f"/{settings.postgres_db_name}/silver/{dataset.name}"
     )
     return Asset(
-        name=f"{dataset_name}__silver_pg",
+        name=f"{dataset.name}__{SILVER_PG_GROUP}",
         uri=uri,
-        group="silver_pg",
-        extra={"dataset_name": dataset_name},
+        group=SILVER_PG_GROUP,
+        extra={
+            "provider": dataset.source.provider,
+            "table": dataset.postgres.table,
+            "ingestion_mode": str(dataset.ingestion.mode),
+        },
     )
 
 
 @cache
-def get_gold_pg_asset(dataset_name: str) -> Asset:
+def get_gold_pg_asset(dataset: GoldDatasetConfig) -> Asset:
     """Build an Airflow Asset for a dataset's Postgres gold table.
 
     These Assets represent data produced by dbt in the ``gold`` schema of the project
-    Postgres database. They serve as outlets for the dbt DAG.
+    Postgres database. They serve as outlets for the ``to_gold`` DAG.
 
     Parameters
     ----------
-    dataset_name
-        Dataset identifier (must match a catalog key).
+    dataset
+        Gold dataset configuration from the catalog.
 
     Returns
     -------
@@ -108,11 +121,11 @@ def get_gold_pg_asset(dataset_name: str) -> Asset:
     """
     uri = (
         f"postgres://{settings.postgres_host}:{settings.postgres_port}"
-        f"/{settings.postgres_db_name}/gold/{dataset_name}"
+        f"/{settings.postgres_db_name}/gold/{dataset.name}"
     )
     return Asset(
-        name=f"{dataset_name}__gold_pg",
+        name=f"{dataset.name}__{GOLD_PG_GROUP}",
         uri=uri,
-        group="gold_pg",
-        extra={"dataset_name": dataset_name},
+        group=GOLD_PG_GROUP,
+        extra={"depends_on": list(dataset.source.depends_on)},
     )

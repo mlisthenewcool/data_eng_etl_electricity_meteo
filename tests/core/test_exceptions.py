@@ -11,9 +11,9 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     PostgresLoadError,
 )
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # BaseProjectException.to_dict
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestBaseProjectExceptionToDict:
@@ -22,9 +22,9 @@ class TestBaseProjectExceptionToDict:
         assert exc.to_dict() == {"path": Path("/data/archive.7z")}
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # BaseProjectException.log
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestBaseProjectExceptionLog:
@@ -35,9 +35,9 @@ class TestBaseProjectExceptionLog:
         log_method.assert_called_once_with(str(exc), **exc.to_dict())
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # PipelineStageError.log
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPipelineStageErrorLog:
@@ -53,9 +53,10 @@ class TestPipelineStageErrorLog:
         exc.__cause__ = cause
         log_method = Mock()
         exc.log(log_method)
+        cause_data = {f"cause_{k}": v for k, v in cause.to_dict().items()}
         log_method.assert_called_once_with(
             str(exc),
-            **exc.to_dict() | cause.to_dict(),
+            **exc.to_dict() | cause_data,
             cause_type=type(cause).__qualname__,
         )
 
@@ -73,9 +74,9 @@ class TestPipelineStageErrorLog:
         )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # PipelineStageError.to_dict
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPipelineStageErrorToDict:
@@ -91,13 +92,13 @@ class TestPipelineStageErrorToDict:
         assert "context" not in result
 
     def test_with_multiple_context_keys(self) -> None:
-        exc = BronzeStageError("transform failed", dataset="eco2mix", version="2026-01-01")
-        assert exc.to_dict() == {"dataset": "eco2mix", "version": "2026-01-01"}
+        exc = BronzeStageError("transform failed", table="silver.eco2mix", version="2026-01-01")
+        assert exc.to_dict() == {"table": "silver.eco2mix", "version": "2026-01-01"}
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # PipelineStageError message
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPipelineStageErrorMessage:
@@ -110,9 +111,9 @@ class TestPipelineStageErrorMessage:
         assert str(exc) == "inner_file required for archive dataset"
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # PostgresCredentialsError.to_dict
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPostgresCredentialsErrorToDict:
@@ -129,9 +130,9 @@ class TestPostgresCredentialsErrorToDict:
         assert "stage" not in result
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # PipelineStageError.log with context
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TestPipelineStageErrorLogWithContext:
@@ -146,13 +147,12 @@ class TestPipelineStageErrorLogWithContext:
 
     def test_log_with_context_and_cause(self) -> None:
         cause = ArchiveNotFoundError(path=Path("/data/archive.7z"))
-        exc = ExtractStageError("inner_file required", dataset="eco2mix")
+        exc = ExtractStageError("inner_file required")
         exc.__cause__ = cause
         log_method = Mock()
         exc.log(log_method)
         log_method.assert_called_once_with(
             "inner_file required",
-            dataset="eco2mix",
-            path=Path("/data/archive.7z"),
+            cause_path=Path("/data/archive.7z"),
             cause_type="ArchiveNotFoundError",
         )

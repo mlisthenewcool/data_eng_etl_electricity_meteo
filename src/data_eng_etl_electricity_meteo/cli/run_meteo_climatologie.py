@@ -13,30 +13,33 @@ Usage::
         --year-start 2024 --year-end 2025
 """
 
+from datetime import UTC, datetime
 from functools import partial
 
 import typer
 
 from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
-from data_eng_etl_electricity_meteo.utils.meteo_download import download_climatologie
+from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
+    download_climatologie,
+)
 
 DATASET_NAME = "meteo_france_climatologie"
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer()
 
 
 @app.command()
 def main(
     year_start: int | None = typer.Option(
         None,
-        min=1950,
-        max=2100,
+        min=2015,
+        max=datetime.now(tz=UTC).year,
         help="Start year for climatologie data (default: current year - 1).",
     ),
     year_end: int | None = typer.Option(
         None,
-        min=1950,
-        max=2100,
+        min=2015,
+        max=datetime.now(tz=UTC).year,
         help="End year for climatologie data (default: current year).",
     ),
     skip_postgres: bool = typer.Option(
@@ -47,7 +50,7 @@ def main(
 ) -> None:
     """Run the Météo France climatologie pipeline (95 departmental files)."""
     run_pipeline(
-        dataset_name=DATASET_NAME,
+        DATASET_NAME,
         custom_download=partial(
             download_climatologie,
             year_start=year_start,

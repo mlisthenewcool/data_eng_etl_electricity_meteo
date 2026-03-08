@@ -28,9 +28,10 @@ from data_eng_etl_electricity_meteo.utils.remote_metadata import RemoteFileMetad
 
 logger = get_logger("pipeline")
 
-# ---------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------
 # Stage-specific metrics
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class ExtractionInfo(StrictModel):
@@ -46,7 +47,7 @@ class ExtractionInfo(StrictModel):
     file_path
         Path to the extracted file.
     file_hash
-        SHA-256 hash of the extracted file.
+        Content hash of the extracted file (algorithm from settings).
     size_mib
         Size of the extracted file in MiB.
     """
@@ -90,7 +91,7 @@ class BronzeMetrics(StrictModel):
     """Metrics produced by the bronze conversion stage."""
 
     file_size_mib: float
-    row_count: int
+    rows_count: int
     columns: list[str]
 
 
@@ -101,7 +102,7 @@ class IncrementalDiffMetrics(StrictModel):
     ----------
     rows_total
         Total rows in the full silver snapshot.
-    rows_new
+    rows_added
         Rows whose PK is absent from the previous snapshot (inserts).
     rows_changed
         Rows whose PK exists but at least one non-key column differs (updates).
@@ -110,7 +111,7 @@ class IncrementalDiffMetrics(StrictModel):
     """
 
     rows_total: int
-    rows_new: int
+    rows_added: int
     rows_changed: int
     rows_unchanged: int
 
@@ -122,7 +123,7 @@ class SilverMetrics(StrictModel):
     ----------
     file_size_mib
         Size of ``current.parquet`` in MiB.
-    row_count
+    rows_count
         Number of rows in the silver snapshot.
     columns
         Column names.
@@ -131,7 +132,7 @@ class SilverMetrics(StrictModel):
     """
 
     file_size_mib: float
-    row_count: int
+    rows_count: int
     columns: list[str]
     diff: IncrementalDiffMetrics | None = None
 
@@ -140,7 +141,7 @@ class GoldMetrics(StrictModel):
     """Metrics produced by the gold aggregation stage (dbt in Postgres)."""
 
     table: str
-    row_count: int
+    rows_count: int
     columns: list[str]
 
 
@@ -149,28 +150,25 @@ class LoadPostgresMetrics(StrictModel):
 
     Attributes
     ----------
-    dataset_name
-        Dataset identifier.
     table
         Schema-qualified table name (e.g. ``silver.dim_installations``).
-    strategy
-        Loading strategy used: ``"snapshot"`` or ``"incremental"``.
+    mode
+        Ingestion mode: ``"snapshot"`` or ``"incremental"``.
     rows_loaded
         Number of rows written (for incremental: rows inserted + updated).
     diff
         Incremental diff statistics from the silver stage, or ``None``.
     """
 
-    dataset_name: str
     table: str
-    strategy: IngestionMode
+    mode: IngestionMode
     rows_loaded: int
     diff: IncrementalDiffMetrics | None = None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Ingestion decision
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class IngestionDecision(StrictModel):
@@ -192,9 +190,9 @@ class IngestionDecision(StrictModel):
     remote_metadata: RemoteFileMetadata
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Pipeline context (accumulates across stages via XCom)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class PipelineContext(StrictModel):
@@ -222,9 +220,9 @@ class PipelineContext(StrictModel):
     silver: SilverMetrics | None = None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Pipeline run snapshot (nested view for observability / metadata store)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DownloadSnapshot(StrictModel):
@@ -235,7 +233,7 @@ class DownloadSnapshot(StrictModel):
     remote_metadata
         HTTP HEAD metadata captured before download.
     file_hash
-        SHA-256 hash of the downloaded file.
+        Content hash of the downloaded file (algorithm from settings).
     size_mib
         Size of the downloaded file in MiB.
     """
@@ -251,7 +249,7 @@ class ExtractionSnapshot(StrictModel):
     Attributes
     ----------
     file_hash
-        SHA-256 hash of the extracted file.
+        Content hash of the extracted file (algorithm from settings).
     size_mib
         Size of the extracted file in MiB.
     """

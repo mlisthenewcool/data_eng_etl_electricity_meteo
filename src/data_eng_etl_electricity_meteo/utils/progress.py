@@ -5,64 +5,73 @@ the types defined here.
 """
 
 import time
+from collections.abc import Callable
 from typing import Protocol
 
 from py7zr.callbacks import ExtractCallback
 from tqdm import tqdm
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+
 
 LOG_INTERVAL_S: float = 10.0
 LOG_INTERVAL_PCT: float = 10.0
 LOG_MIN_INTERVAL_S: float = 5.0
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Protocols
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class DownloadProgressReporter(Protocol):
-    """Reports byte-count updates during a streaming download.
+    """Reports progress updates during a streaming operation.
 
-    Implementations receive the total expected bytes at construction time (``0`` when
-    ``Content-Length`` is absent) and individual chunk sizes via :meth:`update`.
+    Implementations receive the expected total count at construction time
+    (``0`` when unknown) and individual increments via :meth:`update`.
+    Used for both byte-level (download, extraction) and item-level (batch) tracking.
     """
 
     def update(self, n: int) -> None:
-        """Accumulate *n* downloaded bytes."""
+        """Accumulate *n* units of progress (bytes or items)."""
 
     def close(self) -> None:
         """Release any resources held by the reporter."""
 
 
-# ---------------------------------------------------------------------------
+# Factory that takes total count (bytes or items) and returns a progress reporter.
+# Used to inject progress tracking strategy (tqdm vs structlog) from the orchestrator.
+BatchProgressFactory = Callable[[int], DownloadProgressReporter]
+
+
+# --------------------------------------------------------------------------------------
 # Shared throttle logic
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class ThrottledProgressTracker:
-    """Track bytes processed and decide when to emit a log line.
+    """Track progress and decide when to emit a log line.
 
-    Accumulates byte counts and exposes ``accumulate`` which returns ``True`` when the
-    elapsed time or percentage-change threshold is crossed.
+    Accumulates counts (bytes or items) and exposes ``accumulate`` which returns
+    ``True`` when the elapsed time or percentage-change threshold is crossed.
 
     Parameters
     ----------
-    total_bytes
-        Expected total size. ``0`` when unknown (disables %-based triggering).
+    total
+        Expected total count (bytes or items).
+        ``0`` when unknown (disables %-based triggering).
     """
 
-    def __init__(self, total_bytes: int) -> None:
-        self._total = total_bytes
+    def __init__(self, total: int) -> None:
+        self._total = total
         self._processed: int = 0
         self._last_log_time: float = time.monotonic()
         self._last_log_pct: float = 0.0
 
     def accumulate(self, n: int) -> bool:
-        """Add *n* bytes and return ``True`` if a log line should be emitted."""
+        """Add *n* units and return ``True`` if a log line should be emitted."""
         self._processed += n
         now = time.monotonic()
         pct = self._processed / self._total * 100 if self._total else None
@@ -80,6 +89,16 @@ class ThrottledProgressTracker:
         return False
 
     @property
+    def processed(self) -> int:
+        """Raw processed count (bytes or items)."""
+        return self._processed
+
+    @property
+    def total(self) -> int:
+        """Raw total count (bytes or items). ``0`` if unknown."""
+        return self._total
+
+    @property
     def processed_mib(self) -> float:
         """Processed bytes converted to MiB (rounded to 2 decimals)."""
         return round(self._processed / 1024**2, 2)
@@ -95,9 +114,9 @@ class ThrottledProgressTracker:
         return round(self._processed / self._total * 100, 2) if self._total else None
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Extract callback base (py7zr no-op defaults)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class BaseExtractCallback(ExtractCallback):
@@ -126,9 +145,9 @@ class BaseExtractCallback(ExtractCallback):
         """No-op: not needed for progress tracking."""
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # tqdm reporters (local / interactive)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 
 
 class TqdmExtractCallback(BaseExtractCallback):

@@ -1,4 +1,12 @@
 -- "date_mise_enservice_(format_date)" is a verbatim column name from the ODRE source API.
+--
+-- Previous schema used a 24-column subset: id_peps, nom_installation, code_iris,
+-- code_insee (→ code_insee_commune), commune, code_departement, departement,
+-- code_region, region, code_filiere, filiere, code_technologie, technologie,
+-- puissance_max_installee (→ puis_max_installee), puissance_max_raccordement
+-- (→ puis_max_rac), nb_groupes, date_mise_en_service, date_raccordement,
+-- date_deraccordement, regime, gestionnaire, code_epci, epci, est_renouvelable,
+-- type_energie, est_actif. Current schema keeps all source API columns.
 
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
     id_peps                                 TEXT PRIMARY KEY,

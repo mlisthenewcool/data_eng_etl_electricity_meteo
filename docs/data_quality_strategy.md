@@ -14,39 +14,47 @@ invalides.
 
 ## Approche actuelle
 
-Validations légères dans `transformations/shared.py` :
+Trois niveaux de validation Silver, tous en Python custom (zéro dépendance
+externe) :
 
-- `apply_common_silver()` : renommage snake_case + drop des colonnes full-null +
-  `validate_not_empty()`
-- `validate_not_empty()` : lève `TransformValidationError` si le DataFrame est vide
+1. **Structurelle** — `prepare_silver()` (renommage snake_case, drop colonnes
+   full-null) + `validate_not_empty()` dans le registry wrapper.
+2. **Détection de drift source** — `validate_source_columns()` en début de
+   `transform_silver()` : vérifie que les colonnes post-`prepare_silver` n'ont
+   pas changé. Lève `SourceSchemaDriftError` avec détail des colonnes
+   ajoutées/supprimées.
+3. **Contrat de sortie** — `DataFrameModel` (metaclass + `Annotated[T, Column()]`)
+   par dataset : schéma déclaratif avec types Polars exacts, contraintes de
+   valeurs (`nullable`, `unique`, `ge`/`le`, `isin`). Lève
+   `SchemaValidationError` avec liste d'erreurs détaillées.
 
-Ces checks sont **structurels** (invariants universels). Aucune validation de
-**contenu** par dataset (types, ranges, patterns, unicité).
+Chaque module de transformation (`transformations/*.py`) définit un `SPEC`
+(`DatasetTransformSpec`) regroupant :
+- `all_source_columns: frozenset[str]` — colonnes attendues en entrée
+- `used_source_columns: frozenset[str]` — colonnes effectivement utilisées
+- `silver_schema: type[DataFrameModel]` — contrat de sortie
+- `bronze_transform` / `silver_transform` — fonctions de transformation
 
-## Décision : Python custom maintenant, Pandera plus tard
+Voir `docs/dataframe_model_custom.md` pour le design détaillé.
 
-Pour les 5 datasets actuels avec uniquement des checks structurels, Python custom
-suffit. Pandera sera introduit quand des validations de contenu par dataset seront
-nécessaires.
+## Décision : DataFrameModel custom, Pandera réévalué plus tard
+
+Le `DataFrameModel` custom a été choisi plutôt que Pandera pour les raisons
+suivantes :
+
+- **Types Polars complexes** — `List(String)`, `UInt32`, `Binary`,
+  `Datetime("us", "UTC")` : Pandera ne les supporte pas nativement.
+- **Zéro dépendance** — ~150 lignes de code, pas de package externe.
+- **Syntaxe Pydantic** — `Annotated[T, Column(...)]`, familière et lisible.
 
 ### Point de bascule vers Pandera
 
-Pandera devient plus intéressant que Python custom dès que :
+Pandera sera réévalué si :
 
-- On veut valider le **contenu des colonnes** (types, ranges, valeurs attendues) —
-  en custom ça devient vite une forêt de `if/for` par dataset
-- On veut un **contrat lisible par dataset** — un schéma Pandera se lit comme une
-  spec, du code custom se lit comme du code
-- On ajoute régulièrement des datasets — le pattern Pandera est identique à chaque
-  fois, le custom diverge
-
-### Intégration prévue
-
-- Schéma Pandera par dataset (ex: `OdreInstallationsSilver(DataFrameModel)`)
-- `schema.validate(df)` appelé dans `to_silver()` avant `df.write_parquet()`
-- `pandera.errors.SchemaError` wrappé dans `TransformValidationError`
-- `apply_common_silver` reste pour le renommage snake_case et le drop de colonnes
-  null (nettoyage structurel avant validation Pandera)
+- Le nombre de datasets dépasse ~10 et que le `DataFrameModel` custom montre
+  ses limites de maintenabilité.
+- Des besoins de checks statistiques (distribution, corrélation) apparaissent.
+- Le support Pandera des types Polars complexes s'améliore.
 
 ## Comparatif des solutions étudiées
 
@@ -108,14 +116,15 @@ Pandera devient plus intéressant que Python custom dès que :
 - **Faiblesses** : pas de standard, chaque check est ad-hoc, ne scale pas quand on
   veut valider le contenu par dataset (N checks × M datasets), le contrat n'est pas
   lisible comme une spec
-- **Verdict** : **utilisé actuellement** pour les checks structurels. Sera remplacé
-  par Pandera quand des validations de contenu seront nécessaires.
+- **Verdict** : **utilisé** — `DataFrameModel` custom avec syntaxe
+  `Annotated[T, Column()]`, validation de schéma + valeurs, zéro dépendance.
 
 ## Résumé par couche
 
 | Couche | Validation | Outil | Quand |
 |--------|-----------|-------|-------|
-| Silver (parquet) | Structurelle (vide, null) | Python custom | Actuel |
-| Silver (parquet) | Contenu (types, ranges, unicité) | Pandera | Futur |
+| Silver (parquet) | Structurelle (vide, snake_case, null cols) | `shared.py` | Actuel |
+| Silver (parquet) | Drift source (colonnes ajoutées/supprimées) | `validate_source_columns` | Actuel |
+| Silver (parquet) | Contenu (types, ranges, unicité, isin) | `DataFrameModel` | Actuel |
 | Silver (Postgres) | Intégrité de la copie | `_validate_columns` | Actuel |
 | Gold (Postgres) | Tests métier | dbt tests | Futur (avec dbt) |

@@ -24,6 +24,28 @@ def _(mo):
     Exploration and filtering of Meteo France weather stations metadata.
     Identifies active stations with relevant meteorological parameters
     for renewable energy analysis (solar PV + wind).
+
+    ## Data sources
+
+    Three complementary Meteo France datasets are used in this project:
+
+    1. **Informations stations (metadata)** — reference file with all stations
+       (metro + outre-mer), ~180 Mo, annual frequency.
+       [data.gouv.fr](https://www.data.gouv.fr/datasets/informations-sur-les-stations-metadonnees/)
+
+    2. **Observations (real-time)** — raw hourly data from active stations,
+       rolling 24h window, one file per department.
+
+    3. **Climatologie (qualified)** — quality-controlled archived data from
+       historical stations (active or not), granularity = 1 station, max 1
+       year per request.
+       [data.gouv.fr][clim-dgf] ·
+       [API doc (Confluence)][clim-api] ·
+       [field descriptions][clim-fields]
+
+    [clim-dgf]: https://www.data.gouv.fr/datasets/donnees-climatologiques-de-base-horaires
+    [clim-api]: https://confluence-meteofrance.atlassian.net/wiki/spaces/OpenDataMeteoFrance/pages/854261785/API+Donn+es+Climatologiques
+    [clim-fields]: https://www.data.gouv.fr/datasets/donnees-climatologiques-de-base-horaires?resource_id=48b7e4aa-3ca1-4a63-9ab1-a723357336ff
     """)
     return
 

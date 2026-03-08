@@ -23,6 +23,11 @@ from data_eng_etl_electricity_meteo.utils.progress import TqdmExtractCallback
 logger = get_logger("extraction")
 
 
+# --------------------------------------------------------------------------------------
+# Types
+# --------------------------------------------------------------------------------------
+
+
 @dataclass(frozen=True)
 class ExtractedFileInfo:
     """Extracted file metadata (path, hash, size) returned by ``extract_7z``."""
@@ -30,6 +35,11 @@ class ExtractedFileInfo:
     path: Path
     file_hash: str
     size_mib: float
+
+
+# --------------------------------------------------------------------------------------
+# Validate SQLite header (GeoPackage)
+# --------------------------------------------------------------------------------------
 
 
 def _validate_sqlite_header(path: Path) -> None:
@@ -60,8 +70,14 @@ def _validate_sqlite_header(path: Path) -> None:
         raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from error
 
 
+# --------------------------------------------------------------------------------------
+# Public API
+# --------------------------------------------------------------------------------------
+
+
 def extract_7z(
     archive_path: Path,
+    *,
     target_filename: str,
     dest_dir: Path,
     validate_sqlite: bool = True,
@@ -69,7 +85,7 @@ def extract_7z(
 ) -> ExtractedFileInfo:
     """Extract a specific file from a 7z archive.
 
-    Extracts to a temporary directory then moves atomically to *dest_dir*.
+    Extracts to a temporary directory then moves the result to *dest_dir*.
 
     Parameters
     ----------
@@ -108,6 +124,8 @@ def extract_7z(
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
 
+        # -- Open archive and locate target file ---------------------------------------
+
         with py7zr.SevenZipFile(archive_path, mode="r") as archive:
             all_files = archive.getnames()
 
@@ -120,13 +138,15 @@ def extract_7z(
 
             logger.debug("Found target in archive", target_path=target_internal_path)
 
-            # Get uncompressed size for progress bar
+            # -- Get uncompressed size for progress ------------------------------------
+
             target_info = next(
                 info for info in archive.list() if info.filename == target_internal_path
             )
             uncompressed_size = target_info.uncompressed
 
-            # Extract to temp directory with progress
+            # -- Extract with progress tracking ----------------------------------------
+
             owned_pbar: tqdm | None = None
             if progress is not None:
                 callback: ExtractCallback = progress(uncompressed_size)
@@ -149,23 +169,27 @@ def extract_7z(
                 if owned_pbar is not None:
                     owned_pbar.close()
 
+            # -- Move to final destination ---------------------------------------------
+
             extracted_file = tmp_dir_path / target_internal_path
 
-            # Compute final destination path (preserve original filename from archive)
+            # Preserve original filename from archive (not the nested internal path)
             dest_path = dest_dir / target_filename
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Atomic move to final destination
+            # Move to final destination (not atomic across filesystems,
+            # but the source temp dir is cleaned up regardless)
             if dest_path.exists():
                 dest_path.unlink()
             shutil.move(src=extracted_file, dst=dest_path)
 
-            # Optional SQLite validation for GeoPackage files
+            # -- Validate (optional SQLite check) and compute metadata -----------------
+
             if validate_sqlite:
                 try:
                     _validate_sqlite_header(dest_path)
                 except FileIntegrityError:
-                    # Clean up invalid file
+                    # Avoid leaving a corrupt file that a subsequent run might accept
                     if dest_path.exists():
                         dest_path.unlink()
                     raise
@@ -173,6 +197,6 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.info("Extraction completed", size_mib=size_mib)
+            logger.info("Extraction completed", target=target_filename, file_size_mib=size_mib)
 
-            return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)
+            return ExtractedFileInfo(dest_path, file_hash=file_hash, size_mib=size_mib)
