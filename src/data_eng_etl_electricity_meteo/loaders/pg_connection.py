@@ -21,7 +21,7 @@ Hook methods are stateless per call and do not share a transaction.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import psycopg
 
@@ -34,7 +34,7 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.settings import settings
 
 
-def open_standalone_connection() -> psycopg.Connection[Any]:
+def open_standalone_connection() -> psycopg.Connection:
     """Open a psycopg connection using settings resolved at startup.
 
     Credentials (``settings.postgres_user`` / ``settings.postgres_password``) are
@@ -78,7 +78,7 @@ def open_standalone_connection() -> psycopg.Connection[Any]:
     )
 
 
-def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection[Any]:
+def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection:
     """Extract a ``psycopg.Connection`` from an Airflow ``PostgresHook``.
 
     ``PostgresHook.get_conn()`` returns a psycopg3 connection wrapped in
@@ -99,5 +99,5 @@ def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection[Any]:
     psycopg.Connection
         Open connection. Caller must close it.
     """
-    conn: psycopg.Connection[Any] = hook.get_conn()  # type: ignore[assignment]
+    conn: psycopg.Connection = hook.get_conn()  # type: ignore[assignment]
     return conn

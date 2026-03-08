@@ -7,12 +7,14 @@ import polars as pl
 import pytest
 
 from data_eng_etl_electricity_meteo.core.exceptions import SourceSchemaDriftError
-from data_eng_etl_electricity_meteo.transformations.meteo_france_climatologie import (
+from data_eng_etl_electricity_meteo.transformations.datasets.meteo_france_climatologie import (
+    _ALL_SOURCE_COLUMNS,
     _BRONZE_COLUMNS,
     _COLUMNS_MAPPING,
     transform_bronze,
     transform_silver,
 )
+from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
 
 # --------------------------------------------------------------------------------------
 # Fixtures
@@ -195,7 +197,8 @@ class TestColumnSelection:
     def test_output_has_expected_columns(self) -> None:
         """Silver output should have exactly the 16 mapped columns."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
 
         expected_columns = list(_COLUMNS_MAPPING.values())
         assert result.columns == expected_columns
@@ -203,17 +206,26 @@ class TestColumnSelection:
     def test_output_column_count(self) -> None:
         """Silver output should have exactly 16 columns."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert len(result.columns) == 16
 
     def test_extra_source_columns_raise_drift_error(self) -> None:
         """Extra source columns should raise SourceSchemaDriftError."""
-        df = _make_bronze_df().with_columns(
-            pl.lit("extra_value").alias("extra_column"),
-            pl.lit(42).alias("another_column"),
+        lf = (
+            _make_bronze_df()
+            .with_columns(
+                pl.lit("extra_value").alias("extra_column"),
+                pl.lit(42).alias("another_column"),
+            )
+            .lazy()
         )
         with pytest.raises(SourceSchemaDriftError) as exc_info:
-            transform_silver(df)
+            validate_source_columns(
+                lf,
+                expected_columns=_ALL_SOURCE_COLUMNS,
+                dataset_name="meteo_france_climatologie",
+            )
         assert "extra_column" in exc_info.value.added
         assert "another_column" in exc_info.value.added
 
@@ -229,7 +241,8 @@ class TestDateParsing:
     def test_date_parsing(self) -> None:
         """String date "2026022815" should parse to 2026-02-28T15:00:00 UTC."""
         df = _make_bronze_df(aaaammjjhh=["2026022815", "2026010100", "2025123123"])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
 
         dates = result["date_heure"].to_list()
         assert dates[0].year == 2026
@@ -240,7 +253,8 @@ class TestDateParsing:
     def test_date_midnight(self) -> None:
         """Hour 00 should parse correctly (no leading zero loss)."""
         df = _make_bronze_df(aaaammjjhh=["2026010100", "2026020100", "2026030100"])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
 
         dates = result["date_heure"].to_list()
         assert dates[0].hour == 0
@@ -250,7 +264,8 @@ class TestDateParsing:
     def test_date_column_is_datetime_type(self) -> None:
         """date_heure should be Datetime type with UTC timezone."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
 
         assert result["date_heure"].dtype == pl.Datetime("us", "UTC")
 
@@ -266,25 +281,29 @@ class TestNarrowingCasts:
     def test_nebulosite_is_int16(self) -> None:
         """Nébulosité should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["nebulosite"].dtype == pl.Int16
 
     def test_direction_vent_is_int16(self) -> None:
         """Direction du vent should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["direction_vent"].dtype == pl.Int16
 
     def test_humidite_is_int16(self) -> None:
         """Humidité should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["humidite"].dtype == pl.Int16
 
     def test_null_narrowing(self) -> None:
         """Null values should remain null after narrowing cast."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
 
         # Row 2 (index 2) has None for all numeric columns
         assert result["nebulosite"][2] is None
@@ -303,7 +322,8 @@ class TestValuesPassthrough:
     def test_temperature_preserved(self) -> None:
         """Temperature 21.5°C should remain 21.5 (no K×10 conversion)."""
         df = _make_bronze_df(t=[21.5, 9.8, -7.8])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["temperature"][0] == pytest.approx(21.5)
         assert result["temperature"][1] == pytest.approx(9.8)
         assert result["temperature"][2] == pytest.approx(-7.8)
@@ -311,7 +331,8 @@ class TestValuesPassthrough:
     def test_wind_preserved(self) -> None:
         """Wind speed 5.0 m/s should remain 5.0 (no ÷10 conversion)."""
         df = _make_bronze_df(ff=[5.0, 12.0, 0.6])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["vitesse_vent"][0] == pytest.approx(5.0)
         assert result["vitesse_vent"][1] == pytest.approx(12.0)
         assert result["vitesse_vent"][2] == pytest.approx(0.6)
@@ -319,7 +340,8 @@ class TestValuesPassthrough:
     def test_pressure_preserved(self) -> None:
         """Pressure 1013.25 hPa should remain 1013.25 (no Pa→hPa conversion)."""
         df = _make_bronze_df(pstat=[1013.25, 980.0, 1020.5])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["pression_station"][0] == pytest.approx(1013.25)
         assert result["pression_station"][1] == pytest.approx(980.0)
         assert result["pression_station"][2] == pytest.approx(1020.5)
@@ -327,7 +349,8 @@ class TestValuesPassthrough:
     def test_precipitation_preserved(self) -> None:
         """Precipitation 1.5 mm should remain 1.5 (no ÷10 conversion)."""
         df = _make_bronze_df(rr1=[0.0, 1.5, 12.4])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["precipitations"][0] == pytest.approx(0.0)
         assert result["precipitations"][1] == pytest.approx(1.5)
         assert result["precipitations"][2] == pytest.approx(12.4)
@@ -344,13 +367,15 @@ class TestIdStationType:
     def test_id_station_is_string(self) -> None:
         """id_station should always be string type."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["id_station"].dtype == pl.Utf8
 
     def test_numeric_station_id_preserved(self) -> None:
         """Station IDs with leading zeros should be preserved as strings."""
         df = _make_bronze_df(num_poste=["01014001", "02345002", "03456003"])
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert result["id_station"][0] == "01014001"
         assert result["id_station"][1] == "02345002"
 
@@ -366,5 +391,6 @@ class TestRowCount:
     def test_row_count_preserved(self) -> None:
         """Row count should be preserved (no filtering)."""
         df = _make_bronze_df()
-        result = transform_silver(df)
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
         assert len(result) == len(df)

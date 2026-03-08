@@ -21,7 +21,7 @@ logger = get_logger("ods_metadata")
 _ODS_EXPORT_RE = re.compile(r"/api/explore/v2\.1/catalog/datasets/(?P<dataset_id>[^/]+)/exports/")
 
 
-def fetch_ods_metadata(url: str, timeout: int = 30) -> RemoteFileMetadata:
+def fetch_ods_metadata(url: str, *, timeout: int = 30) -> RemoteFileMetadata:
     """Fetch ``data_processed`` from the OpenDataSoft catalog API.
 
     Derives the catalog endpoint from the export *url*, calls it, and returns a
@@ -51,12 +51,12 @@ def fetch_ods_metadata(url: str, timeout: int = 30) -> RemoteFileMetadata:
     ValueError
         If the URL does not match the OpenDataSoft export pattern.
     """
-    match = _ODS_EXPORT_RE.search(urlparse(url).path)
+    parsed = urlparse(url)
+    match = _ODS_EXPORT_RE.search(parsed.path)
     if not match:
         raise ValueError(f"URL does not match OpenDataSoft export pattern: {url}")
 
     dataset_id = match.group("dataset_id")
-    parsed = urlparse(url)
     catalog_url = (
         f"{parsed.scheme}://{parsed.hostname}/api/explore/v2.1/catalog/datasets/{dataset_id}"
     )
@@ -71,8 +71,9 @@ def fetch_ods_metadata(url: str, timeout: int = 30) -> RemoteFileMetadata:
 
     # data_processed tracks the last data update; modified tracks any
     # dataset change (metadata edits included) — less precise but usable.
-    date_raw: str | None = metas.get("data_processed") or metas.get("modified")
-    source = "data_processed" if metas.get("data_processed") else "modified"
+    data_processed = metas.get("data_processed")
+    date_raw: str | None = data_processed or metas.get("modified")
+    source = "data_processed" if data_processed else "modified"
 
     if not date_raw:
         logger.warning(

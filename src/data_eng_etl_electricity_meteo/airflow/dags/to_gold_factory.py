@@ -14,7 +14,11 @@ from airflow.sdk import DAG, Asset, AssetAll, dag, task
 from data_eng_etl_electricity_meteo.airflow.assets import get_gold_pg_asset, get_silver_pg_asset
 from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, GoldDatasetConfig
-from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
+from data_eng_etl_electricity_meteo.core.exceptions import (
+    DataCatalogError,
+    GoldStageError,
+    InvalidCatalogError,
+)
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 
@@ -61,7 +65,7 @@ _DBT_LOG_LEVELS = {
 # --------------------------------------------------------------------------------------
 
 
-def _run_dbt(subcommand: str, *, extra_args: list[str] | None = None) -> None:
+def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
     """Run a dbt subcommand, streaming JSON log lines through structlog."""
     cmd = ["dbt", subcommand, *_DBT_COMMON_ARGS, *(extra_args or [])]
     logger.info("Starting dbt", dbt_cmd=subcommand)
@@ -84,8 +88,11 @@ def _run_dbt(subcommand: str, *, extra_args: list[str] | None = None) -> None:
                 logger.debug(line, dbt_cmd=subcommand)
 
     if proc.returncode != 0:
-        logger.error("dbt failed", dbt_cmd=subcommand, returncode=proc.returncode)
-        raise subprocess.CalledProcessError(proc.returncode, cmd)
+        raise GoldStageError(
+            f"dbt {subcommand} failed with exit code {proc.returncode}",
+            dbt_cmd=subcommand,
+            returncode=proc.returncode,
+        )
 
     logger.info("dbt completed", dbt_cmd=subcommand)
 
@@ -98,8 +105,8 @@ def _run_dbt(subcommand: str, *, extra_args: list[str] | None = None) -> None:
 def _create_dag(
     dataset: GoldDatasetConfig,
     *,
-    gold_asset: Asset,
     schedule: Asset | AssetAll,
+    outlet: Asset,
 ) -> DAG:
     """Create a dbt DAG for a single gold dataset.
 
@@ -107,10 +114,11 @@ def _create_dag(
     ----------
     dataset
         Gold dataset configuration from the catalog.
-    gold_asset
-        Outlet: the gold Postgres Asset emitted after successful dbt test.
     schedule
-        Inlet: ``AssetAll`` of upstream silver PG Assets (or single Asset).
+        Upstream silver PG Assets (``AssetAll`` or single ``Asset``) that trigger this
+        DAG.
+    outlet
+        The gold Postgres Asset emitted after successful dbt test.
 
     Returns
     -------
@@ -136,16 +144,16 @@ def _create_dag(
         def dbt_run() -> None:
             """Execute ``dbt run --select +{model}`` (model + upstream)."""
             # '+' includes upstream silver staging views
-            _run_dbt(subcommand="run", extra_args=["--select", f"+{dataset.name}"])
+            _run_dbt("run", extra_args=["--select", f"+{dataset.name}"])
 
         @task(
             task_id=TASK_DBT_TEST,
             execution_timeout=TASK_DBT_TEST_TIMEOUT,
-            outlets=[gold_asset],
+            outlets=[outlet],
         )
         def dbt_test() -> None:
             """Execute ``dbt test --select {model}``."""
-            _run_dbt(subcommand="test", extra_args=["--select", dataset.name])
+            _run_dbt("test", extra_args=["--select", dataset.name])
 
         dbt_run() >> dbt_test()  # for IDE
 
@@ -161,14 +169,15 @@ def _generate_all_dags() -> dict[str, DAG]:
         Mapping of dataset names to their dbt DAG objects.
     """
     try:
-        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
+        catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as e:
         e.log(logger.critical)
         return {}
 
+    gold_datasets = catalog.get_gold_datasets()
     dags: dict[str, DAG] = {}
 
-    for dataset in catalog.get_gold_datasets():
+    for dataset in gold_datasets:
         try:
             gold_asset = get_gold_pg_asset(dataset)
             upstream_assets = [
@@ -178,15 +187,16 @@ def _generate_all_dags() -> dict[str, DAG]:
             schedule: Asset | AssetAll = (
                 upstream_assets[0] if len(upstream_assets) == 1 else AssetAll(*upstream_assets)
             )
-        except ValueError:
-            logger.exception("Invalid dataset configuration", dataset=dataset.name)
+        except (ValueError, DataCatalogError):
+            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
             continue  # move to next dataset
 
-        dags[dataset.name] = _create_dag(dataset, gold_asset=gold_asset, schedule=schedule)
-        logger.info("to_gold DAG created", dataset=dataset.name)
+        dags[dataset.name] = _create_dag(dataset, schedule=schedule, outlet=gold_asset)
+        logger.debug("to_gold DAG created", dataset_name=dataset.name)
 
-    total = len(catalog.get_gold_datasets())
-    logger.info("to_gold factory completed", created_count=len(dags), total_count=total)
+    logger.info(
+        "to_gold factory completed", created_count=len(dags), total_count=len(gold_datasets)
+    )
 
     return dags
 

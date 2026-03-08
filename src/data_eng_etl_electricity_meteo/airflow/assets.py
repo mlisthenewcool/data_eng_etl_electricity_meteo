@@ -51,8 +51,7 @@ def get_silver_file_asset(dataset: RemoteDatasetConfig) -> Asset:
         Airflow Asset with a ``file://`` URI pointing to
         ``silver/{dataset_name}/current.parquet``.
     """
-    resolver = RemotePathResolver(dataset.name)
-    uri = resolver.silver_current_path.as_uri()
+    uri = RemotePathResolver(dataset.name).silver_current_path.as_uri()
 
     return Asset(
         name=f"{dataset.name}__{SILVER_FILE_GROUP}",

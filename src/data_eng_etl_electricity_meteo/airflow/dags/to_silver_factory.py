@@ -50,15 +50,15 @@ TASK_SILVER_TIMEOUT = timedelta(minutes=10)
 # --------------------------------------------------------------------------------------
 
 
-def _create_dag(manager: RemoteIngestionPipeline, *, asset: Asset) -> DAG:
+def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
     """Create a production-ready DAG for a dataset.
 
     Parameters
     ----------
     manager
         Pipeline manager bound to a single remote dataset.
-    asset
-        Target Asset representing the silver layer output.
+    outlet
+        Asset emitted after successful silver transformation.
 
     Returns
     -------
@@ -90,9 +90,7 @@ def _create_dag(manager: RemoteIngestionPipeline, *, asset: Asset) -> DAG:
             """
             previous_snapshot = load_local_snapshot(manager.dataset.name)
 
-            ingestion_result = manager.download(
-                version=version, previous_snapshot=previous_snapshot
-            )
+            ingestion_result = manager.download(version, previous_snapshot=previous_snapshot)
 
             if ingestion_result is None:
                 return False
@@ -116,10 +114,9 @@ def _create_dag(manager: RemoteIngestionPipeline, *, asset: Asset) -> DAG:
         @task(task_id=TASK_BRONZE, execution_timeout=TASK_BRONZE_TIMEOUT)
         def bronze_task(ctx: XComArg) -> XComArg:
             """Convert landing file to versioned bronze Parquet."""
-            result = manager.to_bronze(PipelineContext.model_validate(ctx))
-            return result.model_dump(mode="json")
+            return manager.to_bronze(PipelineContext.model_validate(ctx)).model_dump(mode="json")
 
-        @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[asset])
+        @task(task_id=TASK_SILVER, execution_timeout=TASK_SILVER_TIMEOUT, outlets=[outlet])
         def silver_task(ctx: XComArg) -> Generator[Metadata]:
             """Apply business transformations, save state, and emit Asset metadata."""
             silver_result = manager.to_silver(PipelineContext.model_validate(ctx))
@@ -130,7 +127,7 @@ def _create_dag(manager: RemoteIngestionPipeline, *, asset: Asset) -> DAG:
 
             # Emit Asset metadata (UI observability + downstream triggering)
             yield Metadata(
-                asset=asset,
+                asset=outlet,
                 extra=snapshot.model_dump(exclude_none=True),
             )
 
@@ -157,23 +154,24 @@ def _generate_all_dags() -> dict[str, DAG]:
         Mapping of dataset names to their ingestion DAG objects.
     """
     try:
-        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
+        catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as e:
         e.log(logger.critical)
         return {}
 
+    remote_datasets = catalog.get_remote_datasets()
     pipelines: dict[str, DAG] = {}
 
-    for dataset in catalog.get_remote_datasets():
+    for dataset in remote_datasets:
         try:
             asset = get_silver_file_asset(dataset)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset=dataset.name)
+            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
             continue  # move to next dataset
 
         try:
             manager = RemoteIngestionPipeline(
-                dataset=dataset,
+                dataset,
                 custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
                 custom_metadata=CUSTOM_METADATA.get(dataset.name),
             )
@@ -181,11 +179,14 @@ def _generate_all_dags() -> dict[str, DAG]:
             error.log(logger.warning)
             continue  # move to next dataset
 
-        pipelines[dataset.name] = _create_dag(manager, asset=asset)
-        logger.info("to_silver DAG created", dataset=dataset.name)
+        pipelines[dataset.name] = _create_dag(manager, outlet=asset)
+        logger.debug("to_silver DAG created", dataset_name=dataset.name)
 
-    total = len(catalog.get_remote_datasets())
-    logger.info("to_silver factory completed", created_count=len(pipelines), total_count=total)
+    logger.info(
+        "to_silver factory completed",
+        created_count=len(pipelines),
+        total_count=len(remote_datasets),
+    )
 
     return pipelines
 

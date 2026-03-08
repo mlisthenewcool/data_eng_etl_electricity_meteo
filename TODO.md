@@ -8,7 +8,6 @@
 
 ## Maintenant
 
-- [x] [Misc] Résoudre tous les TODO dans le code
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
   météo à requêter (meilleure station à moins de 20 km par exemple).
 
@@ -24,8 +23,6 @@
 - [ ] [Docs] Rédiger la documentation minimale du projet V1 (présentation, données,
   architecture, outils) —
   [exemple](https://github.com/abeltavares/batch-data-pipeline)
-- [ ] [Pipeline] Capturer les métadonnées de téléchargement custom (par département)
-  pour le smart skip de la climatologie
 - [ ] [Pipeline] Définir comment intégrer et gérer l'ajout de nouvelles transformations
   silver (impact sur les données existantes)
 - [ ] [Pipeline] Étudier la possibilité d'ajouter une barre de progression comme tqdm
@@ -55,7 +52,6 @@
   dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
   `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
   `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
-
 - [ ] [Airflow] Créer un DAG de maintenance (hebdomadaire) : nettoyage des fichiers
   bronze obsolètes (`cleanup_old_bronze_versions` existe, mais n'est appelé nulle
   part), validation de la cohérence état/disque (silver file existe ↔ métadonnées
@@ -86,9 +82,7 @@
 - [ ] [Docs] Documenter les variables d'environnement qui configurent le logging
 - [ ] [Logging] Ajouter toutes les exceptions custom dans le smoke test visuel
 - [ ] [Logging] Rendre les messages d'erreur plus actionnables
-
-- [ ] [Optimisation] Compression Parquet et suppression de la relecture du DataFrame
-  bronze → silver
+- [ ] [Optimisation] Compression Parquet bronze/silver
 - [ ] [Pipeline] Ajouter les options `--skip-download`, `--skip-bronze`,
   `--skip-silver`, `--skip-postgres` aux entrypoints CLI + rétention configurable des
   fichiers landing
@@ -103,6 +97,18 @@
 
 ## Terminé
 
+- [x] [Pipeline] _(2026-03-08)_ Smart-skip pour la climatologie via métadonnées
+  data.gouv.fr (`custom_metadata/datagouv.py`, `last_update` au niveau dataset)
+- [x] [Transformations] _(2026-03-08)_ Pipeline silver entièrement lazy
+  (`LazyFrame` bout en bout, `scan_parquet` → transforms → `.collect()` unique),
+  réduction mémoire de ~5 GB à ~2 GB pour la climatologie (18M lignes)
+- [x] [Transformations] _(2026-03-08)_ Réorganiser les modules de transformation
+  dans `transformations/datasets/`, extraire la logique commune eco2mix dans
+  `odre_eco2mix_common.py`
+- [x] [CI] _(2026-03-08)_ Ajouter les règles ruff `ANN` (flake8-annotations) et
+  corriger les annotations de types dans tout le codebase (`psycopg.Connection`,
+  `frozenset`, `TypedDict`, signatures `*`)
+- [x] [Misc] _(2026-03-07)_ Résoudre tous les TODO dans le code
 - [x] [Logging] _(2026-03-07)_ Uniformiser les logs (messages, niveaux, noms de
   loggers) et le logging entre exceptions custom et les autres modules
 - [x] [Pipeline] _(2026-03-07)_ Unifier toutes les timezones sous UTC (Airflow,

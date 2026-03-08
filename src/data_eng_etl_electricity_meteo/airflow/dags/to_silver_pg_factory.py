@@ -40,8 +40,8 @@ TASK_LOAD_TIMEOUT = timedelta(minutes=20)
 def _create_dag(
     dataset: RemoteDatasetConfig,
     *,
-    silver_file_asset: Asset,
-    silver_pg_asset: Asset,
+    schedule: Asset,
+    outlet: Asset,
 ) -> DAG:
     """Create a load DAG for a single dataset.
 
@@ -49,10 +49,10 @@ def _create_dag(
     ----------
     dataset
         Remote dataset configuration from the catalog.
-    silver_file_asset
-        Inlet: the silver ``file://`` Asset produced by the ingestion DAG.
-    silver_pg_asset
-        Outlet: the silver Postgres Asset emitted after a successful load.
+    schedule
+        The silver ``file://`` Asset that triggers this DAG.
+    outlet
+        The silver Postgres Asset emitted after a successful load.
 
     Returns
     -------
@@ -62,7 +62,7 @@ def _create_dag(
 
     @dag(
         dag_id=f"{dataset.name}_to_silver_pg",
-        schedule=silver_file_asset,  # triggered by the ingestion DAG's outlet
+        schedule=schedule,
         start_date=START_DATE,
         catchup=False,  # TODO[prod]: set to True
         default_args=DEFAULT_ARGS,
@@ -73,7 +73,7 @@ def _create_dag(
         @task(
             task_id=TASK_LOAD,
             execution_timeout=TASK_LOAD_TIMEOUT,
-            outlets=[silver_pg_asset],
+            outlets=[outlet],
         )
         def load_task() -> Generator[Metadata]:
             """Load silver parquet into the Postgres silver schema.
@@ -86,12 +86,12 @@ def _create_dag(
 
             conn = open_airflow_hook_connection(PostgresHook("project_postgres"))
             try:
-                metrics = load_silver_to_postgres(dataset=dataset, conn=conn)
+                metrics = load_silver_to_postgres(dataset, conn=conn)
             finally:
                 conn.close()
 
             yield Metadata(
-                asset=silver_pg_asset,
+                asset=outlet,
                 extra={
                     "rows_loaded": metrics.rows_loaded,
                     "mode": metrics.mode,
@@ -113,28 +113,30 @@ def _generate_all_dags() -> dict[str, DAG]:
         Mapping of dataset names to their load DAG objects.
     """
     try:
-        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
+        catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as e:
         e.log(logger.critical)
         return {}
 
+    remote_datasets = catalog.get_remote_datasets()
     dags: dict[str, DAG] = {}
 
-    for dataset in catalog.get_remote_datasets():
+    for dataset in remote_datasets:
         try:
             silver_file_asset = get_silver_file_asset(dataset)
             silver_pg_asset = get_silver_pg_asset(dataset)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset=dataset.name)
+            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
             continue  # move to next dataset
 
         dags[dataset.name] = _create_dag(
-            dataset, silver_file_asset=silver_file_asset, silver_pg_asset=silver_pg_asset
+            dataset, schedule=silver_file_asset, outlet=silver_pg_asset
         )
-        logger.info("to_silver_pg DAG created", dataset=dataset.name)
+        logger.debug("to_silver_pg DAG created", dataset_name=dataset.name)
 
-    total = len(catalog.get_remote_datasets())
-    logger.info("to_silver_pg factory completed", created_count=len(dags), total_count=total)
+    logger.info(
+        "to_silver_pg factory completed", created_count=len(dags), total_count=len(remote_datasets)
+    )
 
     return dags
 

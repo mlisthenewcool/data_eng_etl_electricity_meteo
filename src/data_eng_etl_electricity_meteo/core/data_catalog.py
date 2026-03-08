@@ -369,7 +369,7 @@ class DataCatalog(StrictModel):
             File missing, invalid YAML, or Pydantic validation failure.
         """
         if not path.exists():
-            raise InvalidCatalogError(path=path, reason="file doesn't exist")
+            raise InvalidCatalogError(path, reason="file doesn't exist")
 
         try:
             with path.open() as f:
@@ -377,22 +377,20 @@ class DataCatalog(StrictModel):
 
             if data is None:
                 raise InvalidCatalogError(
-                    path=path,
-                    reason="catalog file is empty or contains only comments",
+                    path, reason="catalog file is empty or contains only comments"
                 )
 
             return cls.model_validate(data)
 
         except yaml.YAMLError as yaml_error:
             raise InvalidCatalogError(
-                path=path,
-                reason=f"error parsing YAML: {yaml_error}",
+                path, reason=f"error parsing YAML: {yaml_error}"
             ) from yaml_error
         except ValidationError as pydantic_errors:
             # Suppress pydantic internals from traceback (raise ... from None);
             # details are captured in validation_errors.
             raise InvalidCatalogError(
-                path=path,
+                path,
                 reason="Pydantic validation errors",
                 validation_errors=format_pydantic_errors(pydantic_errors),
             ) from None
@@ -418,10 +416,10 @@ class DataCatalog(StrictModel):
         """
         dataset = self.datasets.get(name)
         if dataset is None:
-            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+            raise DatasetNotFoundError(name, available_datasets=list(self.datasets.keys()))
         if not isinstance(dataset, RemoteDatasetConfig):
             raise DatasetTypeError(
-                name=name, expected="RemoteDatasetConfig", actual=type(dataset).__name__
+                name, expected="RemoteDatasetConfig", actual=type(dataset).__name__
             )
         return dataset
 
@@ -446,10 +444,10 @@ class DataCatalog(StrictModel):
         """
         dataset = self.datasets.get(name)
         if dataset is None:
-            raise DatasetNotFoundError(name=name, available_datasets=list(self.datasets.keys()))
+            raise DatasetNotFoundError(name, available_datasets=list(self.datasets.keys()))
         if not isinstance(dataset, GoldDatasetConfig):
             raise DatasetTypeError(
-                name=name, expected="GoldDatasetConfig", actual=type(dataset).__name__
+                name, expected="GoldDatasetConfig", actual=type(dataset).__name__
             )
         return dataset
 

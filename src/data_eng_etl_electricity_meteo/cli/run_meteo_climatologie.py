@@ -25,7 +25,7 @@ from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
 
 DATASET_NAME = "meteo_france_climatologie"
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer()
 
 
 @app.command()
@@ -50,7 +50,7 @@ def main(
 ) -> None:
     """Run the Météo France climatologie pipeline (95 departmental files)."""
     run_pipeline(
-        dataset_name=DATASET_NAME,
+        DATASET_NAME,
         custom_download=partial(
             download_climatologie,
             year_start=year_start,

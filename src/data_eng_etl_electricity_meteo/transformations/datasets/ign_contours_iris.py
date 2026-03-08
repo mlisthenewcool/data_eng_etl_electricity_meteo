@@ -13,7 +13,7 @@ import polars as pl
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.shared import _collect
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -40,19 +40,21 @@ def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
 # --------------------------------------------------------------------------------------
 
 
-_ALL_SOURCE_COLUMNS: set[str] = {
-    "cleabs",
-    "code_insee",
-    "code_iris",
-    "geom_wkb",
-    "iris",
-    "nom_commune",
-    "nom_iris",
-    "type_iris",
-}
+_ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "cleabs",
+        "code_insee",
+        "code_iris",
+        "geom_wkb",
+        "iris",
+        "nom_commune",
+        "nom_iris",
+        "type_iris",
+    }
+)
 
 # cleabs (internal IGN id) and iris (redundant with code_iris) are not used.
-_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS - {"cleabs", "iris"}
+_USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS - {"cleabs", "iris"}
 
 
 class SilverSchema(DataFrameModel):
@@ -133,12 +135,15 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
 # --------------------------------------------------------------------------------------
 
 
-def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
+def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for IGN Contours IRIS.
 
     Enriches IRIS contours with centroid coordinates in WGS84.
     The original geometry is in Lambert 93 (EPSG:2154), we transform the centroid to
     WGS84 (EPSG:4326) for compatibility with other datasets.
+
+    Collects eagerly — DuckDB spatial operations require a registered DataFrame
+    (cannot operate on a LazyFrame).
 
     Transformations applied:
     - Remove cleabs column (internal IGN identifier, not useful)
@@ -148,20 +153,20 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     Parameters
     ----------
-    df
-        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
+    lf
+        Pre-processed LazyFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
-    pl.DataFrame
-        Silver DataFrame with ``centroid_lat`` and ``centroid_lon`` columns.
+    pl.LazyFrame
+        Silver LazyFrame with ``centroid_lat`` and ``centroid_lon`` columns.
 
     Raises
     ------
     duckdb.Error
         On DuckDB spatial query failure (missing extension, etc.).
     """
-    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "ign_contours_iris")
+    df = _collect(lf)
 
     # Use DuckDB for spatial operations on the WKB geometry
     with _duckdb_spatial_conn() as conn:
@@ -211,8 +216,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         rows_count=len(result),
         columns_count=len(result.columns),
     )
-    SilverSchema.validate(result)
-    return result
+    return result.lazy()
 
 
 # --------------------------------------------------------------------------------------
@@ -221,10 +225,10 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
 
 SPEC = DatasetTransformSpec(
-    name="ign_contours_iris",
+    "ign_contours_iris",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
+    all_source_columns=_ALL_SOURCE_COLUMNS,
+    used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,
 )

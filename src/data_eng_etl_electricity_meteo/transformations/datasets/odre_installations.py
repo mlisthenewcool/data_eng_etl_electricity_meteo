@@ -8,7 +8,7 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.transformations.shared import _collect
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -20,10 +20,12 @@ logger = get_logger("transform")
 
 
 # Renewable energy filieres
-FILIERES_RENOUVELABLES = ["SOLAI", "EOLIE", "HYDLQ", "BIOEN", "MARIN", "GEOTH"]
+FILIERES_RENOUVELABLES: frozenset[str] = frozenset(
+    {"SOLAI", "EOLIE", "HYDLQ", "BIOEN", "MARIN", "GEOTH"}
+)
 
 # Mapping from codeFiliere to simplified type
-TYPE_ENERGIE_MAPPING = {
+TYPE_ENERGIE_MAPPING: dict[str, str] = {
     "SOLAI": "solaire",
     "EOLIE": "eolien",
     "HYDLQ": "hydraulique",
@@ -43,62 +45,64 @@ TYPE_ENERGIE_MAPPING = {
 
 
 # Source columns expected after prepare_silver (before computed columns are added).
-_ALL_SOURCE_COLUMNS: set[str] = {
-    "capacite_reservoir",
-    "code_combustible",
-    "code_departement",
-    "code_eic_resource_object",
-    "code_epci",
-    "code_filiere",
-    "code_gestionnaire",
-    "code_insee_commune",
-    "code_insee_commune_implantation",
-    "code_iris",
-    "code_iris_commune_implantation",
-    "code_region",
-    "code_s3_renr",
-    "code_technologie",
-    "codes_combustibles_secondaires",
-    "combustible",
-    "combustibles_secondaires",
-    "commune",
-    "date_debut_version",
-    "date_deraccordement",
-    "date_mise_en_service",
-    "date_mise_enservice_(format_date)",
-    "date_raccordement",
-    "debit_maximal",
-    "departement",
-    "energie_annuelle_glissante_injectee",
-    "energie_annuelle_glissante_produite",
-    "energie_annuelle_glissante_soutiree",
-    "energie_stockable",
-    "epci",
-    "filiere",
-    "gestionnaire",
-    "hauteur_chute",
-    "id_peps",
-    "max_puis",
-    "mode_raccordement",
-    "nb_groupes",
-    "nb_installations",
-    "nom_installation",
-    "poste_source",
-    "productible",
-    "puis_max_charge",
-    "puis_max_installee",
-    "puis_max_installee_dis_charge",
-    "puis_max_rac",
-    "puis_max_rac_charge",
-    "regime",
-    "region",
-    "technologie",
-    "tension_raccordement",
-    "type_stockage",
-}
+_ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "capacite_reservoir",
+        "code_combustible",
+        "code_departement",
+        "code_eic_resource_object",
+        "code_epci",
+        "code_filiere",
+        "code_gestionnaire",
+        "code_insee_commune",
+        "code_insee_commune_implantation",
+        "code_iris",
+        "code_iris_commune_implantation",
+        "code_region",
+        "code_s3_renr",
+        "code_technologie",
+        "codes_combustibles_secondaires",
+        "combustible",
+        "combustibles_secondaires",
+        "commune",
+        "date_debut_version",
+        "date_deraccordement",
+        "date_mise_en_service",
+        "date_mise_enservice_(format_date)",
+        "date_raccordement",
+        "debit_maximal",
+        "departement",
+        "energie_annuelle_glissante_injectee",
+        "energie_annuelle_glissante_produite",
+        "energie_annuelle_glissante_soutiree",
+        "energie_stockable",
+        "epci",
+        "filiere",
+        "gestionnaire",
+        "hauteur_chute",
+        "id_peps",
+        "max_puis",
+        "mode_raccordement",
+        "nb_groupes",
+        "nb_installations",
+        "nom_installation",
+        "poste_source",
+        "productible",
+        "puis_max_charge",
+        "puis_max_installee",
+        "puis_max_installee_dis_charge",
+        "puis_max_rac",
+        "puis_max_rac_charge",
+        "regime",
+        "region",
+        "technologie",
+        "tension_raccordement",
+        "type_stockage",
+    }
+)
 
 # All source columns are used (directly or for computed flags).
-_USED_SOURCE_COLUMNS: set[str] = _ALL_SOURCE_COLUMNS
+_USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
@@ -200,11 +204,13 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
 # --------------------------------------------------------------------------------------
 
 
-def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
+def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for ODRE installations.
 
     Generates synthetic primary keys for aggregated installations and adds business
-    flags for energy type classification.
+    flags for energy type classification. Fully lazy — window operations
+    (``cum_sum().over()``) and ``coalesce``/``concat_str`` are lazy-compatible. Counts
+    for logging use cheap single-row aggregations.
 
     Transformations applied:
 
@@ -217,19 +223,18 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     Parameters
     ----------
-    df
-        Pre-processed bronze DataFrame (snake_case columns, all-null columns removed).
+    lf
+        Pre-processed LazyFrame (snake_case columns, all-null columns removed).
 
     Returns
     -------
-    pl.DataFrame
-        Enriched DataFrame with energy type flags.
+    pl.LazyFrame
+        Enriched LazyFrame with energy type flags.
     """
-    validate_source_columns(df, _ALL_SOURCE_COLUMNS, "odre_installations")
-
-    logger.debug("Applying transformations", rows_count=len(df), columns_count=len(df.columns))
-
     # -- Synthetic key for aggregated installations (id_peps is NULL) ------------------
+
+    # Count null id_peps for logging (cheap single-row aggregation)
+    n_null_peps: int = _collect(lf.select(pl.col("id_peps").is_null().sum())).item()
 
     _geo_key = pl.coalesce(
         pl.concat_str([pl.lit("IRIS"), pl.col("code_iris")], separator="_"),
@@ -240,20 +245,19 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
     )
     _base_key = pl.concat_str([pl.lit("AGR"), _geo_key, pl.col("code_filiere")], separator="_")
 
-    n_null_peps = df["id_peps"].null_count()
-    df = df.with_columns(
+    lf = lf.with_columns(
         pl.col("id_peps").is_null().alias("est_agregation"),
         _base_key.alias("_base_key"),
     )
 
     # Add per-group sequence number so each synthetic key is unique
-    df = df.with_columns(
+    lf = lf.with_columns(
         pl.when(pl.col("est_agregation"))
         .then(
             pl.concat_str(
                 [
                     pl.col("_base_key"),
-                    pl.col("est_agregation").cum_sum().over("_base_key").cast(pl.Utf8),
+                    pl.col("est_agregation").cum_sum().over("_base_key").cast(pl.String),
                 ],
                 separator="_",
             )
@@ -269,7 +273,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
     # -- Business flags ----------------------------------------------------------------
 
-    df_with_flags = df.with_columns(
+    lf = lf.with_columns(
         pl.col("code_filiere").is_in(FILIERES_RENOUVELABLES).alias("est_renouvelable"),
         pl.col("code_filiere")
         .replace_strict(TYPE_ENERGIE_MAPPING, default="autre")
@@ -277,17 +281,7 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("date_deraccordement").is_null().alias("est_actif"),
     )
 
-    result = df_with_flags.select(SilverSchema.polars_schema().names())
-
-    logger.debug(
-        "Silver transformation completed",
-        rows_count=len(result),
-        renouvelables_count=result["est_renouvelable"].sum(),
-        actifs_count=result["est_actif"].sum(),
-    )
-
-    SilverSchema.validate(result)
-    return result
+    return lf.select(SilverSchema.polars_schema().names())
 
 
 # --------------------------------------------------------------------------------------
@@ -296,10 +290,10 @@ def transform_silver(df: pl.DataFrame) -> pl.DataFrame:
 
 
 SPEC = DatasetTransformSpec(
-    name="odre_installations",
+    "odre_installations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
-    all_source_columns=frozenset(_ALL_SOURCE_COLUMNS),
-    used_source_columns=frozenset(_USED_SOURCE_COLUMNS),
+    all_source_columns=_ALL_SOURCE_COLUMNS,
+    used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,
 )

@@ -54,7 +54,7 @@ def load_local_snapshot(dataset_name: str) -> PipelineRunSnapshot | None:
     return PipelineRunSnapshot.from_metadata_dict(raw)
 
 
-def save_local_snapshot(dataset_name: str, *, snapshot: PipelineRunSnapshot) -> None:
+def save_local_snapshot(dataset_name: str, snapshot: PipelineRunSnapshot) -> None:
     """Persist a run snapshot to the local JSON state file (atomic write).
 
     Parameters
@@ -81,4 +81,4 @@ def save_local_snapshot(dataset_name: str, *, snapshot: PipelineRunSnapshot) -> 
             os.unlink(tmp)
         raise
 
-    logger.debug("State saved", dataset=dataset_name)
+    logger.debug("State saved")

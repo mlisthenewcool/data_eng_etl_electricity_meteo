@@ -242,9 +242,8 @@ def download_to_file(
 
             # -- Compute final metadata and return -------------------------------------
 
-            file_hash = hasher.hexdigest
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)
 
             logger.info("Download completed", filename=filename, file_size_mib=size_mib)
 
-            return HttpDownloadInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)
+            return HttpDownloadInfo(dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)

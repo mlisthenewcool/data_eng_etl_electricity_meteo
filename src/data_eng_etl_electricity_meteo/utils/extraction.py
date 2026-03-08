@@ -199,4 +199,4 @@ def extract_7z(
 
             logger.info("Extraction completed", target=target_filename, file_size_mib=size_mib)
 
-            return ExtractedFileInfo(path=dest_path, size_mib=size_mib, file_hash=file_hash)
+            return ExtractedFileInfo(dest_path, file_hash=file_hash, size_mib=size_mib)

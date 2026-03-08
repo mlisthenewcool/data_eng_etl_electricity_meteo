@@ -60,8 +60,8 @@ def run_pipeline(
     # -- Load catalog and dataset configuration ----------------------------------------
 
     try:
-        catalog = DataCatalog.load(path=settings.data_catalog_file_path)
-        dataset = catalog.get_remote_dataset(name=dataset_name)
+        catalog = DataCatalog.load(settings.data_catalog_file_path)
+        dataset = catalog.get_remote_dataset(dataset_name)
     except DataCatalogError as error:
         error.log(logger.critical)
         raise SystemExit(1)
@@ -81,9 +81,7 @@ def run_pipeline(
 
     version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
     manager = RemoteIngestionPipeline(
-        dataset=dataset,
-        custom_download=custom_download,
-        custom_metadata=custom_metadata,
+        dataset, custom_download=custom_download, custom_metadata=custom_metadata
     )
 
     # -- Load previous run state -------------------------------------------------------
@@ -93,7 +91,7 @@ def run_pipeline(
     # -- Download ----------------------------------------------------------------------
 
     try:
-        download_ctx = manager.download(version=version, previous_snapshot=previous_snapshot)
+        download_ctx = manager.download(version, previous_snapshot=previous_snapshot)
     except DownloadStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
@@ -106,9 +104,7 @@ def run_pipeline(
 
     if dataset.source.format.is_archive:
         try:
-            extract_ctx = manager.extract_archive(
-                context=download_ctx, previous_snapshot=previous_snapshot
-            )
+            extract_ctx = manager.extract_archive(download_ctx, previous_snapshot=previous_snapshot)
         except ExtractStageError as error:
             error.log(logger.critical)
             raise SystemExit(1)
@@ -123,7 +119,7 @@ def run_pipeline(
     # -- Convert to Bronze -------------------------------------------------------------
 
     try:
-        bronze_ctx = manager.to_bronze(context=extract_ctx or download_ctx)
+        bronze_ctx = manager.to_bronze(extract_ctx or download_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)
@@ -131,7 +127,7 @@ def run_pipeline(
     # -- Silver ------------------------------------------------------------------------
 
     try:
-        silver_ctx = manager.to_silver(context=bronze_ctx)
+        silver_ctx = manager.to_silver(bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
         raise SystemExit(1)

@@ -17,7 +17,7 @@ runtime via ``psql.SQL().format()`` with ``psql.Identifier`` quoting:
 """
 
 import tempfile
-from typing import Any, LiteralString, cast
+from typing import LiteralString, cast
 
 import polars as pl
 import psycopg
@@ -77,7 +77,7 @@ _POLARS_TO_PG_COMPATIBLE: dict[str, set[str]] = {
 def load_silver_to_postgres(
     dataset: RemoteDatasetConfig,
     *,
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     diff: IncrementalDiffMetrics | None = None,
 ) -> LoadPostgresMetrics:
     """Load a silver ``.parquet`` file into the Postgres silver schema.
@@ -236,7 +236,7 @@ def _format_sql_template(dataset_name: str, *, subdir: str, **identifiers: str) 
     return psql.SQL(template).format(**{k: psql.Identifier(v) for k, v in identifiers.items()})
 
 
-def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], pg_table: str) -> None:
+def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -> None:
     """Raise ``SchemaValidationError`` if DataFrame and PG table columns diverge.
 
     Checks both column **names** (extra / missing) and **type compatibility**
@@ -315,7 +315,7 @@ def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(exprs) if exprs else df
 
 
-def _copy_df(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], copy_sql: psql.Composed) -> None:
+def _copy_df(df: pl.DataFrame, *, cur: psycopg.Cursor, copy_sql: psql.Composed) -> None:
     """Serialize ``df`` to CSV and stream it via COPY in 64 KB chunks.
 
     Uses a ``SpooledTemporaryFile`` to keep small DataFrames in memory and spill large
@@ -333,7 +333,7 @@ def _copy_df(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], copy_sql: psql.Compo
 def _verify_sync(
     pg_table: str,
     *,
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor,
     expected_count: int,
 ) -> int | None:
     """Verify that Postgres row count matches expected silver count.
@@ -359,7 +359,7 @@ def _verify_sync(
 def _verify_and_maybe_full_refresh(
     resolver: RemotePathResolver,
     *,
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     ddl_sql: psql.Composed,
     pg_table: str,
 ) -> int | None:
@@ -415,7 +415,7 @@ def _verify_and_maybe_full_refresh(
     return rows
 
 
-def _load_snapshot(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], pg_table: str) -> int:
+def _load_snapshot(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -> int:
     """TRUNCATE then COPY all rows."""
     tid = psql.Identifier(_SILVER_SCHEMA, pg_table)
     cols = psql.SQL(", ").join(psql.Identifier(col) for col in df.columns)
@@ -435,7 +435,7 @@ def _load_snapshot(df: pl.DataFrame, *, cur: psycopg.Cursor[Any], pg_table: str)
 def _load_incremental(
     df: pl.DataFrame,
     *,
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor,
     dataset_name: str,
     pg_table: str,
 ) -> int:
@@ -513,6 +513,6 @@ def run_standalone_postgres_load(dataset: RemoteDatasetConfig) -> LoadPostgresMe
         raise PostgresLoadError("Postgres connection failed") from err
 
     try:
-        return load_silver_to_postgres(dataset=dataset, conn=connection)
+        return load_silver_to_postgres(dataset, conn=connection)
     finally:
         connection.close()

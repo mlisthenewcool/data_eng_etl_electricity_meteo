@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 import httpx
 import polars as pl
@@ -37,19 +38,24 @@ logger = get_logger("dl.meteo_clim")
 
 # data.gouv.fr API for the Météo France HOR (hourly) dataset
 # Resources endpoint requires API v2 (v1 returns 405 on /resources/)
-_DATASET_ID = "6569b4473bedf2e7abad3b72"
-_RESOURCES_API_URL = f"https://www.data.gouv.fr/api/2/datasets/{_DATASET_ID}/resources/"
+DATAGOUV_METEO_FRANCE_CLIMATOLOGIE_HOR_DATASET_ID = "6569b4473bedf2e7abad3b72"
+_RESOURCES_API_URL = (
+    "https://www.data.gouv.fr/api/2/datasets/"
+    f"{DATAGOUV_METEO_FRANCE_CLIMATOLOGIE_HOR_DATASET_ID}/resources/"
+)
 
 # Direct download base URL (used for CSV.gz fallback when API is unavailable)
 _BASE_URL = "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR"
 
 # Metropolitan France departments: 01-19, 20 (Corse), 21-95 (95 total)
 # data.gouv.fr uses "20" for Corse — "2A"/"2B" files do not exist (HTTP 404)
-DEPARTMENTS: set[str] = {
-    *{f"{i:02d}" for i in range(1, 20)},
-    "20",
-    *{f"{i:02d}" for i in range(21, 96)},
-}
+DEPARTMENTS: frozenset[str] = frozenset(
+    {
+        *{f"{i:02d}" for i in range(1, 20)},
+        "20",
+        *{f"{i:02d}" for i in range(21, 96)},
+    }
+)
 
 # Landing output filename
 _MERGED_FILENAME = "merged.parquet"
@@ -81,6 +87,14 @@ _API_PAGE_SIZE = 50
 _DOWNLOAD_MAX_WORKERS = 8
 
 
+class DepartmentResource(TypedDict):
+    """Download URLs for a single department."""
+
+    dept: str
+    csv_url: str
+    parquet_url: str | None
+
+
 # --------------------------------------------------------------------------------------
 # Resource discovery
 # --------------------------------------------------------------------------------------
@@ -91,7 +105,7 @@ def _fetch_department_resources(
     client: httpx.Client,
     year_start: int,
     year_end: int,
-) -> dict[str, dict[str, str | None]]:
+) -> dict[str, DepartmentResource]:
     """Discover department resources via the data.gouv.fr API.
 
     Queries the dataset resources endpoint, filters by period and department, and
@@ -111,9 +125,8 @@ def _fetch_department_resources(
 
     Returns
     -------
-    dict[str, dict[str, str | None]]
-        Mapping ``dept → resource dict`` for departments found via the API.
-        Each resource has keys: ``dept``, ``csv_url``, ``parquet_url`` (or None).
+    dict[str, DepartmentResource]
+        Mapping ``dept → resource`` for departments found via the API.
         May be empty if the API returns no matching resources.
 
     Raises
@@ -122,7 +135,7 @@ def _fetch_department_resources(
         If the API call fails (network, timeout, HTTP status).
     """
     period = f"{year_start}-{year_end}"
-    resources: dict[str, dict[str, str | None]] = {}
+    resources: dict[str, DepartmentResource] = {}
     page = 1
 
     while True:
@@ -174,8 +187,8 @@ def _build_fallback_resources(
     *,
     year_start: int,
     year_end: int,
-) -> list[dict[str, str | None]]:
-    """Build CSV.gz resource list from hardcoded URL pattern.
+) -> dict[str, DepartmentResource]:
+    """Build CSV.gz resource dict from hardcoded URL pattern.
 
     Used as the base for all downloads — API discovery enriches these entries with
     Parquet URLs where available. Parquet Hydra URLs use UUIDs and cannot be guessed
@@ -190,17 +203,17 @@ def _build_fallback_resources(
 
     Returns
     -------
-    list[dict[str, str | None]]
-        Each dict has keys: ``dept``, ``csv_url``, ``parquet_url`` (always None).
+    dict[str, DepartmentResource]
+        Mapping ``dept → resource`` with ``parquet_url`` always None.
     """
-    return [
-        {
+    return {
+        dept: {
             "dept": dept,
             "csv_url": f"{_BASE_URL}/H_{dept}_latest-{year_start}-{year_end}.csv.gz",
             "parquet_url": None,
         }
         for dept in sorted(DEPARTMENTS)
-    ]
+    }
 
 
 # --------------------------------------------------------------------------------------
@@ -228,7 +241,7 @@ def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
 
 
 def _download_department(
-    resource: dict[str, str | None],
+    resource: DepartmentResource,
     *,
     client: httpx.Client,
     tmp_dir: Path,
@@ -241,7 +254,7 @@ def _download_department(
     Parameters
     ----------
     resource
-        Dict with ``dept``, ``csv_url``, ``parquet_url`` keys.
+        Department download URLs.
     client
         HTTP client.
     tmp_dir
@@ -253,9 +266,8 @@ def _download_department(
         Number of rows downloaded (0 if both downloads fail).
     """
     dept = resource["dept"]
-    parquet_url = resource.get("parquet_url")
+    parquet_url = resource["parquet_url"]
     csv_url = resource["csv_url"]
-    assert isinstance(csv_url, str)  # type narrowing: always set by discovery/fallback
 
     df: pl.DataFrame | None = None
 
@@ -310,7 +322,7 @@ def _download_department(
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _BatchResult:
     """Aggregated result of the parallel department download."""
 
@@ -320,7 +332,7 @@ class _BatchResult:
 
 
 def _download_all_departments(
-    resources: dict[str, dict[str, str | None]],
+    resources: dict[str, DepartmentResource],
     *,
     client: httpx.Client,
     tmp_dir: Path,
@@ -331,7 +343,7 @@ def _download_all_departments(
     Parameters
     ----------
     resources
-        Mapping ``dept → resource dict`` with download URLs.
+        Mapping ``dept → DepartmentResource`` with download URLs.
     client
         Thread-safe HTTP client with shared connection pool.
     tmp_dir
@@ -375,7 +387,7 @@ def _download_all_departments(
                 except (pl.exceptions.PolarsError, OSError):
                     logger.exception(
                         "Department download failed unexpectedly",
-                        department=resource.get("dept"),
+                        department=resource["dept"],
                     )
                     rows = 0
                 if rows > 0:
@@ -387,7 +399,7 @@ def _download_all_departments(
         finally:
             reporter.close()
 
-    return _BatchResult(dept_count, failed_count, total_rows)
+    return _BatchResult(dept_count=dept_count, failed_count=failed_count, total_rows=total_rows)
 
 
 # --------------------------------------------------------------------------------------
@@ -450,12 +462,7 @@ def download_climatologie(
 
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         # Base: CSV.gz for all 95 departments (always works, no API needed)
-        fallback = _build_fallback_resources(year_start=year_start, year_end=year_end)
-        resources_by_dept: dict[str, dict[str, str | None]] = {}
-        for r in fallback:
-            dept = r["dept"]
-            assert isinstance(dept, str)  # type narrowing: always set by discovery/fallback
-            resources_by_dept[dept] = r
+        resources_by_dept = _build_fallback_resources(year_start=year_start, year_end=year_end)
 
         # Enrich with API discovery (adds Parquet URLs where available)
         try:
@@ -480,10 +487,11 @@ def download_climatologie(
     # Lazy scan all temporary parquets and write the merged result.
     # This avoids loading all departments into memory simultaneously.
     merged_path = dest_dir / _MERGED_FILENAME
-    lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
-    lazy_frames.sink_parquet(merged_path)
-
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
+        lazy_frames.sink_parquet(merged_path)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     log_kwargs: dict[str, object] = {
         "departments_count": result.dept_count,

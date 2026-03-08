@@ -10,8 +10,9 @@ decoupled from Airflow:
 
 The download step can be customized via ``custom_download``: a callable that takes a
 landing directory and returns the path to the downloaded file.
-When set, the standard HEAD check + smart-skip + single-URL download is replaced by the
-custom logic (e.g. multi-file merge for climatologie).
+When set, the standard HEAD check + single-URL download is replaced by custom logic
+(e.g. multi-file merge for climatologie).
+Smart-skip is still available for custom downloads via ``custom_metadata``.
 
 Uses ``RemotePathResolver`` for all path operations and ``RemoteFileManager`` for
 symlinks, rotation, and rollback.
@@ -69,16 +70,15 @@ from data_eng_etl_electricity_meteo.utils.remote_metadata import (
 
 logger = get_logger("pipeline")
 
-# Callable that takes a landing directory and an optional progress factory,
-# and returns the path to the downloaded file. Used to inject custom download
-# logic (e.g. multi-file merge for climatologie) instead of the standard
-# single-URL download.
+# Custom download: takes (landing_dir, progress) and returns the produced file path.
+# Replaces the standard single-URL download entirely (e.g. multi-file merge for
+# climatologie). The implementation manages its own HTTP client and timeouts.
 CustomDownloadFunc = Callable[[Path, BatchProgressFactory | None], Path]
 
-# Callable that takes (url, timeout) and returns remote file metadata.
-# Used as a fallback when the standard HTTP HEAD returns no caching headers
-# (e.g. OpenDataSoft export endpoints).
-CustomMetadataFunc = Callable[[str, int], RemoteFileMetadata]
+# Custom metadata: takes a URL and returns remote file metadata.
+# Fallback when HTTP HEAD returns no caching headers (e.g. OpenDataSoft).
+# The implementation manages its own HTTP client and timeouts.
+CustomMetadataFunc = Callable[[str], RemoteFileMetadata]
 
 
 @dataclass
@@ -96,9 +96,9 @@ class RemoteIngestionPipeline:
         single-URL download with custom logic. The callable receives the landing
         directory and must return the path to the produced file.
     custom_metadata
-        Optional metadata strategy.
-        When set, called as a fallback when the standard HTTP HEAD returns no caching
-        headers (no ETag, Last-Modified, or Content-Length).
+        Optional metadata strategy. For standard downloads, called as a fallback when
+        the standard HTTP HEAD returns no caching headers. For custom downloads, called
+        before the download to enable metadata-based smart-skip.
 
     Raises
     ------
@@ -129,7 +129,6 @@ class RemoteIngestionPipeline:
     def _decide_ingestion(
         self,
         current_remote_file_info: RemoteFileMetadata,
-        *,
         previous_remote_file_info: RemoteFileMetadata | None,
     ) -> IngestionDecision:
         """Determine if ingestion is required based on remote metadata and local state.
@@ -140,7 +139,7 @@ class RemoteIngestionPipeline:
         Parameters
         ----------
         current_remote_file_info
-            Freshly fetched HTTP HEAD metadata.
+            Freshly fetched remote metadata.
         previous_remote_file_info
             Metadata from the previous successful run, or ``None``.
 
@@ -189,12 +188,14 @@ class RemoteIngestionPipeline:
     ) -> PipelineContext | None:
         """Run the full ingestion flow: smart-skip checks then download.
 
-        When ``custom_download`` is set, delegates entirely to the custom callable
-        (no HEAD check, no smart-skip).
-        Otherwise, performs the standard HEAD check + smart-skip + single-URL download.
+        For custom downloads with a registered ``custom_metadata``, performs a
+        metadata-based smart-skip check before downloading, then a content hash
+        comparison after.
+        Without ``custom_metadata``, delegates directly to the custom callable.
+        For standard downloads, performs HEAD check + smart-skip + single-URL download.
 
-        Returns ``None`` if ingestion was skipped (unchanged remote or identical content
-        hash), otherwise the initial pipeline context.
+        Returns ``None`` if ingestion was skipped (unchanged remote or identical
+        content hash), otherwise the initial pipeline context.
 
         Parameters
         ----------
@@ -215,22 +216,33 @@ class RemoteIngestionPipeline:
             or the download, or if the custom download fails.
         """
         if self.custom_download is not None:
-            return self._run_custom_download(version)
+            return self._run_custom_download(version, previous_snapshot)
 
         return self._run_standard_download(version, previous_snapshot)
 
-    def _run_custom_download(self, version: str) -> PipelineContext:
-        """Execute the custom download strategy.
+    def _run_custom_download(
+        self, version: str, previous_snapshot: PipelineRunSnapshot | None
+    ) -> PipelineContext | None:
+        """Execute the custom download strategy with smart-skip support.
+
+        When ``custom_metadata`` is registered, performs two smart-skip layers before
+        and after the download:
+
+        1. **Pre-download** — compare remote metadata with previous snapshot
+           (e.g. dataset-level ``last_update`` from data.gouv.fr).
+        2. **Post-download** — compare content hash with previous snapshot.
 
         Parameters
         ----------
         version
             Run version string.
+        previous_snapshot
+            Validated snapshot from the previous run, or ``None``.
 
         Returns
         -------
-        PipelineContext
-            Pipeline context with the landing file path.
+        PipelineContext | None
+            Pipeline context with the landing file path, or ``None`` if skipped.
 
         Raises
         ------
@@ -239,7 +251,32 @@ class RemoteIngestionPipeline:
         """
         assert self.custom_download is not None  # type narrowing: guarded by download() dispatch
 
-        logger.info("Starting custom download", version=version)
+        # -- 1. Smart-skip: remote metadata comparison ---------------------
+
+        remote_metadata = RemoteFileMetadata()
+        is_healing = False
+
+        if self.custom_metadata is not None:
+            try:
+                remote_metadata = self.custom_metadata(self.dataset.source.url_as_str)
+            except (httpx.HTTPError, ValueError) as err:
+                logger.warning(
+                    "Custom metadata fetch failed, proceeding with download",
+                    error=str(err),
+                )
+
+            if previous_snapshot is not None and remote_metadata.has_any_field():
+                decision = self._decide_ingestion(
+                    remote_metadata,
+                    previous_snapshot.download.remote_metadata,
+                )
+                if not decision.should_ingest:
+                    return None
+                is_healing = decision.is_healing
+
+        # -- 2. Custom download --------------------------------------------
+
+        logger.debug("Starting custom download", version=version)
 
         progress: BatchProgressFactory | None = (
             AirflowBatchProgress if settings.is_running_on_airflow else None
@@ -247,7 +284,7 @@ class RemoteIngestionPipeline:
 
         try:
             landing_path = self.custom_download(self.resolver.landing_dir, progress)
-        except Exception as err:
+        except (httpx.HTTPError, OSError, ValueError) as err:
             raise DownloadStageError("Custom download failed") from err
 
         file_hash = FileHasher.hash_file(landing_path)
@@ -255,12 +292,22 @@ class RemoteIngestionPipeline:
 
         logger.info("Custom download completed", file_size_mib=size_mib)
 
+        # -- 3. Smart-skip: content hash comparison (skipped in healing mode)
+
+        if not is_healing and previous_snapshot is not None:
+            if self._should_skip_on_hash(
+                previous_hash=previous_snapshot.download.file_hash,
+                current_hash=file_hash,
+            ):
+                self._cleanup_landing()
+                return None
+
         return PipelineContext(
             version=version,
             download=DownloadMetrics(
-                remote_metadata=RemoteFileMetadata(),
+                remote_metadata=remote_metadata,
                 download_info=HttpDownloadInfo(
-                    path=landing_path,
+                    landing_path,
                     file_hash=file_hash,
                     size_mib=size_mib,
                 ),
@@ -302,7 +349,7 @@ class RemoteIngestionPipeline:
 
         try:
             remote_file_info = get_remote_file_metadata(
-                url=self.dataset.source.url_as_str,
+                self.dataset.source.url_as_str,
                 if_none_match=previous_etag,
             )
         except httpx.HTTPError as err:
@@ -311,12 +358,14 @@ class RemoteIngestionPipeline:
         # -- 1b. Custom metadata fallback (e.g. OpenDataSoft catalog API) --------------
         # When HEAD returns no caching headers and a custom strategy is registered,
         # call it to obtain metadata from an alternative source.
+        # Hard failure here (unlike custom download path) because for these datasets
+        # HEAD is useless — the custom metadata is the only source of change detection.
 
         if remote_file_info is not None and not remote_file_info.has_any_field():
             if self.custom_metadata is not None:
                 try:
-                    remote_file_info = self.custom_metadata(self.dataset.source.url_as_str, 30)
-                except httpx.HTTPError as err:
+                    remote_file_info = self.custom_metadata(self.dataset.source.url_as_str)
+                except (httpx.HTTPError, ValueError) as err:
                     raise DownloadStageError("Custom metadata fetch failed") from err
 
         # -- 2. Smart-skip #1: HTTP 304 or metadata comparison -------------------------
@@ -334,16 +383,13 @@ class RemoteIngestionPipeline:
             logger.warning("HTTP 304 but silver file missing, re-fetching metadata to heal")
             try:
                 remote_file_info = get_remote_file_metadata(
-                    url=self.dataset.source.url_as_str,
+                    self.dataset.source.url_as_str,
                 )
             except httpx.HTTPError as err:
                 raise DownloadStageError("HEAD metadata re-fetch failed") from err
             assert remote_file_info is not None  # no If-None-Match → never 304
 
-        ingestion_decision = self._decide_ingestion(
-            current_remote_file_info=remote_file_info,
-            previous_remote_file_info=previous_remote_metadata,
-        )
+        ingestion_decision = self._decide_ingestion(remote_file_info, previous_remote_metadata)
 
         if not ingestion_decision.should_ingest:
             return None
@@ -352,7 +398,7 @@ class RemoteIngestionPipeline:
 
         try:
             download_info = download_to_file(
-                url=self.dataset.source.url_as_str,
+                self.dataset.source.url_as_str,
                 dest_dir=self.resolver.landing_dir,
                 fallback_filename=f"{version}.{self.dataset.source.format.value}",
                 timeout_seconds=settings.download_timeout_seconds,
@@ -371,7 +417,7 @@ class RemoteIngestionPipeline:
 
         # -- 4. Smart-skip #2: content hash comparison (skipped in healing mode) -------
 
-        if not ingestion_decision.is_healing and previous_snapshot:
+        if not ingestion_decision.is_healing and previous_snapshot is not None:
             if self._should_skip_on_hash(
                 previous_hash=previous_snapshot.download.file_hash,
                 current_hash=context.download.download_info.file_hash,
@@ -421,7 +467,7 @@ class RemoteIngestionPipeline:
 
         try:
             extract_info = extract_7z(
-                archive_path=archive_path,
+                archive_path,
                 target_filename=inner_file,
                 dest_dir=landing_dir,
                 validate_sqlite=Path(inner_file).suffix == ".gpkg",
@@ -529,9 +575,8 @@ class RemoteIngestionPipeline:
         # -- Collect output metadata without loading all rows --------------------------
 
         columns = list(pl.read_parquet_schema(bronze_path).keys())
-        count_df = pl.scan_parquet(bronze_path).select(pl.len()).collect()
-        assert isinstance(count_df, pl.DataFrame)  # always true (no GPU engine)
-        rows_count: int = count_df.item(0, 0)
+        # .collect() always returns DataFrame (InProcessQuery is GPU-only)
+        rows_count: int = pl.scan_parquet(bronze_path).select(pl.len()).collect().item(0, 0)  # ty: ignore[unresolved-attribute]
         parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
 
         logger.info(
@@ -737,9 +782,8 @@ class RemoteIngestionPipeline:
         # -- Build delta and compute metrics -------------------------------------------
 
         delta = pl.concat([df_new, df_changed])
-        count_df = new_lf.select(pl.len()).collect()
-        assert isinstance(count_df, pl.DataFrame)
-        rows_total: int = count_df.item()
+        # .collect() always returns DataFrame (InProcessQuery is GPU-only)
+        rows_total: int = new_lf.select(pl.len()).collect().item()  # ty: ignore[unresolved-attribute]
         rows_unchanged = rows_total - len(df_new) - len(df_changed)
 
         metrics = IncrementalDiffMetrics(

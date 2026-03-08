@@ -96,7 +96,7 @@ def _flatten_dict(prefix: str, mapping: EventDict) -> EventDict:
     for key, value in mapping.items():
         dotted = f"{prefix}.{key}" if prefix else key
         if isinstance(value, dict):
-            result |= _flatten_dict(dotted, value)
+            result |= _flatten_dict(dotted, mapping=value)
         elif value is not None:
             result[dotted] = value
     return result
@@ -122,7 +122,7 @@ def _flatten_and_normalize(
     external: EventDict = {}
     for k, v in event_dict.items():
         (internal if k in _STRUCTLOG_INTERNAL_KEYS else external)[k] = v
-    flattened = _flatten_dict("", external)
+    flattened = _flatten_dict("", mapping=external)
     return {**internal, **{k: _normalize_value(v) for k, v in flattened.items()}}
 
 
@@ -175,6 +175,7 @@ def _colorize_event(
 
 
 def _prepend_logger_name(
+    *,
     use_colors: bool = False,
     pad_to: int = 0,
 ) -> structlog.types.Processor:
@@ -211,6 +212,7 @@ def _prepend_logger_name(
 
 
 def _rich_traceback(
+    *,
     use_colors: bool = True,
     width: int | None = None,
     show_locals: bool = False,
@@ -377,7 +379,7 @@ def _setup_logger(
             level_styles = None
 
         console_chain.append(
-            _prepend_logger_name(use_colors, pad_to=_EVENT_PAD if use_colors else 0)
+            _prepend_logger_name(use_colors=use_colors, pad_to=_EVENT_PAD if use_colors else 0)
         )
 
         console_chain.append(

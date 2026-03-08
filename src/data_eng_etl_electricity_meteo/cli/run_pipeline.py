@@ -33,7 +33,7 @@ def main(
 ) -> None:
     """Run the remote dataset pipeline for a single dataset."""
     run_pipeline(
-        dataset_name=dataset_name,
+        dataset_name,
         custom_download=CUSTOM_DOWNLOADS.get(dataset_name),
         custom_metadata=CUSTOM_METADATA.get(dataset_name),
         skip_postgres=skip_postgres,

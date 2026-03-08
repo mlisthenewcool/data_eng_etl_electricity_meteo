@@ -11,7 +11,7 @@ Gold transformations are handled by dbt in Postgres, not in Python.
 """
 
 from data_eng_etl_electricity_meteo.core.exceptions import TransformNotFoundError
-from data_eng_etl_electricity_meteo.transformations import (
+from data_eng_etl_electricity_meteo.transformations.datasets import (
     ign_contours_iris,
     meteo_france_climatologie,
     meteo_france_stations,
@@ -60,4 +60,4 @@ def get_transform_spec(dataset_name: str) -> DatasetTransformSpec:
     try:
         return _REGISTRY[dataset_name]
     except KeyError:
-        raise TransformNotFoundError(dataset_name=dataset_name) from None
+        raise TransformNotFoundError(dataset_name) from None

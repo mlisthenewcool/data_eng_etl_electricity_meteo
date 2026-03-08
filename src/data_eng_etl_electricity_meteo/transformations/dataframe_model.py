@@ -60,7 +60,7 @@ class Column:
     le: int | float | date | datetime | None = None
     gt: int | float | date | datetime | None = None
     lt: int | float | date | datetime | None = None
-    isin: Sequence[Any] | None = None
+    isin: Sequence[str | int | float | bool | date | datetime] | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -110,12 +110,14 @@ def _parse_annotated(hint: Any) -> tuple[type, Column]:
 class DataFrameModelMeta(type):
     """Metaclass that extracts column definitions from type hints."""
 
+    __columns__: dict[str, _ResolvedColumn]
+
     def __new__(
         mcs,
         name: str,
         bases: tuple[type, ...],
         namespace: dict[str, Any],
-    ) -> type:
+    ) -> "DataFrameModelMeta":
         """Build ``__columns__`` from type hints at class-definition time."""
         cls = super().__new__(mcs, name, bases, namespace)
         if not any(isinstance(b, DataFrameModelMeta) for b in bases):
@@ -133,9 +135,9 @@ class DataFrameModelMeta(type):
                 msg = f"No Polars dtype mapping for {python_type!r} on '{field_name}'"
                 raise TypeError(msg)
             col_name = col_meta.name or field_name
-            columns[col_name] = _ResolvedColumn(col_name, dtype, col_meta)
+            columns[col_name] = _ResolvedColumn(col_name, dtype=dtype, constraints=col_meta)
 
-        cls.__columns__ = columns  # type: ignore[attr-defined]
+        cls.__columns__ = columns
         return cls
 
 
@@ -182,7 +184,13 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
         SchemaValidationError
             If any schema or value check fails.
         """
-        errors = cls._check_schema(df.schema) + cls._check_values(df)
+        # Short-circuit: skip value checks when the schema itself is wrong.
+        # Running _check_values on a dtype-mismatched column (e.g. String
+        # with ge= bound) would raise ComputeError instead of a clean
+        # validation error.
+        errors = cls._check_schema(df.schema)
+        if not errors:
+            errors = cls._check_values(df)
         if errors:
             raise SchemaValidationError(errors)
         return df
