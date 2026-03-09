@@ -28,7 +28,6 @@ import yaml
 from pydantic import BeforeValidator, Discriminator, HttpUrl, Tag, ValidationError, model_validator
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
-    AirflowContextError,
     DatasetNotFoundError,
     DatasetTypeError,
     InvalidCatalogError,
@@ -75,43 +74,8 @@ class IngestionFrequency(StrEnum):
         """Airflow cron preset (e.g. ``@daily``) or ``None``."""
         return _AIRFLOW_SCHEDULES[self]
 
-    def get_airflow_version_template(self, no_dash: bool = False) -> str:
-        """Return the Airflow Jinja template for versioning.
-
-        Hourly versions are truncated to the hour
-        (minutes/seconds are always ``00`` for ``@hourly`` schedules).
-
-        Parameters
-        ----------
-        no_dash
-            If ``True``, return compact format without separators.
-
-        Returns
-        -------
-        str
-            Airflow template string resolved at runtime.
-
-        Raises
-        ------
-        AirflowContextError
-            If not running inside Airflow.
-        """
-        if not settings.is_running_on_airflow:
-            raise AirflowContextError(
-                operation="get_airflow_version_template",
-                expected_context="Airflow runtime",
-                suggestion="use format_datetime_as_version instead",
-            )
-
-        if self == IngestionFrequency.HOURLY:
-            if no_dash:
-                return "{{ data_interval_start.strftime('%Y%m%dT%H') }}"
-            return "{{ data_interval_start.strftime('%Y-%m-%dT%H') }}"
-
-        return "{{ ds_nodash }}" if no_dash else "{{ ds }}"
-
     def format_datetime_as_version(self, dt: datetime, no_dash: bool = False) -> str:
-        """Format *dt* as a version string (non-Airflow contexts).
+        """Format *dt* as a pipeline version string.
 
         Hourly versions are truncated to the hour (minutes/seconds dropped).
 
@@ -383,9 +347,8 @@ class DataCatalog(StrictModel):
             return cls.model_validate(data)
 
         except yaml.YAMLError as yaml_error:
-            raise InvalidCatalogError(
-                path, reason=f"error parsing YAML: {yaml_error}"
-            ) from yaml_error
+            # Suppress YAML parser internals; line/column info is in str().
+            raise InvalidCatalogError(path, reason=f"error parsing YAML: {yaml_error}") from None
         except ValidationError as pydantic_errors:
             # Suppress pydantic internals from traceback (raise ... from None);
             # details are captured in validation_errors.
@@ -394,6 +357,8 @@ class DataCatalog(StrictModel):
                 reason="Pydantic validation errors",
                 validation_errors=format_pydantic_errors(pydantic_errors),
             ) from None
+        except OSError as io_error:
+            raise InvalidCatalogError(path, reason=f"cannot read file: {io_error}") from None
 
     def get_remote_dataset(self, name: str) -> RemoteDatasetConfig:
         """Retrieve a remote dataset by name.

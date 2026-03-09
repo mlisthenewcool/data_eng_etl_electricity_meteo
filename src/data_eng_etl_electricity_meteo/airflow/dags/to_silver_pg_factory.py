@@ -2,11 +2,12 @@
 
 Generates one ``{dataset}_to_silver_pg`` DAG per remote dataset in the data catalog.
 Each DAG is triggered when its upstream ``to_silver`` DAG produces a new silver file
-Asset, and loads the parquet into Postgres ``silver.{dataset}`` via ``PostgresHook``
-(connection id ``project_postgres``).
+Asset, and loads the Parquet into Postgres ``silver.{dataset}`` via ``PostgresHook``
+(connection id defined in ``pg_connection.AIRFLOW_CONN_ID``).
 """
 
 from collections.abc import Generator
+from contextlib import closing
 from datetime import timedelta
 
 from airflow.sdk import DAG, Asset, Metadata, dag, task
@@ -17,7 +18,7 @@ from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, Remote
 from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.loaders.pg_connection import open_airflow_hook_connection
+from data_eng_etl_electricity_meteo.loaders.pg_connection import open_airflow_connection
 from data_eng_etl_electricity_meteo.loaders.pg_loader import load_silver_to_postgres
 
 logger = get_logger("dag.to_silver_pg")
@@ -76,19 +77,15 @@ def _create_dag(
             outlets=[outlet],
         )
         def load_task() -> Generator[Metadata]:
-            """Load silver parquet into the Postgres silver schema.
+            """Load silver Parquet into the Postgres silver schema.
 
             Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come from the
             Airflow connection store.
             """
-            # Lazy import: airflow providers only available inside the container.
-            from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
-
-            conn = open_airflow_hook_connection(PostgresHook("project_postgres"))
-            try:
+            # closing() ensures close-without-commit (unlike `with conn:`
+            # which auto-commits on success).
+            with closing(open_airflow_connection()) as conn:
                 metrics = load_silver_to_postgres(dataset, conn=conn)
-            finally:
-                conn.close()
 
             yield Metadata(
                 asset=outlet,

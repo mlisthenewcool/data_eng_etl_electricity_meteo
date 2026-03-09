@@ -9,7 +9,9 @@
 ## Maintenant
 
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
-  météo à requêter (meilleure station à moins de 20 km par exemple).
+  météo à requêter (meilleure station à moins de 20 km par exemple) et créer le nouveau
+  dataset correspondant qui permettra de requêter l'API de Météo France
+- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques
 
 ## Ensuite
 
@@ -38,7 +40,6 @@
 - [ ] [Postgres] Résoudre l'accès concurrent au load dans Postgres
 - [ ] [Tests] Ajouter des tests de qualité des données post-load (assertions Polars ou
   SQL : nulls, distribution, cohérence temporelle)
-- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques
 - [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
   détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
   NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
@@ -81,7 +82,6 @@
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
 - [ ] [Docs] Documenter les variables d'environnement qui configurent le logging
 - [ ] [Logging] Ajouter toutes les exceptions custom dans le smoke test visuel
-- [ ] [Logging] Rendre les messages d'erreur plus actionnables
 - [ ] [Optimisation] Compression Parquet bronze/silver
 - [ ] [Pipeline] Ajouter les options `--skip-download`, `--skip-bronze`,
   `--skip-silver`, `--skip-postgres` aux entrypoints CLI + rétention configurable des
@@ -97,6 +97,24 @@
 
 ## Terminé
 
+- [x] [Données] _(2026-03-09)_ Remplacement de la clé primaire `id_peps` par
+  `code_eic_resource_object` dans le catalog, Postgres, dbt et les transformations
+- [x] [Pipeline] _(2026-03-09)_ Gestion d'erreurs granulaire (un `except` par
+  opération dans `remote_ingestion.py`), messages spécifiques et actionnables
+  dans `pg_loader.py`, métriques `duration_s` sur toutes les étapes du pipeline
+- [x] [Pipeline] _(2026-03-09)_ `RemoteIngestionPipeline` frozen avec attributs
+  privés, suppression du template Jinja Airflow au profit de
+  `get_current_context()`, `collect_narrow()` dans `utils/polars.py`
+- [x] [Pipeline] _(2026-03-09)_ Optimisation du diff incrémental silver (une seule
+  passe d'inner join au lieu de deux scans)
+- [x] [Airflow] _(2026-03-09)_ Logging dbt enrichi (résultats model/test avec
+  progression, timing, rows affected) et `open_airflow_connection()` encapsulant
+  la création du hook
+- [x] [Tests] _(2026-03-09)_ Nouveaux tests utils (download, extraction, file_hash,
+  progress, remote_metadata), shared et amélioration tests logger
+- [x] [Logging] _(2026-03-09)_ Messages d'erreur plus spécifiques et actionnables,
+  `_pad_event` comme processeur partagé (console + Airflow), padding augmenté
+  à 60 caractères
 - [x] [Pipeline] _(2026-03-08)_ Smart-skip pour la climatologie via métadonnées
   data.gouv.fr (`custom_metadata/datagouv.py`, `last_update` au niveau dataset)
 - [x] [Transformations] _(2026-03-08)_ Pipeline silver entièrement lazy

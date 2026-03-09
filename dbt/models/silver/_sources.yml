@@ -7,7 +7,7 @@ sources:
       - name: dim_installations
         description: "Installations de production d'électricité (source ODRE)."
         columns:
-          - name: id_peps
+          - name: code_eic_resource_object
             tests:
               - unique
               - not_null

@@ -4,8 +4,8 @@ models:
   - name: stg_dim_installations
     description: "Vue staging des installations de production (colonnes utiles pour la couche gold)."
     columns:
-      - name: id_peps
-        description: "Identifiant unique de l'installation (clé ODRE)."
+      - name: code_eic_resource_object
+        description: "Identifiant unique de l'installation (code EIC ou clé synthétique pour les agrégations)."
         tests:
           - unique
           - not_null

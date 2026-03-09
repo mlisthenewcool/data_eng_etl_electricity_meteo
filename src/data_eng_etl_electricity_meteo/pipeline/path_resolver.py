@@ -33,7 +33,7 @@ class _BasePathResolver:
         ValueError
             If ``dataset_name`` is empty or whitespace-only.
         """
-        if not self.dataset_name or not self.dataset_name.strip():
+        if not self.dataset_name.strip():
             raise ValueError("dataset_name must be a non-empty string")
 
 

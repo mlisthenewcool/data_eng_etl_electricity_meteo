@@ -201,24 +201,24 @@ def download_to_file(
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             downloaded_bytes = 0
-            try:
-                content_length = int(response.headers.get("content-length", 0))
-            except ValueError:
-                logger.warning(
-                    "Invalid Content-Length header",
-                    header=response.headers.get("content-length"),
-                )
-                content_length = 0
+
+            content_length: int | None = None
+            raw_cl = response.headers.get("content-length")
+            if raw_cl is not None:
+                try:
+                    content_length = int(raw_cl)
+                except ValueError:
+                    logger.warning("Invalid Content-Length header", header=raw_cl)
 
             # -- Initialize progress reporter and stream -------------------------------
 
             hasher = FileHasher()
 
             reporter: DownloadProgressReporter = (
-                progress(content_length)
+                progress(content_length or 0)
                 if progress is not None
                 else tqdm(
-                    total=content_length,
+                    total=content_length or 0,
                     unit="iB",
                     unit_scale=True,
                     unit_divisor=1024,
@@ -246,4 +246,4 @@ def download_to_file(
 
             logger.info("Download completed", filename=filename, file_size_mib=size_mib)
 
-            return HttpDownloadInfo(dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)
+            return HttpDownloadInfo(path=dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)

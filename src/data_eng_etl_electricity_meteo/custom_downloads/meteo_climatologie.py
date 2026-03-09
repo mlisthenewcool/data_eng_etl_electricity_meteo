@@ -16,6 +16,7 @@ single Parquet via lazy scanning.
 import re
 import shutil
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -285,6 +286,7 @@ def _download_department(
             logger.warning(
                 "Parquet download failed, falling back to CSV.gz",
                 department=dept,
+                url=parquet_url,
                 error=str(err),
                 error_type=type(err).__qualname__,
             )
@@ -441,7 +443,8 @@ def download_climatologie(
     Raises
     ------
     DownloadStageError
-        If no data could be downloaded from any department.
+        If no data could be downloaded from any department, or if the merge of
+        per-department Parquet files fails.
     """
     now = datetime.now(tz=UTC)
     if year_start is None:
@@ -453,8 +456,7 @@ def download_climatologie(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_dir = dest_dir / "_tmp_departments"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(dir=dest_dir, prefix="_tmp_departments_"))
 
     timeout = httpx.Timeout(timeout=settings.download_timeout_seconds)
 
@@ -490,6 +492,8 @@ def download_climatologie(
     try:
         lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
         lazy_frames.sink_parquet(merged_path)
+    except (pl.exceptions.PolarsError, OSError) as err:
+        raise DownloadStageError("Failed to merge department parquets") from err
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

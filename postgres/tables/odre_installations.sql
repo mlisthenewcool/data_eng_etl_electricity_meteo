@@ -9,9 +9,8 @@
 -- type_energie, est_actif. Current schema keeps all source API columns.
 
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
-    id_peps                                 TEXT PRIMARY KEY,
+    code_eic_resource_object                TEXT PRIMARY KEY,
     nom_installation                        TEXT,
-    code_eic_resource_object                TEXT,
     code_iris                               TEXT,
     code_insee_commune                      TEXT,
     commune                                 TEXT,

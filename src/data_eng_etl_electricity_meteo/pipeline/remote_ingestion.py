@@ -8,20 +8,20 @@ decoupled from Airflow:
 3. **Bronze** — landing → versioned Parquet + ``latest`` symlink
 4. **Silver** — bronze latest → business transform → ``current`` / ``backup``
 
-The download step can be customized via ``custom_download``: a callable that takes a
+The download step can be customized via ``_custom_download``: a callable that takes a
 landing directory and returns the path to the downloaded file.
 When set, the standard HEAD check + single-URL download is replaced by custom logic
 (e.g. multi-file merge for climatologie).
-Smart-skip is still available for custom downloads via ``custom_metadata``.
+Smart-skip is still available for custom downloads via ``_custom_metadata``.
 
 Uses ``RemotePathResolver`` for all path operations and ``RemoteFileManager`` for
 symlinks, rotation, and rollback.
 """
 
 import shutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import cached_property
 from pathlib import Path
 
 import duckdb
@@ -62,6 +62,7 @@ from data_eng_etl_electricity_meteo.transformations.registry import get_transfor
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo, download_to_file
 from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 from data_eng_etl_electricity_meteo.utils.progress import BatchProgressFactory
 from data_eng_etl_electricity_meteo.utils.remote_metadata import (
     RemoteFileMetadata,
@@ -81,7 +82,7 @@ CustomDownloadFunc = Callable[[Path, BatchProgressFactory | None], Path]
 CustomMetadataFunc = Callable[[str], RemoteFileMetadata]
 
 
-@dataclass
+@dataclass(frozen=True)
 class RemoteIngestionPipeline:
     """Pipeline manager for a single remote dataset.
 
@@ -91,11 +92,11 @@ class RemoteIngestionPipeline:
     ----------
     dataset
         Remote dataset configuration from the catalog.
-    custom_download
+    _custom_download
         Optional download strategy. When set, replaces the standard HEAD check +
         single-URL download with custom logic. The callable receives the landing
         directory and must return the path to the produced file.
-    custom_metadata
+    _custom_metadata
         Optional metadata strategy. For standard downloads, called as a fallback when
         the standard HTTP HEAD returns no caching headers. For custom downloads, called
         before the download to enable metadata-based smart-skip.
@@ -107,22 +108,24 @@ class RemoteIngestionPipeline:
     """
 
     dataset: RemoteDatasetConfig
-    custom_download: CustomDownloadFunc | None = field(default=None, repr=False)
-    custom_metadata: CustomMetadataFunc | None = field(default=None, repr=False)
+    _custom_download: CustomDownloadFunc | None = field(default=None, repr=False)
+    _custom_metadata: CustomMetadataFunc | None = field(default=None, repr=False)
+    _resolver: RemotePathResolver = field(init=False, repr=False)
+    _file_manager: RemoteFileManager = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate that transform spec exists for this dataset (fast-fail)."""
+        """Validate transform spec and initialize derived fields."""
         get_transform_spec(self.dataset.name)
-
-    @cached_property
-    def resolver(self) -> RemotePathResolver:
-        """Path resolver for this dataset (created once, cached)."""
-        return RemotePathResolver(dataset_name=self.dataset.name)
-
-    @cached_property
-    def _file_manager(self) -> RemoteFileManager:
-        """File manager for symlinks, rotation and rollback (created once, cached)."""
-        return RemoteFileManager(self.resolver)
+        object.__setattr__(
+            self,
+            "_resolver",
+            RemotePathResolver(dataset_name=self.dataset.name),
+        )
+        object.__setattr__(
+            self,
+            "_file_manager",
+            RemoteFileManager(self._resolver),
+        )
 
     # -- Download ----------------------------------------------------------------------
 
@@ -149,7 +152,7 @@ class RemoteIngestionPipeline:
             Whether to ingest, whether this is a healing run, and the remote metadata
             used for the decision.
         """
-        silver_file_exists = self.resolver.silver_current_path.exists()
+        silver_file_exists = self._resolver.silver_current_path.exists()
         # Treat empty metadata (all None fields from stale state) as absent.
         has_previous_metadata = (
             previous_remote_file_info is not None and previous_remote_file_info.has_any_field()
@@ -166,6 +169,7 @@ class RemoteIngestionPipeline:
             )
 
         # After the guard above, has_previous_metadata == silver_file_exists.
+        # Redundant is-not-None narrowing required by ty (can't follow boolean guard).
         if has_previous_metadata and previous_remote_file_info is not None:
             change_detection_result = current_remote_file_info.compare_with(
                 previous_remote_file_info
@@ -188,10 +192,10 @@ class RemoteIngestionPipeline:
     ) -> PipelineContext | None:
         """Run the full ingestion flow: smart-skip checks then download.
 
-        For custom downloads with a registered ``custom_metadata``, performs a
+        For custom downloads with a registered ``_custom_metadata``, performs a
         metadata-based smart-skip check before downloading, then a content hash
         comparison after.
-        Without ``custom_metadata``, delegates directly to the custom callable.
+        Without ``_custom_metadata``, delegates directly to the custom callable.
         For standard downloads, performs HEAD check + smart-skip + single-URL download.
 
         Returns ``None`` if ingestion was skipped (unchanged remote or identical
@@ -213,9 +217,10 @@ class RemoteIngestionPipeline:
         ------
         DownloadStageError
             On any HTTP failure (connect, timeout, status error) during the HEAD check
-            or the download, or if the custom download fails.
+            or the download, I/O error writing the file, or if the custom download
+            fails.
         """
-        if self.custom_download is not None:
+        if self._custom_download is not None:
             return self._run_custom_download(version, previous_snapshot)
 
         return self._run_standard_download(version, previous_snapshot)
@@ -225,7 +230,7 @@ class RemoteIngestionPipeline:
     ) -> PipelineContext | None:
         """Execute the custom download strategy with smart-skip support.
 
-        When ``custom_metadata`` is registered, performs two smart-skip layers before
+        When ``_custom_metadata`` is registered, performs two smart-skip layers before
         and after the download:
 
         1. **Pre-download** — compare remote metadata with previous snapshot
@@ -249,16 +254,16 @@ class RemoteIngestionPipeline:
         DownloadStageError
             If the custom download callable fails.
         """
-        assert self.custom_download is not None  # type narrowing: guarded by download() dispatch
+        assert self._custom_download is not None  # type narrowing: guarded by download() dispatch
 
         # -- 1. Smart-skip: remote metadata comparison ---------------------
 
         remote_metadata = RemoteFileMetadata()
         is_healing = False
 
-        if self.custom_metadata is not None:
+        if self._custom_metadata is not None:
             try:
-                remote_metadata = self.custom_metadata(self.dataset.source.url_as_str)
+                remote_metadata = self._custom_metadata(self.dataset.source.url_as_str)
             except (httpx.HTTPError, ValueError) as err:
                 logger.warning(
                     "Custom metadata fetch failed, proceeding with download",
@@ -276,21 +281,29 @@ class RemoteIngestionPipeline:
 
         # -- 2. Custom download --------------------------------------------
 
-        logger.debug("Starting custom download", version=version)
+        t0 = time.monotonic()
+        logger.info("Starting custom download", version=version)
 
         progress: BatchProgressFactory | None = (
             AirflowBatchProgress if settings.is_running_on_airflow else None
         )
 
         try:
-            landing_path = self.custom_download(self.resolver.landing_dir, progress)
+            landing_path = self._custom_download(self._resolver.landing_dir, progress)
         except (httpx.HTTPError, OSError, ValueError) as err:
             raise DownloadStageError("Custom download failed") from err
 
-        file_hash = FileHasher.hash_file(landing_path)
-        size_mib = round(landing_path.stat().st_size / (1024 * 1024), 2)
+        try:
+            file_hash = FileHasher.hash_file(landing_path)
+            size_mib = round(landing_path.stat().st_size / (1024 * 1024), 2)
+        except OSError as err:
+            raise DownloadStageError("Failed to hash downloaded file") from err
 
-        logger.info("Custom download completed", file_size_mib=size_mib)
+        logger.info(
+            "Custom download completed",
+            file_size_mib=size_mib,
+            duration_s=round(time.monotonic() - t0, 2),
+        )
 
         # -- 3. Smart-skip: content hash comparison (skipped in healing mode)
 
@@ -307,7 +320,7 @@ class RemoteIngestionPipeline:
             download=DownloadMetrics(
                 remote_metadata=remote_metadata,
                 download_info=HttpDownloadInfo(
-                    landing_path,
+                    path=landing_path,
                     file_hash=file_hash,
                     size_mib=size_mib,
                 ),
@@ -334,9 +347,10 @@ class RemoteIngestionPipeline:
         Raises
         ------
         DownloadStageError
-            On any HTTP failure.
+            On any HTTP or I/O failure during metadata fetch or file download.
         """
-        logger.debug("Starting standard download", version=version)
+        t0 = time.monotonic()
+        logger.info("Starting download", version=version)
 
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
@@ -362,9 +376,9 @@ class RemoteIngestionPipeline:
         # HEAD is useless — the custom metadata is the only source of change detection.
 
         if remote_file_info is not None and not remote_file_info.has_any_field():
-            if self.custom_metadata is not None:
+            if self._custom_metadata is not None:
                 try:
-                    remote_file_info = self.custom_metadata(self.dataset.source.url_as_str)
+                    remote_file_info = self._custom_metadata(self.dataset.source.url_as_str)
                 except (httpx.HTTPError, ValueError) as err:
                     raise DownloadStageError("Custom metadata fetch failed") from err
 
@@ -372,7 +386,7 @@ class RemoteIngestionPipeline:
 
         if remote_file_info is None:
             # Server confirmed no change (304). Still need to check local state.
-            if self.resolver.silver_current_path.exists():
+            if self._resolver.silver_current_path.exists():
                 logger.info(
                     "Ingestion skipped: remote metadata unchanged",
                     reason="HTTP 304 Not Modified",
@@ -399,13 +413,15 @@ class RemoteIngestionPipeline:
         try:
             download_info = download_to_file(
                 self.dataset.source.url_as_str,
-                dest_dir=self.resolver.landing_dir,
+                dest_dir=self._resolver.landing_dir,
                 fallback_filename=f"{version}.{self.dataset.source.format.value}",
                 timeout_seconds=settings.download_timeout_seconds,
                 progress=AirflowDownloadProgress if settings.is_running_on_airflow else None,
             )
-        except httpx.HTTPError as err:
-            raise DownloadStageError("File download failed") from err
+        except (httpx.HTTPError, OSError) as err:
+            raise DownloadStageError(
+                f"File download failed: {self.dataset.source.url_as_str}"
+            ) from err
 
         context = PipelineContext(
             version=version,
@@ -413,6 +429,12 @@ class RemoteIngestionPipeline:
                 remote_metadata=remote_file_info,
                 download_info=download_info,
             ),
+        )
+
+        logger.info(
+            "Download completed",
+            file_size_mib=download_info.size_mib,
+            duration_s=round(time.monotonic() - t0, 2),
         )
 
         # -- 4. Smart-skip #2: content hash comparison (skipped in healing mode) -------
@@ -455,6 +477,8 @@ class RemoteIngestionPipeline:
             ``inner_file`` is ``None``
             (should not happen — guaranteed by ``RemoteSourceConfig`` validator).
         """
+        t0 = time.monotonic()
+        logger.info("Starting extraction")
         archive_path = context.download.download_info.path
         landing_dir = archive_path.parent
 
@@ -475,6 +499,12 @@ class RemoteIngestionPipeline:
             )
         except ExtractionError as err:
             raise ExtractStageError("Archive extraction failed") from err
+
+        logger.info(
+            "Extraction completed",
+            file_size_mib=extract_info.size_mib,
+            duration_s=round(time.monotonic() - t0, 2),
+        )
 
         # -- Build result context ------------------------------------------------------
 
@@ -518,8 +548,8 @@ class RemoteIngestionPipeline:
 
     def _cleanup_landing(self) -> None:
         """Remove the landing directory and all its contents."""
-        if self.resolver.landing_dir.exists() and self.resolver.landing_dir.is_dir():
-            shutil.rmtree(self.resolver.landing_dir)
+        if self._resolver.landing_dir.exists() and self._resolver.landing_dir.is_dir():
+            shutil.rmtree(self._resolver.landing_dir)
 
     # -- Transformations ---------------------------------------------------------------
 
@@ -542,13 +572,14 @@ class RemoteIngestionPipeline:
         Raises
         ------
         BronzeStageError
-            On transform failure (DuckDB error), I/O error writing the Parquet file, or
-            failure updating the ``latest`` symlink.
+            On transform failure reading the landing file (DuckDB / Polars / I/O),
+            Parquet write failure, or symlink update failure.
         """
-        bronze_path = self.resolver.bronze_path(context.version)
+        bronze_path = self._resolver.bronze_path(context.version)
         bronze_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info("Starting bronze conversion", version=context.version)
+        t0 = time.monotonic()
+        logger.info("Starting bronze conversion")
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
@@ -559,9 +590,13 @@ class RemoteIngestionPipeline:
 
         try:
             lf = spec.bronze_transform(context.download.landing_path)
-            lf.sink_parquet(bronze_path)
         except (duckdb.Error, pl.exceptions.PolarsError, OSError) as err:
-            raise BronzeStageError("Bronze transform or write failed") from err
+            raise BronzeStageError("Bronze transform failed (reading landing file)") from err
+
+        try:
+            lf.sink_parquet(bronze_path)
+        except (pl.exceptions.PolarsError, OSError) as err:
+            raise BronzeStageError("Bronze Parquet write failed") from err
 
         # -- Update symlink and cleanup landing ----------------------------------------
 
@@ -574,16 +609,20 @@ class RemoteIngestionPipeline:
 
         # -- Collect output metadata without loading all rows --------------------------
 
-        columns = list(pl.read_parquet_schema(bronze_path).keys())
-        # .collect() always returns DataFrame (InProcessQuery is GPU-only)
-        rows_count: int = pl.scan_parquet(bronze_path).select(pl.len()).collect().item(0, 0)  # ty: ignore[unresolved-attribute]
-        parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
+        try:
+            bronze_lf = pl.scan_parquet(bronze_path)
+            columns = list(bronze_lf.collect_schema().names())
+            rows_count: int = collect_narrow(bronze_lf.select(pl.len())).item(0, 0)
+            parquet_size = round(bronze_path.stat().st_size / (1024 * 1024), 2)
+        except (pl.exceptions.PolarsError, OSError) as err:
+            raise BronzeStageError("Failed to read bronze metadata after write") from err
 
         logger.info(
             "Bronze conversion completed",
             rows_count=rows_count,
             columns_count=len(columns),
             file_size_mib=parquet_size,
+            duration_s=round(time.monotonic() - t0, 2),
         )
 
         return PipelineContext(
@@ -623,10 +662,12 @@ class RemoteIngestionPipeline:
         Raises
         ------
         SilverStageError
-            On transform failure (DuckDB error, validation error) or I/O error during
-            silver file rotation or write.
+            On source schema drift (columns added/removed), silver output validation
+            failure, transform/read failure (DuckDB / Polars / I/O), file rotation
+            failure, Parquet write failure, or delta write failure.
         """
-        logger.info("Starting silver transformation", version=context.version)
+        t0 = time.monotonic()
+        logger.info("Starting silver transformation")
 
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
@@ -636,16 +677,15 @@ class RemoteIngestionPipeline:
         spec = get_transform_spec(dataset_name=self.dataset.name)
 
         try:
-            df = spec.run_silver(self.resolver.bronze_latest_path)
-        except (
-            duckdb.Error,
-            OSError,
-            pl.exceptions.PolarsError,
-            TransformValidationError,
-            SchemaValidationError,
-            SourceSchemaDriftError,
-        ) as err:
-            raise SilverStageError("Silver transform failed") from err
+            df = spec.run_silver(self._resolver.bronze_latest_path)
+        except SourceSchemaDriftError as err:
+            raise SilverStageError(
+                "Source API schema has changed (columns added or removed)"
+            ) from err
+        except (SchemaValidationError, TransformValidationError) as err:
+            raise SilverStageError("Silver output validation failed") from err
+        except (duckdb.Error, pl.exceptions.PolarsError, OSError) as err:
+            raise SilverStageError("Silver transform or read failed") from err
 
         # -- Rotate files and write new snapshot ---------------------------------------
 
@@ -658,11 +698,15 @@ class RemoteIngestionPipeline:
         # in memory simultaneously (~4 GB for 18M-row datasets → OOM).
         try:
             self._file_manager.rotate_silver()
-            self.resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
-            df.write_parquet(self.resolver.silver_current_path)
+        except OSError as err:
+            raise SilverStageError("Silver file rotation failed (current → backup)") from err
+
+        try:
+            self._resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
+            df.write_parquet(self._resolver.silver_current_path)
         except OSError as err:
             self._file_manager.rollback_silver()
-            raise SilverStageError("Silver file rotation or write failed") from err
+            raise SilverStageError("Silver Parquet write failed") from err
 
         columns = df.columns
         rows_count = len(df)
@@ -671,12 +715,20 @@ class RemoteIngestionPipeline:
         # -- Compute incremental diff if applicable ------------------------------------
 
         if is_incremental:
-            diff_metrics, delta = self._compute_incremental_diff_from_files()
             try:
-                delta.write_parquet(self.resolver.silver_delta_path)
+                diff_metrics, delta = self._compute_incremental_diff_from_files()
+            except (pl.exceptions.PolarsError, OSError) as err:
+                raise SilverStageError("Silver incremental diff computation failed") from err
+            try:
+                delta.write_parquet(self._resolver.silver_delta_path)
             except OSError as err:
                 raise SilverStageError("Silver delta write failed") from err
-        parquet_size = round(self.resolver.silver_current_path.stat().st_size / (1024 * 1024), 2)
+
+        try:
+            size_bytes = self._resolver.silver_current_path.stat().st_size
+            parquet_size = round(size_bytes / (1024 * 1024), 2)
+        except OSError as err:
+            raise SilverStageError("Failed to stat silver Parquet after write") from err
 
         # -- Build metrics and result --------------------------------------------------
 
@@ -692,6 +744,7 @@ class RemoteIngestionPipeline:
                 rows_unchanged=diff_metrics.rows_unchanged,
             )
 
+        log_kwargs["duration_s"] = round(time.monotonic() - t0, 2)
         logger.info("Silver transformation completed", **log_kwargs)
 
         return PipelineContext(
@@ -724,14 +777,13 @@ class RemoteIngestionPipeline:
             Diff statistics and the delta DataFrame (new + changed rows only).
         """
         pk = self.dataset.primary_key
-        new_lf = pl.scan_parquet(self.resolver.silver_current_path)
+        new_lf = pl.scan_parquet(self._resolver.silver_current_path)
 
         # -- Handle first run (no previous snapshot) -----------------------------------
 
-        if not self.resolver.silver_backup_path.exists():
+        if not self._resolver.silver_backup_path.exists():
             # First run: everything is new
-            new_df = new_lf.collect()
-            assert isinstance(new_df, pl.DataFrame)  # always true (no GPU engine)
+            new_df = collect_narrow(new_lf)
             logger.info("No previous silver snapshot, full delta", rows_count=len(new_df))
             return (
                 IncrementalDiffMetrics(
@@ -745,46 +797,43 @@ class RemoteIngestionPipeline:
 
         # -- Load and align previous snapshot ------------------------------------------
 
-        old_lf = pl.scan_parquet(self.resolver.silver_backup_path)
+        old_lf = pl.scan_parquet(self._resolver.silver_backup_path)
 
         # Align types: previous may have different dtypes due to schema evolution
         old_lf = old_lf.cast(new_lf.collect_schema())
 
         # -- New rows: anti-join on PK (old file only loads PK columns) ----------------
 
-        df_new = new_lf.join(old_lf.select(pk), on=pk, how="anti").collect()
-        assert isinstance(df_new, pl.DataFrame)
+        df_new = collect_narrow(new_lf.join(old_lf.select(pk), on=pk, how="anti"))
 
-        # -- Changed rows: hash-based comparison instead of full column join. ----------
+        # -- Changed rows: hash-based comparison instead of full column join -----------
 
         # pl.struct hashing is null-aware, so null vs value diffs are detected.
         non_key_cols = [c for c in new_lf.collect_schema().names() if c not in pk]
         hash_expr = pl.struct(non_key_cols).hash().alias("_row_hash")
 
-        # -- Find changed rows (hash comparison) ---------------------------------------
-
-        changed_pks = (
-            new_lf.select([*pk, hash_expr])
-            .join(
-                old_lf.select([*pk, hash_expr]),
-                on=pk,
-                how="inner",
-                suffix="_prev",
-            )
-            .filter(pl.col("_row_hash") != pl.col("_row_hash_prev"))
-            .select(pk)
-            .collect()
+        # Collect inner join (PK + row hashes) in one pass to derive both
+        # changed-row PKs and rows_in_both (avoids an extra full-file scan
+        # just for rows_total).
+        matched_lf = new_lf.select([*pk, hash_expr]).join(
+            old_lf.select([*pk, hash_expr]),
+            on=pk,
+            how="inner",
+            suffix="_prev",
         )
-        assert isinstance(changed_pks, pl.DataFrame)
-        df_changed = new_lf.join(changed_pks.lazy(), on=pk, how="inner").collect()
-        assert isinstance(df_changed, pl.DataFrame)
+        matched_df = collect_narrow(matched_lf)
+
+        rows_in_both = len(matched_df)
+        changed_pks = matched_df.filter(pl.col("_row_hash") != pl.col("_row_hash_prev")).select(pk)
+        del matched_df  # free PK+hash frame before collecting full rows
+
+        df_changed = collect_narrow(new_lf.join(changed_pks.lazy(), on=pk, how="inner"))
 
         # -- Build delta and compute metrics -------------------------------------------
 
         delta = pl.concat([df_new, df_changed])
-        # .collect() always returns DataFrame (InProcessQuery is GPU-only)
-        rows_total: int = new_lf.select(pl.len()).collect().item()  # ty: ignore[unresolved-attribute]
-        rows_unchanged = rows_total - len(df_new) - len(df_changed)
+        rows_total = len(df_new) + rows_in_both
+        rows_unchanged = rows_in_both - len(df_changed)
 
         metrics = IncrementalDiffMetrics(
             rows_total=rows_total,

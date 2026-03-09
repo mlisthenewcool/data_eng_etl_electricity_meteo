@@ -3,7 +3,7 @@
         materialized='table',
         schema='gold',
         indexes=[
-            {'columns': ['id_peps'], 'unique': True},
+            {'columns': ['code_eic_resource_object'], 'unique': True},
             {'columns': ['type_energie']},
             {'columns': ['code_region']},
             {'columns': ['code_departement']},
@@ -23,7 +23,7 @@
 -- @formatter:off
 WITH installations_renouvelables AS (
     SELECT
-        inst.id_peps,
+        inst.code_eic_resource_object,
         inst.nom_installation,
         inst.code_iris,
         inst.code_departement,
@@ -45,7 +45,7 @@ WITH installations_renouvelables AS (
 )
 
 SELECT
-    ir.id_peps,
+    ir.code_eic_resource_object,
     ir.nom_installation,
     ir.code_iris,
     ir.code_departement,

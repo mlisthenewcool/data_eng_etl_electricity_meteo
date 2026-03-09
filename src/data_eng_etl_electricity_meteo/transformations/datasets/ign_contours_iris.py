@@ -13,8 +13,8 @@ import polars as pl
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import _collect
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 logger = get_logger("transform")
 
@@ -166,7 +166,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     duckdb.Error
         On DuckDB spatial query failure (missing extension, etc.).
     """
-    df = _collect(lf)
+    df = collect_narrow(lf)
 
     # Use DuckDB for spatial operations on the WKB geometry
     with _duckdb_spatial_conn() as conn:
@@ -225,7 +225,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "ign_contours_iris",
+    name="ign_contours_iris",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
     all_source_columns=_ALL_SOURCE_COLUMNS,

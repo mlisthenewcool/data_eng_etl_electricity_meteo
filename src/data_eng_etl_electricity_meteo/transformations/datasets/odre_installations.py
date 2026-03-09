@@ -8,7 +8,6 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import _collect
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -80,7 +79,6 @@ _ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(
         "filiere",
         "gestionnaire",
         "hauteur_chute",
-        "id_peps",
         "max_puis",
         "mode_raccordement",
         "nb_groupes",
@@ -108,9 +106,8 @@ _USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS
 class SilverSchema(DataFrameModel):
     """Silver output contract for ODRE installations."""
 
-    id_peps: Annotated[str, Column(nullable=False, unique=True)]
+    code_eic_resource_object: Annotated[str, Column(nullable=False, unique=True)]
     nom_installation: str
-    code_eic_resource_object: str
     code_iris: str
     code_insee_commune: str
     commune: str
@@ -140,24 +137,24 @@ class SilverSchema(DataFrameModel):
     technologie: str
     type_stockage: str
     puis_max_installee: float
-    puis_max_rac_charge: str
-    puis_max_charge: str
+    puis_max_rac_charge: float
+    puis_max_charge: float
     puis_max_rac: float
-    puis_max_installee_dis_charge: str
+    puis_max_installee_dis_charge: float
     nb_groupes: int
     nb_installations: int
     regime: str
-    energie_stockable: str
-    capacite_reservoir: str
-    hauteur_chute: str
-    productible: str
-    debit_maximal: str
+    energie_stockable: float
+    capacite_reservoir: float
+    hauteur_chute: float
+    productible: float
+    debit_maximal: float
     code_gestionnaire: str
     gestionnaire: str
     energie_annuelle_glissante_injectee: int
     energie_annuelle_glissante_produite: int
     energie_annuelle_glissante_soutiree: int
-    max_puis: str
+    max_puis: float
     # Verbatim column name from the ODRE source API (with parentheses).
     date_mise_enservice_format_date: Annotated[
         date, Column(name="date_mise_enservice_(format_date)")
@@ -209,14 +206,14 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
     Generates synthetic primary keys for aggregated installations and adds business
     flags for energy type classification. Fully lazy — window operations
-    (``cum_sum().over()``) and ``coalesce``/``concat_str`` are lazy-compatible. Counts
-    for logging use cheap single-row aggregations.
+    (``cum_sum().over()``) and ``coalesce``/``concat_str`` are lazy-compatible.
+    Diagnostic counts are embedded as ``_diag_*`` columns.
 
     Transformations applied:
 
-    - Flag ``est_agregation`` (``True`` when original ``id_peps`` is null).
-    - Synthetic ``id_peps`` for aggregated rows via geographic cascade (IRIS → COM → DEP
-      → REG → FR) + filière + sequence number.
+    - Flag ``est_agregation`` (``True`` when ``code_eic_resource_object`` is null).
+    - Synthetic ``code_eic_resource_object`` for aggregated rows via geographic cascade
+      (IRIS → COM → DEP → REG → FR) + filière + sequence number.
     - Add ``est_renouvelable`` flag based on ``code_filiere``.
     - Add ``type_energie`` simplified classification via ``TYPE_ENERGIE_MAPPING``.
     - Add ``est_actif`` flag (``True`` when ``date_deraccordement`` is null).
@@ -231,10 +228,9 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     pl.LazyFrame
         Enriched LazyFrame with energy type flags.
     """
-    # -- Synthetic key for aggregated installations (id_peps is NULL) ------------------
+    # -- Synthetic key for aggregated installations (code_eic_resource_object is NULL) -
 
-    # Count null id_peps for logging (cheap single-row aggregation)
-    n_null_peps: int = _collect(lf.select(pl.col("id_peps").is_null().sum())).item()
+    _eic = pl.col("code_eic_resource_object")
 
     _geo_key = pl.coalesce(
         pl.concat_str([pl.lit("IRIS"), pl.col("code_iris")], separator="_"),
@@ -246,7 +242,8 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     _base_key = pl.concat_str([pl.lit("AGR"), _geo_key, pl.col("code_filiere")], separator="_")
 
     lf = lf.with_columns(
-        pl.col("id_peps").is_null().alias("est_agregation"),
+        _eic.is_null().alias("est_agregation"),
+        _eic.is_null().sum().alias("_diag_generated_primary_keys"),
         _base_key.alias("_base_key"),
     )
 
@@ -262,14 +259,9 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
                 separator="_",
             )
         )
-        .otherwise(pl.col("id_peps"))
-        .alias("id_peps")
+        .otherwise(_eic)
+        .alias("code_eic_resource_object")
     ).drop("_base_key")
-
-    logger.info(
-        "Synthetic keys generated for aggregated installations",
-        synthetic_count=n_null_peps,
-    )
 
     # -- Business flags ----------------------------------------------------------------
 
@@ -281,7 +273,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("date_deraccordement").is_null().alias("est_actif"),
     )
 
-    return lf.select(SilverSchema.polars_schema().names())
+    return lf
 
 
 # --------------------------------------------------------------------------------------
@@ -290,7 +282,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "odre_installations",
+    name="odre_installations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
     all_source_columns=_ALL_SOURCE_COLUMNS,

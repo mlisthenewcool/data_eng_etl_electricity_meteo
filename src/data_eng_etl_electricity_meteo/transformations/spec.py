@@ -15,11 +15,12 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import DataFrameModel
 from data_eng_etl_electricity_meteo.transformations.shared import (
-    _collect,
+    extract_diagnostics,
     prepare_silver,
     validate_not_empty,
     validate_source_columns,
 )
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 # --------------------------------------------------------------------------------------
 # Type aliases
@@ -29,9 +30,9 @@ from data_eng_etl_electricity_meteo.transformations.shared import (
 BronzeTransformFunc = Callable[[Path], pl.LazyFrame]
 
 # Silver transforms receive a pre-processed LazyFrame (snake_case columns,
-# all-null columns dropped) and return a LazyFrame. Transforms that need
-# eager operations (DuckDB, null_count, len) collect internally and return
-# result.lazy(). The caller (run_silver) collects once and validates.
+# all-null columns dropped) and return a LazyFrame with optional _diag_* / _warn_*
+# diagnostic columns. The caller (run_silver) collects once, extracts diagnostics,
+# selects schema columns, then validates.
 SilverTransformFunc = Callable[[pl.LazyFrame], pl.LazyFrame]
 
 
@@ -88,14 +89,29 @@ class DatasetTransformSpec:
         -------
         pl.DataFrame
             Fully transformed and validated silver DataFrame.
+
+        Raises
+        ------
+        SourceSchemaDriftError
+            If source API columns have changed (added or removed).
+        SchemaValidationError
+            If silver output violates the declared schema contract.
+        TransformValidationError
+            If the transformed DataFrame is empty.
+        polars.exceptions.PolarsError
+            On any Polars read or compute failure.
+        OSError
+            If the bronze Parquet file cannot be read.
         """
         lf = pl.scan_parquet(bronze_path)
-        lf = prepare_silver(lf, expected_columns=self.all_source_columns)
+        lf = prepare_silver(lf, dataset_name=self.name, expected_columns=self.all_source_columns)
         validate_source_columns(
             lf, expected_columns=self.all_source_columns, dataset_name=self.name
         )
         lf = self.silver_transform(lf)
-        df = _collect(lf)
+        df = collect_narrow(lf)
+        df = extract_diagnostics(df)
+        df = df.select(self.silver_schema.polars_schema().names())
         validate_not_empty(df, dataset_name=self.name)
         self.silver_schema.validate(df)
         return df

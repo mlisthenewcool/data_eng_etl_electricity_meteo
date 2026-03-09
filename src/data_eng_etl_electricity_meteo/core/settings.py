@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     )
 
     # -- Postgres connection -----------------------------------------------------------
+    # Airflow connection id: see loaders/pg_connection.py::AIRFLOW_CONN_ID.
 
     postgres_host: str = Field(default="localhost", description="Postgres host")
     postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)

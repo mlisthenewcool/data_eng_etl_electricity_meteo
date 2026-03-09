@@ -124,6 +124,12 @@ class BaseExtractCallback(ExtractCallback):
 
     Subclasses only need to override ``report_update`` to implement meaningful progress
     reporting.
+
+    Notes
+    -----
+    py7zr declares ``str`` types for byte-count parameters
+    (``processing_bytes``, ``wrote_bytes``, ``decompressed_bytes``) but may pass ``int``
+    at runtime depending on the version.
     """
 
     def report_start(self, processing_file_path: str, processing_bytes: str) -> None:

@@ -100,6 +100,7 @@ services:
       # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD).
       # AIRFLOW_CONN_PROJECT_POSTGRES is exported in the startup command below,
       # built from Docker secrets at runtime — no plaintext credentials in compose.
+      # The connection id must match loaders/pg_connection.py::AIRFLOW_CONN_ID.
 
     # -- Volumes -----------------------------------------------------------------------
 

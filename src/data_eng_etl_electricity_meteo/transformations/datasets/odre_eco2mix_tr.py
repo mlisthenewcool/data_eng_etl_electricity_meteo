@@ -154,7 +154,6 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     return transform_eco2mix_silver(
         lf,
         numeric_text_columns=_NUMERIC_TEXT_COLUMNS,
-        schema=SilverSchema,
     )
 
 
@@ -164,7 +163,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "odre_eco2mix_tr",
+    name="odre_eco2mix_tr",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
     all_source_columns=_ALL_SOURCE_COLUMNS,

@@ -57,30 +57,45 @@ class RemoteFileMetadata:
         """
         if not self.has_any_field() or not other.has_any_field():
             return ChangeDetectionResult(
-                True, reason="Missing metadata on current or previous state"
+                has_changed=True,
+                reason="Missing metadata on current or previous state",
             )
 
         for check in (self._check_etag, self._check_last_modified, self._check_content_length):
             if (result := check(other)) is not None:
                 return result
 
-        return ChangeDetectionResult(True, reason="No matching metadata found to confirm identity")
+        return ChangeDetectionResult(
+            has_changed=True,
+            reason="No matching metadata found to confirm identity",
+        )
 
     def _check_etag(self, other: Self) -> ChangeDetectionResult | None:
         """Compare ETags. Returns ``None`` if either side lacks an ETag."""
         if not (self.etag and other.etag):
             return None
         if self.etag != other.etag:
-            return ChangeDetectionResult(True, reason=f"ETag changed: {other.etag} -> {self.etag}")
-        return ChangeDetectionResult(False, reason="ETag identical")
+            return ChangeDetectionResult(
+                has_changed=True,
+                reason=f"ETag changed: {other.etag} -> {self.etag}",
+            )
+        return ChangeDetectionResult(has_changed=False, reason="ETag identical")
 
     def _check_last_modified(self, other: Self) -> ChangeDetectionResult | None:
         """Compare Last-Modified dates. Returns ``None`` if either side lacks a date."""
         if not (self.last_modified and other.last_modified):
             return None
+        if self.last_modified == other.last_modified:
+            return ChangeDetectionResult(has_changed=False, reason="File date is identical")
         if self.last_modified > other.last_modified:
-            return ChangeDetectionResult(True, reason=f"File is newer: {self.last_modified}")
-        return ChangeDetectionResult(False, reason="File date is identical or older")
+            return ChangeDetectionResult(
+                has_changed=True,
+                reason=f"File is newer: {self.last_modified}",
+            )
+        return ChangeDetectionResult(
+            has_changed=True,
+            reason=f"File date went backward (rollback?): {self.last_modified}",
+        )
 
     def _check_content_length(self, other: Self) -> ChangeDetectionResult | None:
         """Compare Content-Length. Returns ``None`` if neither side has a size."""
@@ -88,9 +103,10 @@ class RemoteFileMetadata:
             return None
         if self.content_length != other.content_length:
             return ChangeDetectionResult(
-                True, reason=f"Size changed: {other.content_length} -> {self.content_length}"
+                has_changed=True,
+                reason=f"Size changed: {other.content_length} -> {self.content_length}",
             )
-        return ChangeDetectionResult(False, reason="Size identical")
+        return ChangeDetectionResult(has_changed=False, reason="Size identical")
 
 
 def get_remote_file_metadata(
@@ -148,8 +164,12 @@ def get_remote_file_metadata(
 
     headers = response.headers
 
-    # ETags may be quoted per RFC 7232 §2.3
-    etag = headers.get("etag", "").strip('"') or None
+    # ETags may be quoted (RFC 7232 §2.3) or weak-prefixed (W/"…")
+    raw_etag = headers.get("etag", "")
+    if raw_etag.startswith('W/"'):
+        etag = raw_etag[3:-1] or None
+    else:
+        etag = raw_etag.strip('"') or None
 
     # Parse Last-Modified (RFC 7231 HTTP-date format)
     last_modified = None
@@ -174,7 +194,9 @@ def get_remote_file_metadata(
                 error=str(e),
             )
 
-    metadata = RemoteFileMetadata(etag, last_modified=last_modified, content_length=content_length)
+    metadata = RemoteFileMetadata(
+        etag=etag, last_modified=last_modified, content_length=content_length
+    )
 
     logger.debug(
         "Remote file metadata retrieved",

@@ -8,6 +8,7 @@ Warnings
 Do **not** raise ``SystemExit`` when running on Airflow. Let Airflow handle exceptions.
 """
 
+import time
 from datetime import UTC, datetime
 
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
@@ -55,6 +56,7 @@ def run_pipeline(
     skip_postgres
         When ``True``, skip the final Postgres load step.
     """
+    t0 = time.monotonic()
     start_datetime = datetime.now(tz=UTC)
 
     # -- Load catalog and dataset configuration ----------------------------------------
@@ -81,7 +83,9 @@ def run_pipeline(
 
     version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
     manager = RemoteIngestionPipeline(
-        dataset, custom_download=custom_download, custom_metadata=custom_metadata
+        dataset=dataset,
+        _custom_download=custom_download,
+        _custom_metadata=custom_metadata,
     )
 
     # -- Load previous run state -------------------------------------------------------
@@ -97,7 +101,6 @@ def run_pipeline(
         raise SystemExit(1)
 
     if download_ctx is None:
-        logger.debug("Pipeline skipped: content unchanged")
         return
 
     # -- Extract (optional) ------------------------------------------------------------
@@ -110,7 +113,6 @@ def run_pipeline(
             raise SystemExit(1)
 
         if extract_ctx is None:
-            logger.debug("Pipeline skipped: extracted content unchanged")
             return
     else:
         logger.debug("Extraction skipped: format is not archive")
@@ -147,3 +149,5 @@ def run_pipeline(
     except PostgresLoadError as err:
         err.log(logger.critical)
         raise SystemExit(1)
+
+    logger.info("Pipeline completed", duration_s=round(time.monotonic() - t0, 2))

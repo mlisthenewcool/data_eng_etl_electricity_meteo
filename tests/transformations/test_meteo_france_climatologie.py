@@ -195,20 +195,22 @@ class TestColumnSelection:
     """Tests for column selection and renaming in silver transform."""
 
     def test_output_has_expected_columns(self) -> None:
-        """Silver output should have exactly the 16 mapped columns."""
+        """Silver output should contain the 16 mapped columns (plus diagnostics)."""
         df = _make_bronze_df()
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
 
         expected_columns = list(_COLUMNS_MAPPING.values())
-        assert result.columns == expected_columns
+        schema_cols = [c for c in result.columns if not c.startswith("_")]
+        assert schema_cols == expected_columns
 
     def test_output_column_count(self) -> None:
-        """Silver output should have exactly 16 columns."""
+        """Silver output should have at least 16 schema columns."""
         df = _make_bronze_df()
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert len(result.columns) == 16
+        schema_cols = [c for c in result.columns if not c.startswith("_")]
+        assert len(schema_cols) == 16
 
     def test_extra_source_columns_raise_drift_error(self) -> None:
         """Extra source columns should raise SourceSchemaDriftError."""
@@ -244,11 +246,13 @@ class TestDateParsing:
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
 
+        result = result.sort("date_heure")
         dates = result["date_heure"].to_list()
-        assert dates[0].year == 2026
-        assert dates[0].month == 2
-        assert dates[0].day == 28
-        assert dates[0].hour == 15
+        # Sorted: 2025-12-31, 2026-01-01, 2026-02-28
+        assert dates[2].year == 2026
+        assert dates[2].month == 2
+        assert dates[2].day == 28
+        assert dates[2].hour == 15
 
     def test_date_midnight(self) -> None:
         """Hour 00 should parse correctly (no leading zero loss)."""
@@ -256,6 +260,7 @@ class TestDateParsing:
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
 
+        result = result.sort("date_heure")
         dates = result["date_heure"].to_list()
         assert dates[0].hour == 0
         assert dates[0].day == 1
@@ -305,10 +310,11 @@ class TestNarrowingCasts:
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
 
-        # Row 2 (index 2) has None for all numeric columns
-        assert result["nebulosite"][2] is None
-        assert result["direction_vent"][2] is None
-        assert result["humidite"][2] is None
+        # The third station (75114001) has None for all numeric columns
+        row = result.filter(pl.col("id_station") == "75114001")
+        assert row["nebulosite"].item() is None
+        assert row["direction_vent"].item() is None
+        assert row["humidite"].item() is None
 
 
 # --------------------------------------------------------------------------------------
@@ -324,36 +330,48 @@ class TestValuesPassthrough:
         df = _make_bronze_df(t=[21.5, 9.8, -7.8])
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert result["temperature"][0] == pytest.approx(21.5)
-        assert result["temperature"][1] == pytest.approx(9.8)
-        assert result["temperature"][2] == pytest.approx(-7.8)
+        _inf = float("inf")
+        temps = sorted(result["temperature"].to_list(), key=lambda x: x if x is not None else _inf)
+        assert temps[0] == pytest.approx(-7.8)
+        assert temps[1] == pytest.approx(9.8)
+        assert temps[2] == pytest.approx(21.5)
 
     def test_wind_preserved(self) -> None:
         """Wind speed 5.0 m/s should remain 5.0 (no ÷10 conversion)."""
         df = _make_bronze_df(ff=[5.0, 12.0, 0.6])
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert result["vitesse_vent"][0] == pytest.approx(5.0)
-        assert result["vitesse_vent"][1] == pytest.approx(12.0)
-        assert result["vitesse_vent"][2] == pytest.approx(0.6)
+        _inf = float("inf")
+        winds = sorted(result["vitesse_vent"].to_list(), key=lambda x: x if x is not None else _inf)
+        assert winds[0] == pytest.approx(0.6)
+        assert winds[1] == pytest.approx(5.0)
+        assert winds[2] == pytest.approx(12.0)
 
     def test_pressure_preserved(self) -> None:
         """Pressure 1013.25 hPa should remain 1013.25 (no Pa→hPa conversion)."""
         df = _make_bronze_df(pstat=[1013.25, 980.0, 1020.5])
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert result["pression_station"][0] == pytest.approx(1013.25)
-        assert result["pression_station"][1] == pytest.approx(980.0)
-        assert result["pression_station"][2] == pytest.approx(1020.5)
+        pressures = sorted(
+            result["pression_station"].to_list(),
+            key=lambda x: x if x is not None else float("inf"),
+        )
+        assert pressures[0] == pytest.approx(980.0)
+        assert pressures[1] == pytest.approx(1013.25)
+        assert pressures[2] == pytest.approx(1020.5)
 
     def test_precipitation_preserved(self) -> None:
         """Precipitation 1.5 mm should remain 1.5 (no ÷10 conversion)."""
         df = _make_bronze_df(rr1=[0.0, 1.5, 12.4])
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert result["precipitations"][0] == pytest.approx(0.0)
-        assert result["precipitations"][1] == pytest.approx(1.5)
-        assert result["precipitations"][2] == pytest.approx(12.4)
+        precips = sorted(
+            result["precipitations"].to_list(),
+            key=lambda x: x if x is not None else float("inf"),
+        )
+        assert precips[0] == pytest.approx(0.0)
+        assert precips[1] == pytest.approx(1.5)
+        assert precips[2] == pytest.approx(12.4)
 
 
 # --------------------------------------------------------------------------------------
@@ -376,8 +394,9 @@ class TestIdStationType:
         df = _make_bronze_df(num_poste=["01014001", "02345002", "03456003"])
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert result["id_station"][0] == "01014001"
-        assert result["id_station"][1] == "02345002"
+        ids = sorted(result["id_station"].to_list())
+        assert ids[0] == "01014001"
+        assert ids[1] == "02345002"
 
 
 # --------------------------------------------------------------------------------------
@@ -389,8 +408,38 @@ class TestRowCount:
     """Tests for row count after transform."""
 
     def test_row_count_preserved(self) -> None:
-        """Row count should be preserved (no filtering)."""
+        """Row count should be preserved (no filtering, no duplicates)."""
         df = _make_bronze_df()
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
         assert len(result) == len(df)
+
+
+# --------------------------------------------------------------------------------------
+# Deduplication
+# --------------------------------------------------------------------------------------
+
+
+class TestDeduplication:
+    """Tests for duplicate row removal on (id_station, date_heure)."""
+
+    def test_duplicates_removed(self) -> None:
+        """Duplicate (id_station, date_heure) rows should be removed."""
+        df = _make_bronze_df(
+            num_poste=["01014001", "01014001", "13055001"],
+            aaaammjjhh=["2026022800", "2026022800", "2026022801"],
+        )
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
+        assert len(result) == 2
+
+    def test_diag_column_present(self) -> None:
+        """Dedup should produce _diag_duplicate_rows_removed column."""
+        df = _make_bronze_df(
+            num_poste=["01014001", "01014001", "13055001"],
+            aaaammjjhh=["2026022800", "2026022800", "2026022801"],
+        )
+        result = transform_silver(df.lazy()).collect()
+        assert isinstance(result, pl.DataFrame)
+        assert "_diag_duplicate_rows_removed" in result.columns
+        assert result["_diag_duplicate_rows_removed"].item(0) == 1

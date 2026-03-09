@@ -43,6 +43,7 @@ _DBT_COMMON_ARGS: list[str] = [
     str(settings.dbt_target_path),
     "--log-format",
     "json",
+    "--no-use-colors",
 ]
 
 TASK_DBT_RUN = "dbt_run"
@@ -59,19 +60,94 @@ _DBT_LOG_LEVELS = {
     "error": logger.error,
 }
 
+# dbt event codes with rich data worth extracting.
+# Q007: test result, Q012: model result, Q034: skip on error.
+_DBT_RESULT_CODES = {"Q007", "Q012", "Q034"}
+
 
 # --------------------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------------------
 
 
+def _log_dbt_result(data: dict[str, object], *, dbt_cmd: str) -> None:
+    """Log a dbt model/test result with progress, timing, and row counts.
+
+    Parameters
+    ----------
+    data
+        The ``data`` dict from a dbt JSON log event (codes Q007/Q012/Q034).
+    dbt_cmd
+        The dbt subcommand being run (for log context).
+    """
+    node_info = data.get("node_info", {})
+    if not isinstance(node_info, dict):
+        logger.warning("Unexpected node_info format", dbt_cmd=dbt_cmd)
+        return
+
+    node_name = node_info.get("node_name")  # type: ignore[arg-type]  # ty narrows dict[object] to dict[Never]
+    status = data.get("status")
+    if not isinstance(node_name, str) or not isinstance(status, str):
+        logger.warning("Missing node_name or status in dbt result", dbt_cmd=dbt_cmd)
+        return
+
+    index = data.get("index")
+    total = data.get("total")
+
+    log_kwargs: dict[str, object] = {
+        "dbt_cmd": dbt_cmd,
+        "model": node_name,
+    }
+
+    if isinstance(index, int) and isinstance(total, int):
+        log_kwargs["progress"] = f"{index}/{total}"
+
+    exec_time = data.get("execution_time")
+    if isinstance(exec_time, (int, float)):
+        log_kwargs["duration_s"] = round(exec_time, 2)
+
+    # adapter_response contains rows_affected for table materialization
+    # and _message like "CREATE VIEW" or "SELECT 1234"
+    adapter: dict[str, object] = {}
+    adapter_raw = data.get("adapter_response")
+    if isinstance(adapter_raw, dict):
+        adapter = adapter_raw  # type: ignore[assignment]
+    rows = adapter.get("rows_affected")
+    if isinstance(rows, int):
+        log_kwargs["rows_count"] = rows
+    adapter_msg = adapter.get("_message")
+    if adapter_msg:
+        log_kwargs["adapter"] = adapter_msg
+
+    is_error = status.upper() in ("ERROR", "FAIL")
+    log_fn = logger.error if is_error else logger.info
+    log_fn(f"dbt {status}", **log_kwargs)
+
+
 def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
-    """Run a dbt subcommand, streaming JSON log lines through structlog."""
+    """Run a dbt subcommand, streaming JSON log lines through structlog.
+
+    Extracts rich data from dbt result events (Q007/Q012/Q034): model name, progress
+    (index/total), execution time, and rows affected.
+    """
     cmd = ["dbt", subcommand, *_DBT_COMMON_ARGS, *(extra_args or [])]
     logger.info("Starting dbt", dbt_cmd=subcommand)
     logger.debug("dbt full command", command=cmd)
 
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except OSError as exc:
+        raise GoldStageError(
+            f"Failed to start dbt {subcommand}: {exc}",
+            dbt_cmd=subcommand,
+        ) from None
+
+    with proc:
         assert proc.stdout is not None  # guaranteed by PIPE
         for raw_line in proc.stdout:
             line = raw_line.rstrip()
@@ -80,10 +156,22 @@ def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
             try:
                 event = orjson.loads(line)
                 meta = event.get("info", {})
+                code = meta.get("code", "")
+
+                # Rich logging for model/test results
+                if code in _DBT_RESULT_CODES:
+                    _log_dbt_result(event.get("data", {}), dbt_cmd=subcommand)
+                    continue
+
                 msg = meta.get("msg", line)
+
+                # Z017: visual separators in dbt output (empty lines)
+                if not msg and code == "Z017":
+                    continue
+
                 level = meta.get("level", "info").lower()
                 log_fn = _DBT_LOG_LEVELS.get(level, logger.info)
-                log_fn(msg, dbt_cmd=subcommand, dbt_code=meta.get("code"))
+                log_fn(msg, dbt_cmd=subcommand, dbt_code=code or None)
             except orjson.JSONDecodeError:
                 logger.debug(line, dbt_cmd=subcommand)
 
@@ -155,7 +243,7 @@ def _create_dag(
             """Execute ``dbt test --select {model}``."""
             _run_dbt("test", extra_args=["--select", dataset.name])
 
-        dbt_run() >> dbt_test()  # for IDE
+        dbt_run() >> dbt_test()  # type: ignore[operator]  # ty:ignore[unused-type-ignore-comment, unused-ignore-comment]
 
     return _dag()
 
@@ -180,10 +268,14 @@ def _generate_all_dags() -> dict[str, DAG]:
     for dataset in gold_datasets:
         try:
             gold_asset = get_gold_pg_asset(dataset)
+            # GoldSourceConfig.validate_depends_on_not_empty enforces ≥1 dependency
             upstream_assets = [
                 get_silver_pg_asset(catalog.get_remote_dataset(dep))
                 for dep in dataset.source.depends_on
             ]
+            if not upstream_assets:
+                logger.error("No upstream assets found", dataset_name=dataset.name)
+                continue
             schedule: Asset | AssetAll = (
                 upstream_assets[0] if len(upstream_assets) == 1 else AssetAll(*upstream_assets)
             )

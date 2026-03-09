@@ -18,6 +18,7 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.shared import deduplicate_on_composite_key
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -197,8 +198,6 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     # -- Select and rename columns -----------------------------------------------------
 
     source_cols = list(_COLUMNS_MAPPING.keys())
-    target_cols = list(_COLUMNS_MAPPING.values())
-
     lf = lf.select(source_cols).rename(_COLUMNS_MAPPING)
 
     # -- Parse date --------------------------------------------------------------------
@@ -219,9 +218,11 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("humidite").cast(pl.Int16, strict=True),
     )
 
-    # -- Reorder columns to match Postgres table schema --------------------------------
+    # -- Deduplicate on (id_station, date_heure) ------------------------------------
 
-    return lf.select(target_cols)
+    lf = deduplicate_on_composite_key(lf, key_columns=["id_station", "date_heure"])
+
+    return lf
 
 
 # --------------------------------------------------------------------------------------
@@ -230,7 +231,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "meteo_france_climatologie",
+    name="meteo_france_climatologie",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
     all_source_columns=_ALL_SOURCE_COLUMNS,

@@ -8,7 +8,7 @@ Each DAG runs on its dataset's configured schedule and orchestrates: download â†
 from collections.abc import Generator
 from datetime import timedelta
 
-from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, task
+from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, get_current_context, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset
 from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
@@ -79,8 +79,16 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
     )
     def _dag() -> None:
         @task.short_circuit(task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT)
-        def download_task(version: str) -> XComArg | bool:
+        def download_task() -> XComArg | bool:
             """Download remote data to landing with short-circuit if unchanged.
+
+            The version string is computed inside the task (via ``get_current_context``)
+            rather than injected as a Jinja template. Airflow 3 Jinja rendering runs
+            before the full context is populated, so ``logical_date`` / ``ds`` are
+            undefined for manual triggers. Using the Python runtime context avoids this
+            and is stable across Airflow versions.
+
+            Steps
 
             1. Load previous run state from local JSON.
             2. Retrieve metadata from remote.
@@ -88,6 +96,11 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
             4. Download content to landing layer.
             5. Compare SHA-256 hashes â€” short-circuit if identical.
             """
+            # logical_date is None for manual triggers; run_after is always set.
+            dag_run = get_current_context()["dag_run"]
+            logical_date = dag_run.logical_date or dag_run.run_after
+            version = manager.dataset.ingestion.frequency.format_datetime_as_version(logical_date)
+
             previous_snapshot = load_local_snapshot(manager.dataset.name)
 
             ingestion_result = manager.download(version, previous_snapshot=previous_snapshot)
@@ -133,10 +146,7 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
 
         # -- DAG workflow: download > (extract) > bronze > silver ----------------------
 
-        # Version generated inside decorated function so Jinja template is resolved
-        run_version = manager.dataset.ingestion.frequency.get_airflow_version_template()
-
-        landing_ctx = download_task(version=run_version)
+        landing_ctx = download_task()
         if manager.dataset.source.format.is_archive:
             landing_ctx = extract_task(ctx=landing_ctx)
         bronze_ctx = bronze_task(ctx=landing_ctx)
@@ -171,9 +181,9 @@ def _generate_all_dags() -> dict[str, DAG]:
 
         try:
             manager = RemoteIngestionPipeline(
-                dataset,
-                custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
-                custom_metadata=CUSTOM_METADATA.get(dataset.name),
+                dataset=dataset,
+                _custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
+                _custom_metadata=CUSTOM_METADATA.get(dataset.name),
             )
         except TransformNotFoundError as error:
             error.log(logger.warning)

@@ -143,26 +143,6 @@ class SourceSchemaDriftError(BaseProjectException):
 
 
 # --------------------------------------------------------------------------------------
-# Airflow context errors
-# --------------------------------------------------------------------------------------
-
-
-class AirflowContextError(BaseProjectException):
-    """Raised when an operation requires a specific Airflow context."""
-
-    def __init__(
-        self,
-        operation: str,
-        expected_context: str,
-        suggestion: str,
-    ) -> None:
-        self.operation = operation
-        self.expected_context = expected_context
-        self.suggestion = suggestion
-        super().__init__("Invalid Airflow context.")
-
-
-# --------------------------------------------------------------------------------------
 # Transformation errors
 # --------------------------------------------------------------------------------------
 

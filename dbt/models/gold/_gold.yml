@@ -7,8 +7,8 @@ models:
       météo la plus proche capable de mesurer les paramètres pertinents.
       Jointure spatiale PostGIS KNN via l'opérateur <->.
     columns:
-      - name: id_peps
-        description: "Identifiant unique de l'installation (clé ODRE)."
+      - name: code_eic_resource_object
+        description: "Identifiant unique de l'installation (code EIC ou clé synthétique pour les agrégations)."
         tests:
           - unique
           - not_null
