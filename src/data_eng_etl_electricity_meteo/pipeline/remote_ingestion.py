@@ -59,7 +59,11 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
     SilverMetrics,
 )
 from data_eng_etl_electricity_meteo.transformations.registry import get_transform_spec
-from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo, download_to_file
+from data_eng_etl_electricity_meteo.utils.download import (
+    HttpDownloadInfo,
+    download_to_file,
+    shorten_url,
+)
 from data_eng_etl_electricity_meteo.utils.extraction import extract_7z
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
@@ -256,10 +260,13 @@ class RemoteIngestionPipeline:
         """
         assert self._custom_download is not None  # type narrowing: guarded by download() dispatch
 
+        t0 = time.monotonic()
+        logger.info("Starting custom download", version=version)
+
         # -- 1. Smart-skip: remote metadata comparison ---------------------
 
         remote_metadata = RemoteFileMetadata()
-        is_healing = False
+        ingestion_decision: IngestionDecision | None = None
 
         if self._custom_metadata is not None:
             try:
@@ -271,18 +278,14 @@ class RemoteIngestionPipeline:
                 )
 
             if previous_snapshot is not None and remote_metadata.has_any_field():
-                decision = self._decide_ingestion(
+                ingestion_decision = self._decide_ingestion(
                     remote_metadata,
                     previous_snapshot.download.remote_metadata,
                 )
-                if not decision.should_ingest:
+                if not ingestion_decision.should_ingest:
                     return None
-                is_healing = decision.is_healing
 
         # -- 2. Custom download --------------------------------------------
-
-        t0 = time.monotonic()
-        logger.info("Starting custom download", version=version)
 
         progress: BatchProgressFactory | None = (
             AirflowBatchProgress if settings.is_running_on_airflow else None
@@ -305,18 +308,11 @@ class RemoteIngestionPipeline:
             duration_s=round(time.monotonic() - t0, 2),
         )
 
-        # -- 3. Smart-skip: content hash comparison (skipped in healing mode)
+        # -- 3. Build context and smart-skip on content hash ---------------
 
-        if not is_healing and previous_snapshot is not None:
-            if self._should_skip_on_hash(
-                previous_hash=previous_snapshot.download.file_hash,
-                current_hash=file_hash,
-            ):
-                self._cleanup_landing()
-                return None
-
-        return PipelineContext(
+        context = PipelineContext(
             version=version,
+            is_healing=ingestion_decision.is_healing if ingestion_decision else False,
             download=DownloadMetrics(
                 remote_metadata=remote_metadata,
                 download_info=HttpDownloadInfo(
@@ -326,6 +322,16 @@ class RemoteIngestionPipeline:
                 ),
             ),
         )
+
+        if not context.is_healing and previous_snapshot is not None:
+            if self._should_skip_on_hash(
+                previous_hash=previous_snapshot.download.file_hash,
+                current_hash=file_hash,
+            ):
+                self._cleanup_landing()
+                return None
+
+        return context
 
     def _run_standard_download(
         self, version: str, previous_snapshot: PipelineRunSnapshot | None
@@ -350,7 +356,11 @@ class RemoteIngestionPipeline:
             On any HTTP or I/O failure during metadata fetch or file download.
         """
         t0 = time.monotonic()
-        logger.info("Starting download", version=version)
+        logger.info(
+            "Starting download",
+            version=version,
+            url=shorten_url(self.dataset.source.url_as_str),
+        )
 
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
@@ -425,6 +435,7 @@ class RemoteIngestionPipeline:
 
         context = PipelineContext(
             version=version,
+            is_healing=ingestion_decision.is_healing,
             download=DownloadMetrics(
                 remote_metadata=remote_file_info,
                 download_info=download_info,
@@ -439,7 +450,7 @@ class RemoteIngestionPipeline:
 
         # -- 4. Smart-skip #2: content hash comparison (skipped in healing mode) -------
 
-        if not ingestion_decision.is_healing and previous_snapshot is not None:
+        if not context.is_healing and previous_snapshot is not None:
             if self._should_skip_on_hash(
                 previous_hash=previous_snapshot.download.file_hash,
                 current_hash=context.download.download_info.file_hash,
@@ -524,7 +535,7 @@ class RemoteIngestionPipeline:
 
         # -- Smart-skip: hash comparison against previous extraction -------------------
 
-        if previous_snapshot and previous_snapshot.extraction:
+        if not context.is_healing and previous_snapshot and previous_snapshot.extraction:
             if self._should_skip_on_hash(
                 previous_hash=previous_snapshot.extraction.file_hash,
                 current_hash=extract_info.file_hash,

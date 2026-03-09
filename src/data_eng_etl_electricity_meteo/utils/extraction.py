@@ -119,8 +119,6 @@ def extract_7z(
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
 
-    logger.info("Starting extraction", archive=archive_path.name, target=target_filename)
-
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
 
@@ -191,7 +189,5 @@ def extract_7z(
 
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
-
-            logger.info("Extraction completed", target=target_filename, file_size_mib=size_mib)
 
             return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

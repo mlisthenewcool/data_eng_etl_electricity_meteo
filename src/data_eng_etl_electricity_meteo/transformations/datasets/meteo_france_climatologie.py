@@ -18,7 +18,6 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import deduplicate_on_composite_key
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -170,9 +169,8 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for Météo France climatologie.
 
     Applies column selection, renaming, date parsing, and narrowing casts.
-    All operations are lazy-compatible — Polars collapses the full query plan into one
-    optimized pass, avoiding multiple 2 GB intermediate copies that caused OOM on the
-    18M-row dataset.
+    All operations are lazy-compatible — Polars collapses the full query plan into a
+    single optimized pass.
 
     Source data is already in final units (°C, m/s, hPa, mm) — no unit conversion is
     applied.
@@ -218,10 +216,6 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("humidite").cast(pl.Int16, strict=True),
     )
 
-    # -- Deduplicate on (id_station, date_heure) ------------------------------------
-
-    lf = deduplicate_on_composite_key(lf, key_columns=["id_station", "date_heure"])
-
     return lf
 
 
@@ -234,6 +228,7 @@ SPEC = DatasetTransformSpec(
     name="meteo_france_climatologie",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
+    primary_key=("id_station", "date_heure"),
     all_source_columns=_ALL_SOURCE_COLUMNS,
     used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,

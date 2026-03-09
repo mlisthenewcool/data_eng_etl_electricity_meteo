@@ -140,8 +140,8 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
 def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for ODRE eco2mix_cons_def.
 
-    Delegates to the shared eco2mix pipeline: cast non-numeric text → deduplicate on
-    ``(code_insee_region, date_heure)`` → normalize to naive UTC µs → validate.
+    Delegates to the shared eco2mix pipeline: cast non-numeric text → normalize to naive
+    UTC µs.
 
     Parameters
     ----------
@@ -151,7 +151,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     Returns
     -------
     pl.LazyFrame
-        Deduplicated LazyFrame ready for the silver layer.
+        LazyFrame ready for the silver layer.
     """
     return transform_eco2mix_silver(
         lf,
@@ -168,6 +168,7 @@ SPEC = DatasetTransformSpec(
     name="odre_eco2mix_cons_def",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
+    primary_key=("code_insee_region", "date_heure"),
     all_source_columns=_ALL_SOURCE_COLUMNS,
     used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,

@@ -143,17 +143,19 @@ def load_silver_to_postgres(  # noqa: PLR0912
     else:
         source_path = resolver.silver_current_path
 
+    try:
+        df = pl.read_parquet(source_path)
+    except (pl.exceptions.PolarsError, OSError) as err:
+        raise PostgresLoadError("Failed to read silver Parquet") from err
+
     t0 = time.monotonic()
     logger.info(
         "Starting Postgres load",
         table=qualified_table,
         mode=mode,
+        rows_count=len(df),
+        columns_count=len(df.columns),
     )
-
-    try:
-        df = pl.read_parquet(source_path)
-    except (pl.exceptions.PolarsError, OSError) as err:
-        raise PostgresLoadError("Failed to read silver Parquet") from err
 
     # -- Early exit for incremental with empty delta -----------------------------------
 

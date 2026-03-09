@@ -25,6 +25,9 @@
 - [ ] [Docs] Rédiger la documentation minimale du projet V1 (présentation, données,
   architecture, outils) —
   [exemple](https://github.com/abeltavares/batch-data-pipeline)
+- [ ] [Pipeline] Ajouter un smart skip pour les transformations silver -> gold :
+  exécution uniquement si les données ont réellement changé (dans le cas d'un run manuel
+  sous Airflow ou une exécution en cli). Suivre la même logique que celle existante.
 - [ ] [Pipeline] Définir comment intégrer et gérer l'ajout de nouvelles transformations
   silver (impact sur les données existantes)
 - [ ] [Pipeline] Étudier la possibilité d'ajouter une barre de progression comme tqdm
@@ -35,7 +38,6 @@
 - [ ] [Pipeline] Permettre à l'utilisateur de choisir une action lors d'une
   incohérence (par exemple celle de l'état incohérent entre métadonnées et fichiers).
   À faire pour Airflow et en local avec confirmation cli
-- [ ] [Pipeline] Vérifier la cohérence des types entre Postgres et Polars
 - [ ] [Postgres] Ajouter extension DuckDB : https://github.com/duckdb/pg_duckdb
 - [ ] [Postgres] Résoudre l'accès concurrent au load dans Postgres
 - [ ] [Tests] Ajouter des tests de qualité des données post-load (assertions Polars ou
@@ -49,10 +51,6 @@
 
 ## Plus tard
 
-- [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par
-  dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
-  `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
-  `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
 - [ ] [Airflow] Créer un DAG de maintenance (hebdomadaire) : nettoyage des fichiers
   bronze obsolètes (`cleanup_old_bronze_versions` existe, mais n'est appelé nulle
   part), validation de la cohérence état/disque (silver file existe ↔ métadonnées
@@ -69,6 +67,10 @@
 - [ ] [Airflow] Intégrer OpenLineage, OpenTelemetry, alertes et SLA
 - [ ] [Airflow] Simplifier le nommage des fichiers générés en `frequency.HOURLY`
   (ne pas inclure les minutes et secondes)
+- [ ] [Airflow] Trouver comment utiliser `catchup` dans les DAGs (là où il y a un
+  `TODO[prod]` dans le code). Plus compliqué qu'il n'y parait, certains DAG auraient
+  peut-être besoin d'un catchup (si par exemple 1 run DAG = récupérer les données en
+  cours seulement). Si le DAG récupère toutes les données, c'est inutile.
 - [ ] [Airflow] Uniformiser les logs (scheduler, triggerer, dag-processor, api-server,
   standalone)
 - [ ] [Benchmark] Ajouter des benchmarks de performance (variables des settings,
@@ -77,6 +79,10 @@
   https://github.com/PyCQA/bandit
 - [ ] [Docker] Permettre l'utilisation de variables d'environnement pour configurer les
   ports du service Airflow plutôt que des valeurs fixes
+- [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par
+  dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
+  `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
+  `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
 - [ ] [Données] Implémenter le delta fetch pour `odre_eco2mix_tr` (upsert SQL prêt,
   manque le delta côté source ; séparer les flux def/cons/tr)
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
@@ -97,6 +103,18 @@
 
 ## Terminé
 
+- [x] [Pipeline] _(2026-03-09)_ Correction OOM `unique()` silver : dedup conditionnel
+  via guard `is_duplicated().any()` dans `run_silver()`, `primary_key` dans
+  `DatasetTransformSpec`, suppression de `deduplicate_on_composite_key()`.
+  Documenté dans `docs/oom_unique_silver.md`
+- [x] [Airflow] _(2026-03-09)_ Refactoring logging dbt : dataclass `_DbtResult` avec
+  parsing typé, `chain()` pour les dépendances de tasks
+- [x] [Pipeline] _(2026-03-09)_ `is_healing` centralisé dans `PipelineContext`,
+  propagé aux smart-skips downstream (extraction incluse)
+- [x] [Logging] _(2026-03-09)_ Suppression des logs dupliqués dans `download.py` et
+  `extraction.py` (conformité « no duplicate logs »), `shorten_url` rendu public
+- [x] [Pipeline] _(2026-03-09)_ Vérification de la cohérence des types entre Polars et
+  Postgres dans `pg_loader.py` (`_validate_columns` + `_POLARS_TO_PG_COMPATIBLE`)
 - [x] [Données] _(2026-03-09)_ Remplacement de la clé primaire `id_peps` par
   `code_eic_resource_object` dans le catalog, Postgres, dbt et les transformations
 - [x] [Pipeline] _(2026-03-09)_ Gestion d'erreurs granulaire (un `except` par

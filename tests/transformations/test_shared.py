@@ -1,4 +1,4 @@
-"""Unit tests for shared transformation utilities (diagnostics, dedup, guard)."""
+"""Unit tests for shared transformation utilities (diagnostics, guard)."""
 
 import polars as pl
 import pytest
@@ -6,7 +6,6 @@ import pytest
 from data_eng_etl_electricity_meteo.transformations.shared import (
     DIAG_PREFIX,
     WARN_PREFIX,
-    deduplicate_on_composite_key,
     extract_diagnostics,
     prepare_silver,
 )
@@ -65,58 +64,6 @@ class TestExtractDiagnostics:
         )
         result = extract_diagnostics(df)
         assert result.columns == ["a"]
-
-
-# --------------------------------------------------------------------------------------
-# deduplicate_on_composite_key
-# --------------------------------------------------------------------------------------
-
-
-class TestDeduplicateOnCompositeKey:
-    def test_removes_duplicates_and_adds_diag(self) -> None:
-        lf = pl.DataFrame(
-            {
-                "key": ["a", "a", "b"],
-                "val": [1, 2, 3],
-            }
-        ).lazy()
-        result = deduplicate_on_composite_key(lf, key_columns=["key"]).collect()
-        assert isinstance(result, pl.DataFrame)
-
-        assert len(result) == 2
-        assert "_diag_duplicate_rows_removed" in result.columns
-        assert result["_diag_duplicate_rows_removed"].item(0) == 1
-
-    def test_no_duplicates_diag_is_zero(self) -> None:
-        lf = pl.DataFrame(
-            {
-                "key": ["a", "b", "c"],
-                "val": [1, 2, 3],
-            }
-        ).lazy()
-        result = deduplicate_on_composite_key(lf, key_columns=["key"]).collect()
-        assert isinstance(result, pl.DataFrame)
-
-        assert len(result) == 3
-        assert result["_diag_duplicate_rows_removed"].item(0) == 0
-
-    def test_keeps_last_occurrence(self) -> None:
-        lf = pl.DataFrame(
-            {
-                "key": ["a", "a"],
-                "val": [1, 2],
-            }
-        ).lazy()
-        result = deduplicate_on_composite_key(lf, key_columns=["key"]).collect()
-        assert isinstance(result, pl.DataFrame)
-
-        assert result["val"].item(0) == 2
-
-    def test_working_column_dropped(self) -> None:
-        lf = pl.DataFrame({"key": ["a"], "val": [1]}).lazy()
-        result = deduplicate_on_composite_key(lf, key_columns=["key"]).collect()
-        assert isinstance(result, pl.DataFrame)
-        assert "_pre_dedup_total" not in result.columns
 
 
 # --------------------------------------------------------------------------------------

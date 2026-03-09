@@ -4,10 +4,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from data_eng_etl_electricity_meteo.utils.download import _extract_filename, _short_url
+from data_eng_etl_electricity_meteo.utils.download import _extract_filename, shorten_url
 
 # --------------------------------------------------------------------------------------
-# _short_url
+# shorten_url
 # --------------------------------------------------------------------------------------
 
 
@@ -38,7 +38,7 @@ class TestShortUrl:
         ],
     )
     def test_shortens_url(self, url: str, expected: str) -> None:
-        assert _short_url(url) == expected
+        assert shorten_url(url) == expected
 
 
 # --------------------------------------------------------------------------------------

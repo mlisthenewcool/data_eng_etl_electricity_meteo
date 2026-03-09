@@ -1,15 +1,11 @@
 """Shared silver transformation logic for ODRE eco2mix datasets.
 
 Both eco2mix_tr (real-time) and eco2mix_cons_def (consolidated) share the same silver
-pipeline: cast non-numeric text → deduplicate on ``(code_insee_region, date_heure)`` →
-normalize ``date_heure`` to naive UTC µs.
+pipeline: cast non-numeric text → normalize ``date_heure`` to naive UTC µs.
+Deduplication is handled centrally by ``DatasetTransformSpec.run_silver()``.
 """
 
 import polars as pl
-
-from data_eng_etl_electricity_meteo.transformations.shared import deduplicate_on_composite_key
-
-_ECO2MIX_KEY_COLUMNS: list[str] = ["code_insee_region", "date_heure"]
 
 
 def transform_eco2mix_silver(
@@ -20,8 +16,7 @@ def transform_eco2mix_silver(
     """Apply the common eco2mix silver transformation pipeline.
 
     Fully lazy — dtype checks use ``collect_schema()``, cast-introduced null counts are
-    embedded as ``_warn_cast_nulls_*`` diagnostic columns, deduplication uses lazy
-    ``unique()``.
+    embedded as ``_warn_cast_nulls_*`` diagnostic columns.
 
     Parameters
     ----------
@@ -53,10 +48,6 @@ def transform_eco2mix_silver(
                 for c in cast_cols
             ),
         )
-
-    # -- Deduplicate on composite key --------------------------------------------------
-
-    lf = deduplicate_on_composite_key(lf, key_columns=_ECO2MIX_KEY_COLUMNS)
 
     # -- Normalize date_heure to naive UTC microseconds --------------------------------
     # Source may send tz-aware (e.g. Europe/Berlin) or naive datetime depending on the

@@ -421,25 +421,14 @@ class TestRowCount:
 
 
 class TestDeduplication:
-    """Tests for duplicate row removal on (id_station, date_heure)."""
+    """Tests that transform_silver no longer deduplicates (dedup is in run_silver)."""
 
-    def test_duplicates_removed(self) -> None:
-        """Duplicate (id_station, date_heure) rows should be removed."""
+    def test_duplicates_preserved_by_transform(self) -> None:
+        """transform_silver preserves duplicates (dedup is in run_silver)."""
         df = _make_bronze_df(
             num_poste=["01014001", "01014001", "13055001"],
             aaaammjjhh=["2026022800", "2026022800", "2026022801"],
         )
         result = transform_silver(df.lazy()).collect()
         assert isinstance(result, pl.DataFrame)
-        assert len(result) == 2
-
-    def test_diag_column_present(self) -> None:
-        """Dedup should produce _diag_duplicate_rows_removed column."""
-        df = _make_bronze_df(
-            num_poste=["01014001", "01014001", "13055001"],
-            aaaammjjhh=["2026022800", "2026022800", "2026022801"],
-        )
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
-        assert "_diag_duplicate_rows_removed" in result.columns
-        assert result["_diag_duplicate_rows_removed"].item(0) == 1
+        assert len(result) == 3

@@ -206,6 +206,9 @@ class PipelineContext(StrictModel):
     version
         Run version string (e.g. ``"2026-01-17"``). Determined by the DAG from the run
         date and ingestion frequency, before any stage executes.
+    is_healing
+        ``True`` if this run is a healing re-ingestion (inconsistent local state).
+        When set, downstream stages skip content-hash smart-skip.
     download
         Metrics from the download (and optional extraction) stage.
     bronze
@@ -215,6 +218,7 @@ class PipelineContext(StrictModel):
     """
 
     version: str
+    is_healing: bool = False
     download: DownloadMetrics
     bronze: BronzeMetrics | None = None
     silver: SilverMetrics | None = None

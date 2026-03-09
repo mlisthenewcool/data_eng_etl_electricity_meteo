@@ -58,7 +58,7 @@ def extract_diagnostics(df: pl.DataFrame) -> pl.DataFrame:
     warn_cols = [c for c in df.columns if c.startswith(WARN_PREFIX)]
     diag_cols = [c for c in df.columns if c.startswith(DIAG_PREFIX)]
 
-    # -- Warning columns (one log per non-zero column) ----
+    # -- Warning columns (one log per non-zero column) ---------------------------------
 
     for col in warn_cols:
         value: int = df[col].item(0)
@@ -66,7 +66,7 @@ def extract_diagnostics(df: pl.DataFrame) -> pl.DataFrame:
             key = col.removeprefix(WARN_PREFIX)
             logger.warning(f"Data quality: {key}", **{key: value})
 
-    # -- Diagnostic columns (single grouped log) ----------
+    # -- Diagnostic columns (single grouped log) ---------------------------------------
 
     diag_values = {}
     for col in diag_cols:
@@ -130,41 +130,6 @@ def validate_source_columns(
     removed = sorted(expected_columns - actual)
     if added or removed:
         raise SourceSchemaDriftError(dataset_name, added=added, removed=removed)
-
-
-def deduplicate_on_composite_key(
-    lf: pl.LazyFrame,
-    key_columns: list[str],
-) -> pl.LazyFrame:
-    """Deduplicate rows on a composite key, keeping the last occurrence.
-
-    Handles DST (Daylight Saving Time) transitions where data sources may return
-    duplicate timestamps: during the autumn clock change (last Sunday of October in
-    France), the hour 2:00-3:00 occurs twice, producing duplicates on time-based keys.
-
-    Embeds the pre-dedup total as a working column so that the removed count is computed
-    lazily as ``_diag_duplicate_rows_removed``, avoiding any intermediate collect.
-
-    Parameters
-    ----------
-    lf
-        LazyFrame to deduplicate.
-    key_columns
-        Column names forming the composite key.
-
-    Returns
-    -------
-    pl.LazyFrame
-        Deduplicated LazyFrame with a ``_diag_duplicate_rows_removed`` column.
-    """
-    # Embed pre-dedup row count as a constant column — evaluated in the
-    # same pass as unique(), so the upstream plan is scanned only once.
-    lf = lf.with_columns(pl.len().alias("_pre_dedup_total"))
-    lf = lf.unique(subset=key_columns, keep="last")
-    lf = lf.with_columns(
-        (pl.first("_pre_dedup_total") - pl.len()).alias("_diag_duplicate_rows_removed")
-    )
-    return lf.drop("_pre_dedup_total")
 
 
 def prepare_silver(

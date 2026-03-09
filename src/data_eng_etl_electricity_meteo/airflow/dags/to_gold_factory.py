@@ -6,10 +6,12 @@ and runs ``dbt run`` then ``dbt test`` inside the Airflow container.
 """
 
 import subprocess
+from dataclasses import dataclass
 from datetime import timedelta
+from typing import Any
 
 import orjson
-from airflow.sdk import DAG, Asset, AssetAll, dag, task
+from airflow.sdk import DAG, Asset, AssetAll, chain, dag, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_gold_pg_asset, get_silver_pg_asset
 from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
@@ -70,58 +72,77 @@ _DBT_RESULT_CODES = {"Q007", "Q012", "Q034"}
 # --------------------------------------------------------------------------------------
 
 
-def _log_dbt_result(data: dict[str, object], *, dbt_cmd: str) -> None:
-    """Log a dbt model/test result with progress, timing, and row counts.
+@dataclass(frozen=True, slots=True)
+class _DbtResult:
+    """Parsed dbt model/test result event (codes Q007/Q012/Q034)."""
 
-    Parameters
-    ----------
-    data
-        The ``data`` dict from a dbt JSON log event (codes Q007/Q012/Q034).
-    dbt_cmd
-        The dbt subcommand being run (for log context).
-    """
-    node_info = data.get("node_info", {})
-    if not isinstance(node_info, dict):
-        logger.warning("Unexpected node_info format", dbt_cmd=dbt_cmd)
-        return
+    node_name: str
+    status: str
+    progress: str | None
+    duration_s: float | None
+    rows_count: int | None
+    adapter_msg: str | None
 
-    node_name = node_info.get("node_name")  # type: ignore[arg-type]  # ty narrows dict[object] to dict[Never]
-    status = data.get("status")
-    if not isinstance(node_name, str) or not isinstance(status, str):
-        logger.warning("Missing node_name or status in dbt result", dbt_cmd=dbt_cmd)
-        return
+    @staticmethod
+    def from_raw(data: dict[str, Any]) -> "_DbtResult | None":
+        """Parse a dbt ``data`` dict into a typed result.
 
-    index = data.get("index")
-    total = data.get("total")
+        Returns ``None`` when mandatory fields (``node_name``, ``status``) are missing
+        or have unexpected types.
+        """
+        node_info = data.get("node_info")
+        if not isinstance(node_info, dict):
+            return None
+        node_name = node_info.get("node_name")
+        status = data.get("status")
+        if not isinstance(node_name, str) or not isinstance(status, str):
+            return None
 
-    log_kwargs: dict[str, object] = {
-        "dbt_cmd": dbt_cmd,
-        "model": node_name,
-    }
+        index = data.get("index")
+        total = data.get("total")
+        progress = f"{index}/{total}" if isinstance(index, int) and isinstance(total, int) else None
 
-    if isinstance(index, int) and isinstance(total, int):
-        log_kwargs["progress"] = f"{index}/{total}"
+        exec_time = data.get("execution_time")
+        duration_s = round(exec_time, 2) if isinstance(exec_time, (int, float)) else None
 
-    exec_time = data.get("execution_time")
-    if isinstance(exec_time, (int, float)):
-        log_kwargs["duration_s"] = round(exec_time, 2)
+        adapter = data.get("adapter_response")
+        if isinstance(adapter, dict):
+            rows_raw = adapter.get("rows_affected")
+            rows_count = rows_raw if isinstance(rows_raw, int) else None
+            msg_raw = adapter.get("_message")
+            adapter_msg = msg_raw if isinstance(msg_raw, str) else None
+        else:
+            rows_count = None
+            adapter_msg = None
 
-    # adapter_response contains rows_affected for table materialization
-    # and _message like "CREATE VIEW" or "SELECT 1234"
-    adapter: dict[str, object] = {}
-    adapter_raw = data.get("adapter_response")
-    if isinstance(adapter_raw, dict):
-        adapter = adapter_raw  # type: ignore[assignment]
-    rows = adapter.get("rows_affected")
-    if isinstance(rows, int):
-        log_kwargs["rows_count"] = rows
-    adapter_msg = adapter.get("_message")
-    if adapter_msg:
-        log_kwargs["adapter"] = adapter_msg
+        return _DbtResult(
+            node_name=node_name,
+            status=status,
+            progress=progress,
+            duration_s=duration_s,
+            rows_count=rows_count,
+            adapter_msg=adapter_msg,
+        )
 
-    is_error = status.upper() in ("ERROR", "FAIL")
-    log_fn = logger.error if is_error else logger.info
-    log_fn(f"dbt {status}", **log_kwargs)
+    @property
+    def is_error(self) -> bool:
+        """Whether the result represents a failed model/test."""
+        return self.status.upper() in ("ERROR", "FAIL")
+
+    def log(self, *, dbt_cmd: str) -> None:
+        """Emit a structured log line for this result."""
+        kwargs: dict[str, object] = {"dbt_cmd": dbt_cmd, "model": self.node_name}
+        if self.progress is not None:
+            kwargs["progress"] = self.progress
+        if self.duration_s is not None:
+            kwargs["duration_s"] = self.duration_s
+        if self.rows_count is not None:
+            kwargs["rows_count"] = self.rows_count
+        if self.adapter_msg is not None:
+            kwargs["adapter"] = self.adapter_msg
+
+        log_fn = logger.error if self.is_error else logger.info
+        log_fn(f"dbt {self.status}", **kwargs)
 
 
 def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
@@ -160,7 +181,15 @@ def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
 
                 # Rich logging for model/test results
                 if code in _DBT_RESULT_CODES:
-                    _log_dbt_result(event.get("data", {}), dbt_cmd=subcommand)
+                    result = _DbtResult.from_raw(event.get("data", {}))
+                    if result is None:
+                        logger.warning(
+                            "Malformed dbt result event",
+                            dbt_cmd=subcommand,
+                            dbt_code=code,
+                        )
+                        continue
+                    result.log(dbt_cmd=subcommand)
                     continue
 
                 msg = meta.get("msg", line)
@@ -243,7 +272,8 @@ def _create_dag(
             """Execute ``dbt test --select {model}``."""
             _run_dbt("test", extra_args=["--select", dataset.name])
 
-        dbt_run() >> dbt_test()  # type: ignore[operator]  # ty:ignore[unused-type-ignore-comment, unused-ignore-comment]
+        # @task transforms return type to XComArg (DependencyMixin) at runtime
+        chain(dbt_run(), dbt_test())  # type: ignore  # ty:ignore[unused-type-ignore-comment, unused-ignore-comment]
 
     return _dag()
 

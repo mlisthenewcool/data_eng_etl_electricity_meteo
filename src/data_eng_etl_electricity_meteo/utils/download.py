@@ -61,7 +61,7 @@ _GENERIC_PATH_SEGMENTS = frozenset(
 )
 
 
-def _short_url(url: str) -> str:
+def shorten_url(url: str) -> str:
     """Shorten a URL to ``hostname/…/meaningful_segment`` for log readability.
 
     Skips generic path segments (``exports``, ``parquet``, …) to surface the most
@@ -170,7 +170,6 @@ def download_to_file(
     OSError
         If the destination file cannot be written.
     """
-    logger.info("Starting download", url=_short_url(url))
     logger.debug("Download URL", url=url, dest_dir=dest_dir)
 
     timeout = httpx.Timeout(
@@ -197,7 +196,7 @@ def download_to_file(
             dest_path = dest_dir / filename
 
             if dest_path.exists():
-                logger.warning("File already exists, overwriting", url=_short_url(url))
+                logger.warning("File already exists, overwriting", url=shorten_url(url))
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             downloaded_bytes = 0
@@ -244,6 +243,6 @@ def download_to_file(
 
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)
 
-            logger.info("Download completed", filename=filename, file_size_mib=size_mib)
+            logger.debug("Download completed", filename=filename)
 
             return HttpDownloadInfo(path=dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)

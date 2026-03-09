@@ -285,6 +285,7 @@ SPEC = DatasetTransformSpec(
     name="odre_installations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
+    primary_key=("code_eic_resource_object",),
     all_source_columns=_ALL_SOURCE_COLUMNS,
     used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,

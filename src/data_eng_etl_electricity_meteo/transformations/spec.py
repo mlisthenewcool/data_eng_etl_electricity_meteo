@@ -13,6 +13,7 @@ from pathlib import Path
 
 import polars as pl
 
+from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import DataFrameModel
 from data_eng_etl_electricity_meteo.transformations.shared import (
     extract_diagnostics,
@@ -21,6 +22,8 @@ from data_eng_etl_electricity_meteo.transformations.shared import (
     validate_source_columns,
 )
 from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
+
+logger = get_logger("transform")
 
 # --------------------------------------------------------------------------------------
 # Type aliases
@@ -56,6 +59,8 @@ class DatasetTransformSpec:
         Landing file → bronze LazyFrame.
     silver_transform
         Pre-processed bronze LazyFrame → silver LazyFrame.
+    primary_key
+        Column names forming the composite primary key (for conditional dedup).
     all_source_columns
         Every column the source API returns (for schema drift detection).
     used_source_columns
@@ -68,17 +73,21 @@ class DatasetTransformSpec:
     name: str
     bronze_transform: BronzeTransformFunc
     silver_transform: SilverTransformFunc
+    primary_key: tuple[str, ...]
     all_source_columns: frozenset[str]
     used_source_columns: frozenset[str]
     silver_schema: type[DataFrameModel]
 
     def run_silver(self, bronze_path: Path) -> pl.DataFrame:
-        """Read bronze parquet lazily, apply transforms, validate.
+        """Read bronze Parquet lazily, apply transforms, conditional dedup, validate.
 
         Uses ``scan_parquet`` + lazy pipeline + single ``.collect()`` to avoid
-        materializing multiple intermediate DataFrames.
-        For the 18M-row climatologie dataset this reduces peak memory from ~5 GB
-        (multiple eager copies) to ~2 GB (single Polars query plan).
+        materializing multiple intermediate DataFrames. Deduplication is conditional:
+        ``is_duplicated().any()`` (tens of MB) checks for duplicates first, and
+        ``unique()`` (several GB peak) is only applied when duplicates actually exist.
+        This avoids OOM on large datasets like climatologie
+        (18M+ rows, typically 0 duplicates) where ``unique()`` in the lazy plan would
+        exceed container memory.
 
         Parameters
         ----------
@@ -111,6 +120,24 @@ class DatasetTransformSpec:
         lf = self.silver_transform(lf)
         df = collect_narrow(lf)
         df = extract_diagnostics(df)
+
+        # -- Conditional dedup -----------------------------------------------------
+
+        pk_expr = (
+            pl.col(self.primary_key[0])
+            if len(self.primary_key) == 1
+            else pl.struct(self.primary_key)
+        )
+        has_dups: bool = df.select(pk_expr.is_duplicated().any()).item()
+
+        if has_dups:
+            pre_count = len(df)
+            df = df.unique(subset=list(self.primary_key), keep="last")
+            logger.info(
+                "Deduplicated on primary key",
+                duplicate_rows_removed=pre_count - len(df),
+            )
+
         df = df.select(self.silver_schema.polars_schema().names())
         validate_not_empty(df, dataset_name=self.name)
         self.silver_schema.validate(df)
