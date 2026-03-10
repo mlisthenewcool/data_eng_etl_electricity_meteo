@@ -88,8 +88,8 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
             undefined for manual triggers. Using the Python runtime context avoids this
             and is stable across Airflow versions.
 
-            Steps
-
+            Notes
+            -----
             1. Load previous run state from local JSON.
             2. Retrieve metadata from remote.
             3. Compare to previous run metadata — short-circuit if unchanged.

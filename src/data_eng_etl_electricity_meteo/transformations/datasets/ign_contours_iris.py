@@ -82,10 +82,11 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     Reads GeoPackage from landing layer (with original filename preserved) and applies
     basic filtering and geometry conversion.
 
-    The GeoPackage (.gpkg) format is SQLite-based. GDAL (used internally by DuckDB's
-    ST_read) acquires file locks when reading, which can cause indefinite hangs in
-    Airflow's LocalExecutor if another process holds a lock on the same file. To
-    avoid this, the file is copied to a temporary location before reading.
+    The GeoPackage (.gpkg) format is SQLite-based.
+    GDAL (used internally by DuckDB's ST_read) acquires file locks when reading, which
+    can cause indefinite hangs in Airflow's LocalExecutor if another process holds a
+    lock on the same file.
+    To avoid this, the file is copied to a temporary location before reading.
 
     Parameters
     ----------

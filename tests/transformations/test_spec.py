@@ -1,11 +1,15 @@
 """Unit tests for DatasetTransformSpec — conditional dedup in run_silver."""
 
 from pathlib import Path
+from typing import Annotated
+from unittest.mock import patch
 
 import polars as pl
-import pytest
 
-from data_eng_etl_electricity_meteo.transformations.dataframe_model import DataFrameModel
+from data_eng_etl_electricity_meteo.transformations.dataframe_model import (
+    Column,
+    DataFrameModel,
+)
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 # --------------------------------------------------------------------------------------
@@ -14,7 +18,7 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 
 
 class _MinimalSchema(DataFrameModel):
-    key: str
+    key: Annotated[str, Column(nullable=False, unique=True)]
     val: int
 
 
@@ -45,7 +49,6 @@ def _make_spec(*, primary_key: tuple[str, ...] = ("key",)) -> DatasetTransformSp
 
 class TestRunSilverDedup:
     def test_dedup_applied_when_duplicates(self, tmp_path: Path) -> None:
-        """Duplicate rows on primary key are removed (keep last)."""
         df = pl.DataFrame({"key": ["a", "a", "b"], "val": [1, 2, 3]})
         bronze_path = tmp_path / "bronze.parquet"
         df.write_parquet(bronze_path)
@@ -59,7 +62,6 @@ class TestRunSilverDedup:
         assert row_a["val"].item() == 2
 
     def test_dedup_skipped_when_no_duplicates(self, tmp_path: Path) -> None:
-        """No duplicates → DataFrame passes through unchanged."""
         df = pl.DataFrame({"key": ["a", "b", "c"], "val": [1, 2, 3]})
         bronze_path = tmp_path / "bronze.parquet"
         df.write_parquet(bronze_path)
@@ -69,15 +71,16 @@ class TestRunSilverDedup:
 
         assert len(result) == 3
 
-    def test_dedup_logs_removal_count(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Dedup should log the number of removed rows."""
+    def test_dedup_logs_removal_count(self, tmp_path: Path) -> None:
         df = pl.DataFrame({"key": ["a", "a", "a", "b"], "val": [1, 2, 3, 4]})
         bronze_path = tmp_path / "bronze.parquet"
         df.write_parquet(bronze_path)
         spec = _make_spec()
 
-        result = spec.run_silver(bronze_path)
+        with patch("data_eng_etl_electricity_meteo.transformations.spec.logger") as mock_logger:
+            result = spec.run_silver(bronze_path)
 
         assert len(result) == 2
+        mock_logger.info.assert_called_once_with(
+            "Deduplicated on primary key", duplicate_rows_removed=2
+        )

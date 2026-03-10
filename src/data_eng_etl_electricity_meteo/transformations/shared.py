@@ -1,4 +1,13 @@
-"""Shared transformation utilities."""
+"""Shared transformation utilities.
+
+Provides reusable helpers for bronze/silver transforms:
+
+- ``prepare_silver`` — snake_case rename + all-null column removal
+- ``validate_source_columns`` — schema drift detection
+- ``validate_not_empty`` — guard against empty DataFrames
+- ``extract_diagnostics`` — log diagnostic ``_diag_*`` columns
+- ``to_snake_case`` — column name normalisation
+"""
 
 import re
 
@@ -64,7 +73,7 @@ def extract_diagnostics(df: pl.DataFrame) -> pl.DataFrame:
         value: int = df[col].item(0)
         if value > 0:
             key = col.removeprefix(WARN_PREFIX)
-            logger.warning(f"Data quality: {key}", **{key: value})
+            logger.warning("Data quality issue", metric=key, count=value)
 
     # -- Diagnostic columns (single grouped log) ---------------------------------------
 

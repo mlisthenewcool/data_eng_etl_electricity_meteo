@@ -95,7 +95,7 @@ def open_airflow_connection() -> psycopg.Connection:
     psycopg.Connection
         Open connection. Caller must close it.
     """
-    # Lazy import: airflow providers only available inside the container.
+    # Lazy import: Airflow providers only available inside the container.
     from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
 
     hook = PostgresHook(AIRFLOW_CONN_ID)

@@ -160,7 +160,7 @@ class SilverSchema(DataFrameModel):
         date, Column(name="date_mise_enservice_(format_date)")
     ]
     est_renouvelable: bool
-    type_energie: str
+    type_energie: Annotated[str, Column(nullable=False)]
     est_actif: bool
     est_agregation: bool
 
@@ -207,7 +207,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     Generates synthetic primary keys for aggregated installations and adds business
     flags for energy type classification. Fully lazy — window operations
     (``cum_sum().over()``) and ``coalesce``/``concat_str`` are lazy-compatible.
-    Diagnostic counts are embedded as ``_diag_*`` columns.
+    Diagnostic counts are embedded as ``_diag_*`` / ``_warn_*`` columns.
 
     Transformations applied:
 
@@ -271,6 +271,17 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         .replace_strict(TYPE_ENERGIE_MAPPING, default="autre")
         .alias("type_energie"),
         pl.col("date_deraccordement").is_null().alias("est_actif"),
+    )
+
+    # -- Data quality: orphan code_iris (overseas) -------------------------------------
+    # IGN contours IRIS cover metropolitan France only (FXX), while ODRE installations
+    # include overseas departments (97x). These orphans are expected, not a bug.
+
+    lf = lf.with_columns(
+        pl.col("code_departement")
+        .str.starts_with("97")
+        .sum()
+        .alias("_warn_orphan_code_iris_overseas"),
     )
 
     return lf

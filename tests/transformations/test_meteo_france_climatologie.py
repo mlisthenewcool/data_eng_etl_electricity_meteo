@@ -1,6 +1,5 @@
 """Unit tests for Météo France climatologie transforms."""
 
-import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -15,44 +14,82 @@ from data_eng_etl_electricity_meteo.transformations.datasets.meteo_france_climat
     transform_silver,
 )
 from data_eng_etl_electricity_meteo.transformations.shared import validate_source_columns
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 # --------------------------------------------------------------------------------------
 # Fixtures
 # --------------------------------------------------------------------------------------
 
 
-def _make_bronze_df(  # noqa: PLR0913
-    num_poste: list[str] | None = None,
-    aaaammjjhh: list[str] | None = None,
-    t: list[float | None] | None = None,
-    ff: list[float | None] | None = None,
-    pstat: list[float | None] | None = None,
-    rr1: list[float | None] | None = None,
-) -> pl.DataFrame:
+def _make_bronze_df(**overrides: list[object]) -> pl.DataFrame:
     """Build a minimal bronze-like DataFrame.
 
     Columns are snake_case (as after prepare_silver).
     Values are in final units as delivered by data.gouv.fr (°C, m/s, hPa, mm).
+
+    Parameters
+    ----------
+    **overrides
+        Column name → values list.
+        Overrides the defaults for that column (e.g. ``t=[21.5, 9.8, -7.8]``).
     """
-    data: dict[str, list] = {
-        "num_poste": num_poste or ["01014001", "13055001", "75114001"],
-        "aaaammjjhh": aaaammjjhh or ["2026022800", "2026022801", "2026022802"],
+    defaults: dict[str, list[object]] = {
+        "num_poste": ["01014001", "13055001", "75114001"],
+        "aaaammjjhh": ["2026022800", "2026022801", "2026022802"],
         "glo": [100.0, 200.0, None],
         "ins": [30.0, 45.0, None],
         "n": [2.0, 5.0, None],
-        "ff": ff or [5.0, 12.0, None],
+        "ff": [5.0, 12.0, None],
         "dd": [180.0, 270.0, None],
         "fxi": [8.0, 15.0, None],
-        "t": t or [21.5, 9.8, None],
+        "t": [21.5, 9.8, None],
         "tx": [25.0, 14.5, None],
         "tn": [15.0, 5.0, None],
         "td": [12.0, 3.5, None],
         "u": [75.0, 60.0, None],
-        "rr1": rr1 or [0.0, 1.5, None],
-        "pstat": pstat or [1013.25, 980.0, None],
+        "rr1": [0.0, 1.5, None],
+        "pstat": [1013.25, 980.0, None],
         "pmer": [1013.25, 1010.0, None],
     }
-    return pl.DataFrame(data)
+    return pl.DataFrame(defaults | overrides)
+
+
+def _write_landing_parquet(tmp_path: Path) -> Path:
+    """Write a fake 196-column landing Parquet with String types."""
+    # Build the 16 real columns as String (mimicking CSV infer_schema=False)
+    data: dict[str, list[str | None]] = {
+        "NUM_POSTE": ["01014001", "13055001"],
+        "AAAAMMJJHH": ["2026022800", "2026022801"],
+        "GLO": ["100", "200"],
+        "INS": ["30", "45"],
+        "N": ["2", "5"],
+        "FF": ["5.0", "12.0"],
+        "DD": ["180", "270"],
+        "FXI": ["8.0", "15.0"],
+        "T": ["21.5", "mq"],
+        "TX": ["25.0", ""],
+        "TN": ["15.0", "5.0"],
+        "TD": ["12.0", "3.5"],
+        "U": ["75", "60"],
+        "RR1": ["0.0", "1.5"],
+        "PSTAT": ["1013.25", "980.0"],
+        "PMER": ["1013.25", "1010.0"],
+    }
+    # Add 180 extra columns to simulate the full 196-column schema
+    for i in range(180):
+        data[f"EXTRA_COL_{i}"] = ["x", "y"]
+
+    df = pl.DataFrame(data)
+    path = tmp_path / "landing.parquet"
+    df.write_parquet(path)
+    return path
+
+
+@pytest.fixture
+def bronze_df(tmp_path: Path) -> pl.DataFrame:
+    """Collect the bronze transform from a fake 196-column landing Parquet."""
+    path = _write_landing_parquet(tmp_path)
+    return collect_narrow(transform_bronze(path))
 
 
 # --------------------------------------------------------------------------------------
@@ -61,95 +98,32 @@ def _make_bronze_df(  # noqa: PLR0913
 
 
 class TestBronzeTransform:
-    """Tests for the bronze transform: column pruning and typing."""
+    def test_column_pruning(self, bronze_df: pl.DataFrame) -> None:
+        assert len(bronze_df.columns) == 16
+        assert set(bronze_df.columns) == set(_BRONZE_COLUMNS.keys())
 
-    def _write_landing_parquet(self, tmp_path: Path) -> Path:
-        """Write a fake 196-column landing parquet with String types."""
-        # Build the 16 real columns as String (mimicking CSV infer_schema=False)
-        data: dict[str, list[str | None]] = {
-            "NUM_POSTE": ["01014001", "13055001"],
-            "AAAAMMJJHH": ["2026022800", "2026022801"],
-            "GLO": ["100", "200"],
-            "INS": ["30", "45"],
-            "N": ["2", "5"],
-            "FF": ["5.0", "12.0"],
-            "DD": ["180", "270"],
-            "FXI": ["8.0", "15.0"],
-            "T": ["21.5", "mq"],
-            "TX": ["25.0", ""],
-            "TN": ["15.0", "5.0"],
-            "TD": ["12.0", "3.5"],
-            "U": ["75", "60"],
-            "RR1": ["0.0", "1.5"],
-            "PSTAT": ["1013.25", "980.0"],
-            "PMER": ["1013.25", "1010.0"],
-        }
-        # Add 180 extra columns to simulate the full 196-column schema
-        for i in range(180):
-            data[f"EXTRA_COL_{i}"] = ["x", "y"]
-
-        df = pl.DataFrame(data)
-        path = tmp_path / "landing.parquet"
-        df.write_parquet(path)
-        return path
-
-    def test_column_pruning(self) -> None:
-        """Bronze should select only the 16 columns from _BRONZE_COLUMNS."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
-
-        assert len(result.columns) == 16
-        assert set(result.columns) == set(_BRONZE_COLUMNS.keys())
-
-    def test_numeric_columns_are_float64(self) -> None:
-        """Numeric columns should be cast to Float64."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
-
+    def test_numeric_columns_are_float64(self, bronze_df: pl.DataFrame) -> None:
         for col, expected_type in _BRONZE_COLUMNS.items():
-            assert result[col].dtype == expected_type, f"Column {col} has wrong type"
+            assert bronze_df[col].dtype == expected_type, f"Column {col} has wrong type"
 
-    def test_sentinel_mq_becomes_null(self) -> None:
-        """Sentinel "mq" is replaced with null before the strict cast."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
+    def test_sentinel_mq_becomes_null(self, bronze_df: pl.DataFrame) -> None:
+        """Row 1 has "mq" for T in landing data."""
+        assert bronze_df["T"][1] is None
 
-        # Row 1 has "mq" for T → should be null
-        assert result["T"][1] is None
+    def test_empty_string_becomes_null(self, bronze_df: pl.DataFrame) -> None:
+        """Row 1 has "" for TX in landing data."""
+        assert bronze_df["TX"][1] is None
 
-    def test_empty_string_becomes_null(self) -> None:
-        """Empty string "" is replaced with null before the strict cast."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
+    def test_utf8_columns_preserved(self, bronze_df: pl.DataFrame) -> None:
+        assert bronze_df["NUM_POSTE"].dtype == pl.Utf8
+        assert bronze_df["AAAAMMJJHH"].dtype == pl.Utf8
 
-        # Row 1 has "" for TX → should be null
-        assert result["TX"][1] is None
+    def test_typed_parquet_source(self, tmp_path: Path) -> None:
+        """Hydra-generated Parquet files have inferred types (e.g. AAAAMMJJHH as Int64).
 
-    def test_utf8_columns_preserved(self) -> None:
-        """Utf8 columns (NUM_POSTE, AAAAMMJJHH) should remain as Utf8."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_landing_parquet(Path(tmp))
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
-
-        assert result["NUM_POSTE"].dtype == pl.Utf8
-        assert result["AAAAMMJJHH"].dtype == pl.Utf8
-
-    def test_typed_parquet_source(self) -> None:
-        """Parquet with typed columns (Int64/Float64) should produce same result.
-
-        Hydra-generated Parquet files have inferred types (e.g. AAAAMMJJHH as Int64).
         Bronze must cast everything to the target schema regardless.
         """
-        data: dict[str, list] = {
+        data: dict[str, list[str | int | float | None]] = {
             "NUM_POSTE": ["01014001", "13055001"],
             "AAAAMMJJHH": [2026022800, 2026022801],  # Int64, not String
             "GLO": [100.0, 200.0],
@@ -171,13 +145,10 @@ class TestBronzeTransform:
         for i in range(180):
             data[f"EXTRA_COL_{i}"] = [i, i + 1]
 
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "landing_typed.parquet"
-            pl.DataFrame(data).write_parquet(path)
-            result = transform_bronze(path).collect()
-            assert isinstance(result, pl.DataFrame)
+        path = tmp_path / "landing_typed.parquet"
+        pl.DataFrame(data).write_parquet(path)
+        result = collect_narrow(transform_bronze(path))
 
-        # All columns should match target types
         for col, expected_type in _BRONZE_COLUMNS.items():
             assert result[col].dtype == expected_type, f"Column {col} has wrong type"
 
@@ -192,28 +163,21 @@ class TestBronzeTransform:
 
 
 class TestColumnSelection:
-    """Tests for column selection and renaming in silver transform."""
-
     def test_output_has_expected_columns(self) -> None:
-        """Silver output should contain the 16 mapped columns (plus diagnostics)."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
 
         expected_columns = list(_COLUMNS_MAPPING.values())
         schema_cols = [c for c in result.columns if not c.startswith("_")]
         assert schema_cols == expected_columns
 
     def test_output_column_count(self) -> None:
-        """Silver output should have at least 16 schema columns."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         schema_cols = [c for c in result.columns if not c.startswith("_")]
         assert len(schema_cols) == 16
 
     def test_extra_source_columns_raise_drift_error(self) -> None:
-        """Extra source columns should raise SourceSchemaDriftError."""
         lf = (
             _make_bronze_df()
             .with_columns(
@@ -238,13 +202,9 @@ class TestColumnSelection:
 
 
 class TestDateParsing:
-    """Tests for AAAAMMJJHH → datetime conversion."""
-
     def test_date_parsing(self) -> None:
-        """String date "2026022815" should parse to 2026-02-28T15:00:00 UTC."""
         df = _make_bronze_df(aaaammjjhh=["2026022815", "2026010100", "2025123123"])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
 
         result = result.sort("date_heure")
         dates = result["date_heure"].to_list()
@@ -255,10 +215,8 @@ class TestDateParsing:
         assert dates[2].hour == 15
 
     def test_date_midnight(self) -> None:
-        """Hour 00 should parse correctly (no leading zero loss)."""
         df = _make_bronze_df(aaaammjjhh=["2026010100", "2026020100", "2026030100"])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
 
         result = result.sort("date_heure")
         dates = result["date_heure"].to_list()
@@ -266,12 +224,9 @@ class TestDateParsing:
         assert dates[0].day == 1
         assert dates[0].month == 1
 
-    def test_date_column_is_datetime_type(self) -> None:
-        """date_heure should be Datetime type with UTC timezone."""
+    def test_date_column_is_datetime_utc(self) -> None:
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
-
+        result = collect_narrow(transform_silver(df.lazy()))
         assert result["date_heure"].dtype == pl.Datetime("us", "UTC")
 
 
@@ -281,34 +236,24 @@ class TestDateParsing:
 
 
 class TestNarrowingCasts:
-    """Tests for Int16 narrowing casts on integer-valued columns."""
-
     def test_nebulosite_is_int16(self) -> None:
-        """Nébulosité should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert result["nebulosite"].dtype == pl.Int16
 
     def test_direction_vent_is_int16(self) -> None:
-        """Direction du vent should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert result["direction_vent"].dtype == pl.Int16
 
     def test_humidite_is_int16(self) -> None:
-        """Humidité should be narrowed to Int16."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert result["humidite"].dtype == pl.Int16
 
     def test_null_narrowing(self) -> None:
-        """Null values should remain null after narrowing cast."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
 
         # The third station (75114001) has None for all numeric columns
         row = result.filter(pl.col("id_station") == "75114001")
@@ -323,13 +268,10 @@ class TestNarrowingCasts:
 
 
 class TestValuesPassthrough:
-    """Tests that values pass through unchanged (no unit conversion)."""
-
     def test_temperature_preserved(self) -> None:
-        """Temperature 21.5°C should remain 21.5 (no K×10 conversion)."""
+        """No K*10 conversion — values pass through as-is from data.gouv.fr."""
         df = _make_bronze_df(t=[21.5, 9.8, -7.8])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         _inf = float("inf")
         temps = sorted(result["temperature"].to_list(), key=lambda x: x if x is not None else _inf)
         assert temps[0] == pytest.approx(-7.8)
@@ -337,10 +279,8 @@ class TestValuesPassthrough:
         assert temps[2] == pytest.approx(21.5)
 
     def test_wind_preserved(self) -> None:
-        """Wind speed 5.0 m/s should remain 5.0 (no ÷10 conversion)."""
         df = _make_bronze_df(ff=[5.0, 12.0, 0.6])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         _inf = float("inf")
         winds = sorted(result["vitesse_vent"].to_list(), key=lambda x: x if x is not None else _inf)
         assert winds[0] == pytest.approx(0.6)
@@ -348,10 +288,8 @@ class TestValuesPassthrough:
         assert winds[2] == pytest.approx(12.0)
 
     def test_pressure_preserved(self) -> None:
-        """Pressure 1013.25 hPa should remain 1013.25 (no Pa→hPa conversion)."""
         df = _make_bronze_df(pstat=[1013.25, 980.0, 1020.5])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         pressures = sorted(
             result["pression_station"].to_list(),
             key=lambda x: x if x is not None else float("inf"),
@@ -361,10 +299,8 @@ class TestValuesPassthrough:
         assert pressures[2] == pytest.approx(1020.5)
 
     def test_precipitation_preserved(self) -> None:
-        """Precipitation 1.5 mm should remain 1.5 (no ÷10 conversion)."""
         df = _make_bronze_df(rr1=[0.0, 1.5, 12.4])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         precips = sorted(
             result["precipitations"].to_list(),
             key=lambda x: x if x is not None else float("inf"),
@@ -380,20 +316,14 @@ class TestValuesPassthrough:
 
 
 class TestIdStationType:
-    """Tests for id_station type casting."""
-
     def test_id_station_is_string(self) -> None:
-        """id_station should always be string type."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert result["id_station"].dtype == pl.Utf8
 
-    def test_numeric_station_id_preserved(self) -> None:
-        """Station IDs with leading zeros should be preserved as strings."""
+    def test_leading_zeros_preserved(self) -> None:
         df = _make_bronze_df(num_poste=["01014001", "02345002", "03456003"])
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         ids = sorted(result["id_station"].to_list())
         assert ids[0] == "01014001"
         assert ids[1] == "02345002"
@@ -405,13 +335,9 @@ class TestIdStationType:
 
 
 class TestRowCount:
-    """Tests for row count after transform."""
-
     def test_row_count_preserved(self) -> None:
-        """Row count should be preserved (no filtering, no duplicates)."""
         df = _make_bronze_df()
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert len(result) == len(df)
 
 
@@ -421,14 +347,11 @@ class TestRowCount:
 
 
 class TestDeduplication:
-    """Tests that transform_silver no longer deduplicates (dedup is in run_silver)."""
-
     def test_duplicates_preserved_by_transform(self) -> None:
         """transform_silver preserves duplicates (dedup is in run_silver)."""
         df = _make_bronze_df(
             num_poste=["01014001", "01014001", "13055001"],
             aaaammjjhh=["2026022800", "2026022800", "2026022801"],
         )
-        result = transform_silver(df.lazy()).collect()
-        assert isinstance(result, pl.DataFrame)
+        result = collect_narrow(transform_silver(df.lazy()))
         assert len(result) == 3

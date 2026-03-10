@@ -142,7 +142,7 @@ class _DbtResult:
             kwargs["adapter"] = self.adapter_msg
 
         log_fn = logger.error if self.is_error else logger.info
-        log_fn(f"dbt {self.status}", **kwargs)
+        log_fn("dbt result", status=self.status, **kwargs)
 
 
 def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
@@ -269,8 +269,10 @@ def _create_dag(
             outlets=[outlet],
         )
         def dbt_test() -> None:
-            """Execute ``dbt test --select {model}``."""
-            _run_dbt("test", extra_args=["--select", dataset.name])
+            """Execute ``dbt test --select +{model}`` (sources + staging + gold)."""
+            # '+' includes upstream sources + staging tests
+            # (defense-in-depth: dbt re-validates post-load)
+            _run_dbt("test", extra_args=["--select", f"+{dataset.name}"])
 
         # @task transforms return type to XComArg (DependencyMixin) at runtime
         chain(dbt_run(), dbt_test())  # type: ignore  # ty:ignore[unused-type-ignore-comment, unused-ignore-comment]

@@ -22,6 +22,7 @@ from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
 from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
     download_climatologie,
 )
+from data_eng_etl_electricity_meteo.custom_metadata.registry import CUSTOM_METADATA
 
 DATASET_NAME = "meteo_france_climatologie"
 
@@ -56,6 +57,7 @@ def main(
             year_start=year_start,
             year_end=year_end,
         ),
+        custom_metadata=CUSTOM_METADATA.get(DATASET_NAME),
         skip_postgres=skip_postgres,
     )
 

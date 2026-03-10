@@ -5,9 +5,9 @@ description = "Projet personnel d'ingénierie des données (data engineering)."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "dbt-core>=1.11.6",
+    "dbt-core>=1.11.7",
     "dbt-postgres>=1.10.0",
-    "duckdb>=1.4.4",
+    "duckdb>=1.5.0",
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.7",
     "polars>=1.38.1",
@@ -28,11 +28,11 @@ dev = [
     "apache-airflow-task-sdk>=1.1.7",
     "marimo>=0.20.4",
     "pip-audit>=2.10.0",
-    "prek>=0.3.4",
+    "prek>=0.3.5",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.4",
-    "ty>=0.0.20",
+    "ruff>=0.15.5",
+    "ty>=0.0.21",
 ]
 
 

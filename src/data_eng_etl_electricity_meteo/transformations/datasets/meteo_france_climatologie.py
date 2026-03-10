@@ -116,23 +116,30 @@ class SilverSchema(DataFrameModel):
 def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for Météo France climatologie.
 
-    Returns a **LazyFrame** to avoid loading the full merged parquet (~760 MB) into
+    Returns a **LazyFrame** to avoid loading the full merged Parquet (~760 MB) into
     memory at once. The caller (``to_bronze``) uses ``sink_parquet`` so the Polars
     streaming engine processes data in chunks.
 
-    Reads the 16 columns from the merged parquet and casts numeric columns to Float64.
+    Reads the 16 columns from the merged Parquet and casts numeric columns to Float64.
     Known sentinel strings (``""``, ``"mq"``) are replaced with null before casting.
     Uses ``strict=True`` so that any unexpected non-numeric value raises an error.
 
     Parameters
     ----------
     landing_path
-        Path to the merged parquet file in the landing layer.
+        Path to the merged Parquet file in the landing layer.
 
     Returns
     -------
     pl.LazyFrame
         LazyFrame with 16 typed columns ready for the bronze layer.
+
+    Raises
+    ------
+    polars.exceptions.PolarsError
+        On any Polars read or cast failure (corrupt file, unexpected values).
+    OSError
+        If *landing_path* does not exist or is not readable.
     """
     columns = list(_BRONZE_COLUMNS.keys())
     logger.debug(

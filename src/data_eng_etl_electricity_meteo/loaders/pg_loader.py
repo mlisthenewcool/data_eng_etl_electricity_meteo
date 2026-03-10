@@ -114,11 +114,12 @@ def load_silver_to_postgres(  # noqa: PLR0912
     Returns
     -------
     LoadPostgresMetrics
+        Table, mode, and row-count metrics from the load.
 
     Raises
     ------
     PostgresLoadError
-        On any load failure: missing DDL/upsert file, unreadable parquet, or any
+        On any load failure: missing DDL/upsert file, unreadable Parquet, or any
         ``psycopg`` database error.
     """
     mode = dataset.ingestion.mode
@@ -523,6 +524,7 @@ def run_standalone_postgres_load(dataset: RemoteDatasetConfig) -> LoadPostgresMe
     Returns
     -------
     LoadPostgresMetrics
+        Table, mode, and row-count metrics from the load.
 
     Raises
     ------

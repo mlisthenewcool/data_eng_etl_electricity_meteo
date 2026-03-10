@@ -1,5 +1,7 @@
 """Unit tests for shared transformation utilities (diagnostics, guard)."""
 
+from unittest.mock import patch
+
 import polars as pl
 import pytest
 
@@ -9,6 +11,8 @@ from data_eng_etl_electricity_meteo.transformations.shared import (
     extract_diagnostics,
     prepare_silver,
 )
+
+_LOGGER_PATH = "data_eng_etl_electricity_meteo.transformations.shared.logger"
 
 # --------------------------------------------------------------------------------------
 # extract_diagnostics
@@ -27,25 +31,31 @@ class TestExtractDiagnostics:
         result = extract_diagnostics(df)
         assert result.columns == ["a"]
 
-    def test_nonzero_warn_does_not_crash(self) -> None:
+    def test_nonzero_warn_logs_warning(self) -> None:
         df = pl.DataFrame({"a": [1], "_warn_cast_nulls_x": [3]})
-        result = extract_diagnostics(df)
-        assert result.columns == ["a"]
+        with patch(_LOGGER_PATH) as mock_logger:
+            extract_diagnostics(df)
+        mock_logger.warning.assert_called_once_with(
+            "Data quality issue", metric="cast_nulls_x", count=3
+        )
 
-    def test_zero_warn_does_not_crash(self) -> None:
+    def test_zero_warn_does_not_log(self) -> None:
         df = pl.DataFrame({"a": [1], "_warn_cast_nulls_x": [0]})
-        result = extract_diagnostics(df)
-        assert result.columns == ["a"]
+        with patch(_LOGGER_PATH) as mock_logger:
+            extract_diagnostics(df)
+        mock_logger.warning.assert_not_called()
 
-    def test_nonzero_diag_does_not_crash(self) -> None:
+    def test_nonzero_diag_logs_info(self) -> None:
         df = pl.DataFrame({"a": [1], "_diag_duplicate_rows_removed": [42]})
-        result = extract_diagnostics(df)
-        assert result.columns == ["a"]
+        with patch(_LOGGER_PATH) as mock_logger:
+            extract_diagnostics(df)
+        mock_logger.info.assert_called_once_with("Silver diagnostics", duplicate_rows_removed=42)
 
-    def test_zero_diag_does_not_crash(self) -> None:
+    def test_zero_diag_does_not_log(self) -> None:
         df = pl.DataFrame({"a": [1], "_diag_duplicate_rows_removed": [0]})
-        result = extract_diagnostics(df)
-        assert result.columns == ["a"]
+        with patch(_LOGGER_PATH) as mock_logger:
+            extract_diagnostics(df)
+        mock_logger.info.assert_not_called()
 
     def test_returns_data_unchanged(self) -> None:
         df = pl.DataFrame({"a": [1, 2], "b": ["x", "y"], "_diag_foo": [10, 10]})
@@ -62,8 +72,11 @@ class TestExtractDiagnostics:
                 "_diag_z": [10],
             }
         )
-        result = extract_diagnostics(df)
+        with patch(_LOGGER_PATH) as mock_logger:
+            result = extract_diagnostics(df)
         assert result.columns == ["a"]
+        mock_logger.warning.assert_called_once_with("Data quality issue", metric="x", count=5)
+        mock_logger.info.assert_called_once_with("Silver diagnostics", z=10)
 
 
 # --------------------------------------------------------------------------------------

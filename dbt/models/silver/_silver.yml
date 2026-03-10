@@ -1,21 +1,22 @@
+# Staging model tests — cross-dataset and staging-specific only.
+# Primary key tests (unique + not_null) live in _sources.yml (defense-in-depth).
+# Source of truth for all column constraints: Python DataFrameModel (pre-write).
+
 version: 2
 
 models:
   - name: stg_dim_installations
     description: "Vue staging des installations de production (colonnes utiles pour la couche gold)."
     columns:
-      - name: code_eic_resource_object
-        description: "Identifiant unique de l'installation (code EIC ou clé synthétique pour les agrégations)."
-        tests:
-          - unique
-          - not_null
       - name: code_iris
-        description: "Code IRIS rattaché à l'installation (jointure vers contours IRIS)."
+        description: "Code IRIS (jointure vers contours IRIS, métropole uniquement)."
         tests:
           - relationships:
-              arguments:
-                to: ref('stg_dim_contours_iris')
-                field: code_iris
+              to: ref('stg_dim_contours_iris')
+              field: code_iris
+              config:
+                severity: warn
+                error_if: ">5000"
       - name: type_energie
         description: "Type d'énergie produite (solaire, eolien, hydraulique, ...)."
         tests:
@@ -26,9 +27,6 @@ models:
     columns:
       - name: station_id
         description: "Identifiant unique de la station (renommé depuis 'id')."
-        tests:
-          - unique
-          - not_null
       - name: geog
         description: "Point geography PostGIS WGS84 pour les requêtes spatiales KNN."
 
@@ -37,6 +35,3 @@ models:
     columns:
       - name: code_iris
         description: "Code IRIS unique (clé IGN)."
-        tests:
-          - unique
-          - not_null

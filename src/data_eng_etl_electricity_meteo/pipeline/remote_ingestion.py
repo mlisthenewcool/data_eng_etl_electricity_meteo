@@ -202,8 +202,9 @@ class RemoteIngestionPipeline:
         Without ``_custom_metadata``, delegates directly to the custom callable.
         For standard downloads, performs HEAD check + smart-skip + single-URL download.
 
-        Returns ``None`` if ingestion was skipped (unchanged remote or identical
-        content hash), otherwise the initial pipeline context.
+        Returns ``None`` if ingestion was skipped
+        (unchanged remote or identical content hash), otherwise the initial pipeline
+        context.
 
         Parameters
         ----------
@@ -258,12 +259,13 @@ class RemoteIngestionPipeline:
         DownloadStageError
             If the custom download callable fails.
         """
-        assert self._custom_download is not None  # type narrowing: guarded by download() dispatch
+        # Type narrowing: guarded by download() dispatch.
+        assert self._custom_download is not None
 
         t0 = time.monotonic()
         logger.info("Starting custom download", version=version)
 
-        # -- 1. Smart-skip: remote metadata comparison ---------------------
+        # -- 1. Smart-skip: remote metadata comparison ---------------------------------
 
         remote_metadata = RemoteFileMetadata()
         ingestion_decision: IngestionDecision | None = None
@@ -285,7 +287,7 @@ class RemoteIngestionPipeline:
                 if not ingestion_decision.should_ingest:
                     return None
 
-        # -- 2. Custom download --------------------------------------------
+        # -- 2. Custom download --------------------------------------------------------
 
         progress: BatchProgressFactory | None = (
             AirflowBatchProgress if settings.is_running_on_airflow else None
@@ -308,7 +310,7 @@ class RemoteIngestionPipeline:
             duration_s=round(time.monotonic() - t0, 2),
         )
 
-        # -- 3. Build context and smart-skip on content hash ---------------
+        # -- 3. Build context and smart-skip on content hash ---------------------------
 
         context = PipelineContext(
             version=version,
@@ -595,7 +597,7 @@ class RemoteIngestionPipeline:
         # TransformNotFoundError propagates directly
         # (programming error, fast-fail by __post_init__)
 
-        # -- Apply transform and write parquet -----------------------------------------
+        # -- Apply transform and write Parquet -----------------------------------------
 
         spec = get_transform_spec(self.dataset.name)
 

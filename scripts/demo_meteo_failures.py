@@ -60,8 +60,8 @@ def main() -> None:
                 result = meteo_download.download_climatologie(Path(tmpdir))
                 print(f"\nMerged file: {result}")
                 print(f"Size: {result.stat().st_size / 1024**2:.1f} MiB")
-            except meteo_download.DownloadStageError as e:
-                print(f"\nPipeline error: {e}")
+            except (ValueError, OSError) as e:
+                print(f"\nDownload error: {e}")
 
 
 if __name__ == "__main__":

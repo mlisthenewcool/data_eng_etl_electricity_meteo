@@ -839,9 +839,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dbt-core", specifier = ">=1.11.6" },
+    { name = "dbt-core", specifier = ">=1.11.7" },
     { name = "dbt-postgres", specifier = ">=1.10.0" },
-    { name = "duckdb", specifier = ">=1.4.4" },
+    { name = "duckdb", specifier = ">=1.5.0" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.28.1" },
     { name = "orjson", specifier = ">=3.11.7" },
     { name = "polars", specifier = ">=1.38.1" },
@@ -862,11 +862,11 @@ dev = [
     { name = "apache-airflow-task-sdk", specifier = ">=1.1.7" },
     { name = "marimo", specifier = ">=0.20.4" },
     { name = "pip-audit", specifier = ">=2.10.0" },
-    { name = "prek", specifier = ">=0.3.4" },
+    { name = "prek", specifier = ">=0.3.5" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.15.4" },
-    { name = "ty", specifier = ">=0.0.20" },
+    { name = "ruff", specifier = ">=0.15.5" },
+    { name = "ty", specifier = ">=0.0.21" },
 ]
 
 [[package]]
@@ -1896,11 +1896,11 @@ wheels = [
 
 [[package]]
 name = "narwhals"
-version = "2.17.0"
+version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/75/59/81d0f4cad21484083466f278e6b392addd9f4205b48d45b5c8771670ebf8/narwhals-2.17.0.tar.gz", hash = "sha256:ebd5bc95bcfa2f8e89a8ac09e2765a63055162837208e67b42d6eeb6651d5e67", size = 620306, upload-time = "2026-02-23T09:44:34.142Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/b4/02a8add181b8d2cd5da3b667cd102ae536e8c9572ab1a130816d70a89edb/narwhals-2.18.0.tar.gz", hash = "sha256:1de5cee338bc17c338c6278df2c38c0dd4290499fcf70d75e0a51d5f22a6e960", size = 620222, upload-time = "2026-03-10T15:51:27.14Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/27/20770bd6bf8fbe1e16f848ba21da9df061f38d2e6483952c29d2bb5d1d8b/narwhals-2.17.0-py3-none-any.whl", hash = "sha256:2ac5307b7c2b275a7d66eeda906b8605e3d7a760951e188dcfff86e8ebe083dd", size = 444897, upload-time = "2026-02-23T09:44:32.006Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/75/0b4a10da17a44cf13567d08a9c7632a285297e46253263f1ae119129d10a/narwhals-2.18.0-py3-none-any.whl", hash = "sha256:68378155ee706ac9c5b25868ef62ecddd62947b6df7801a0a156bc0a615d2d0d", size = 444865, upload-time = "2026-03-10T15:51:24.085Z" },
 ]
 
 [[package]]

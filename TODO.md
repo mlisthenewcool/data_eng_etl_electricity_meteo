@@ -11,7 +11,11 @@
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
   météo à requêter (meilleure station à moins de 20 km par exemple) et créer le nouveau
   dataset correspondant qui permettra de requêter l'API de Météo France
-- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques
+- [ ] [Pipeline] Évaluer la cohérence entre les contrôles de qualité de données pour la
+  couche silver manipulée par plusieurs outils : Polars, Postgres et dbt. Reprendre
+  l'architecture si nécessaire et simplifier pour avoir une seule source de référence
+- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
+  déjà créés
 
 ## Ensuite
 

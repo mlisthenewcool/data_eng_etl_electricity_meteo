@@ -66,6 +66,16 @@ def shorten_url(url: str) -> str:
 
     Skips generic path segments (``exports``, ``parquet``, …) to surface the most
     informative part of the URL.
+
+    Parameters
+    ----------
+    url
+        Full URL to shorten.
+
+    Returns
+    -------
+    str
+        Shortened URL with hostname and most informative path segment.
     """
     parsed = urlparse(url)
     parts = [p for p in PurePosixPath(unquote(parsed.path)).parts if p != "/"]
