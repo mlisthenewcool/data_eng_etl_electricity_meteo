@@ -25,10 +25,7 @@
 - [ ] [Données] Intégrer les appels aux API Météo France (phases 2/3 décrites dans
   [integration_meteo_france.md](docs/integration_meteo_france.md))
 - [ ] [Docs] Documenter pourquoi et comment le silver est maintenu à l'identique entre
-  Postgres et le stockage local
-- [ ] [Docs] Rédiger la documentation minimale du projet V1 (présentation, données,
-  architecture, outils) —
-  [exemple](https://github.com/abeltavares/batch-data-pipeline)
+  Postgres et le stockage Parquet local
 - [ ] [Pipeline] Ajouter un smart skip pour les transformations silver -> gold :
   exécution uniquement si les données ont réellement changé (dans le cas d'un run manuel
   sous Airflow ou une exécution en cli). Suivre la même logique que celle existante.
@@ -107,6 +104,8 @@
 
 ## Terminé
 
+- [x] [Docs] _(2026-03-10)_ Rédiger la documentation minimale du projet V1
+  (présentation, données, architecture, outils) : `README.md` + licence MIT
 - [x] [Pipeline] _(2026-03-09)_ Correction OOM `unique()` silver : dedup conditionnel
   via guard `is_duplicated().any()` dans `run_silver()`, `primary_key` dans
   `DatasetTransformSpec`, suppression de `deduplicate_on_composite_key()`.
