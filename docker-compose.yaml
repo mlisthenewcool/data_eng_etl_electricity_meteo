@@ -87,7 +87,10 @@ services:
       # AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
 
       # -- Airflow internal database ---------------------------------------------------
-      # printf "%s" avoids interpreting % in secrets as format specifiers
+      # printf "%s" avoids interpreting % in secrets as format specifiers.
+      # $$ escapes $ for Compose: passes a literal $ to the container shell,
+      # so $$(cat ...) and $${VAR} are evaluated at runtime, not at parse-time.
+      # All variables used here must be declared above in this environment: block.
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$$(cat /run/secrets/postgres_root_username):$$(cat /run/secrets/postgres_root_password)@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${AIRFLOW_DB_NAME}\"'"
 
       # -- Authentication & API --------------------------------------------------------

@@ -26,15 +26,10 @@ dependencies = [
     "typer>=0.24.1",
 ]
 
-[project.scripts]
-pipeline = "data_eng_etl_electricity_meteo.cli.run_pipeline:app"
-pipeline-meteo-clim = "data_eng_etl_electricity_meteo.cli.run_pipeline_meteo_france_climatologie:app"
-run-dbt = "data_eng_etl_electricity_meteo.cli.run_dbt:app"
-
 [dependency-groups]
 dev = [
     "apache-airflow-providers-postgres>=6.6.0",
-    "apache-airflow-task-sdk>=1.1.7",
+    "apache-airflow-task-sdk>=1.1.8",
     "marimo>=0.20.4",
     "pip-audit>=2.10.0",
     "prek>=0.3.5",
@@ -44,6 +39,10 @@ dev = [
     "ty>=0.0.21",
 ]
 
+[project.scripts]
+pipeline = "data_eng_etl_electricity_meteo.cli.run_pipeline:app"
+pipeline-meteo-clim = "data_eng_etl_electricity_meteo.cli.run_pipeline_meteo_france_climatologie:app"
+run-dbt = "data_eng_etl_electricity_meteo.cli.run_dbt:app"
 
 [tool.ruff]
 line-length = 100

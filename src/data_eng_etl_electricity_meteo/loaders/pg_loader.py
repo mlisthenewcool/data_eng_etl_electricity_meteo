@@ -158,17 +158,6 @@ def load_silver_to_postgres(  # noqa: PLR0912
         columns_count=len(df.columns),
     )
 
-    # -- Early exit for incremental with empty delta -----------------------------------
-
-    if mode == IngestionMode.INCREMENTAL and len(df) == 0:
-        logger.info("Postgres load skipped: no new or changed rows")
-        return LoadPostgresMetrics(
-            table=qualified_table,
-            mode=mode,
-            rows_loaded=0,
-            diff=diff,
-        )
-
     # -- DDL, schema validation, and load (single transaction) -------------------------
 
     try:
