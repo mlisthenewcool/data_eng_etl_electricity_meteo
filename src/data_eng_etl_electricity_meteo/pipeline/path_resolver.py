@@ -33,7 +33,7 @@ class _BasePathResolver:
         ValueError
             If ``dataset_name`` is empty or whitespace-only.
         """
-        if not self.dataset_name or not self.dataset_name.strip():
+        if not self.dataset_name.strip():
             raise ValueError("dataset_name must be a non-empty string")
 
 
@@ -87,8 +87,7 @@ class RemotePathResolver(_BasePathResolver):
         if not latest_link.exists() or not latest_link.is_symlink():
             return None
 
-        # Resolve symlink to get target filename
-        # .stem: extract version from filename (remove .parquet)
+        # Bronze filenames are "{version}.parquet", so .stem recovers the version.
         return latest_link.readlink().stem
 
     def list_bronze_versions(self) -> list[Path]:
@@ -104,7 +103,7 @@ class RemotePathResolver(_BasePathResolver):
         if not self._bronze_dir.exists():
             return []
 
-        # Exclude symlink and only include regular files
+        # latest.parquet is a symlink and must not appear in version listings
         versions: list[Path] = [
             path
             for path in self._bronze_dir.glob("*.parquet")

@@ -19,7 +19,7 @@ datasets:
 
   odre_installations:
     description: "Registre national des installations de production et stockage d'électricité"
-    primary_key: "id_peps"
+    primary_key: "code_eic_resource_object"
     source:
       provider: "ODRE"
       url: "https://object.files.data.gouv.fr/hydra-parquet/hydra-parquet/c14e5a7d-2ca6-4ad8-bc61-93889d13fc25.parquet"

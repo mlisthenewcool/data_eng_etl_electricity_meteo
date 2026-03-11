@@ -143,26 +143,6 @@ class SourceSchemaDriftError(BaseProjectException):
 
 
 # --------------------------------------------------------------------------------------
-# Airflow context errors
-# --------------------------------------------------------------------------------------
-
-
-class AirflowContextError(BaseProjectException):
-    """Raised when an operation requires a specific Airflow context."""
-
-    def __init__(
-        self,
-        operation: str,
-        expected_context: str,
-        suggestion: str,
-    ) -> None:
-        self.operation = operation
-        self.expected_context = expected_context
-        self.suggestion = suggestion
-        super().__init__("Invalid Airflow context.")
-
-
-# --------------------------------------------------------------------------------------
 # Transformation errors
 # --------------------------------------------------------------------------------------
 
@@ -279,7 +259,7 @@ class PostgresLoadError(PipelineStageError):
 
 
 class PostgresCredentialsError(PostgresLoadError):
-    """Raised when Postgres credentials are missing from env vars and Docker secrets."""
+    """Raised when Postgres credentials are missing from Docker secrets files."""
 
     def __init__(self, missing_field: str, suggestion: str) -> None:
         super().__init__(
@@ -481,8 +461,8 @@ if __name__ == "__main__":
     _section("PostgresCredentialsError  with context via to_dict")
     try:
         raise PostgresCredentialsError(
-            missing_field="POSTGRES_PASSWORD",
-            suggestion="Set POSTGRES_PASSWORD or mount Docker secret",
+            missing_field="postgres_password",
+            suggestion="Create secrets/postgres_root_password file.",
         )
     except PostgresCredentialsError as error:
         error.log(_logger.critical)

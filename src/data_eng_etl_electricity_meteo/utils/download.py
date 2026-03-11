@@ -35,7 +35,7 @@ _READ_TIMEOUT = 30
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HttpDownloadInfo:
     """Downloaded file information (path, hash, size)."""
 
@@ -61,11 +61,21 @@ _GENERIC_PATH_SEGMENTS = frozenset(
 )
 
 
-def _short_url(url: str) -> str:
+def shorten_url(url: str) -> str:
     """Shorten a URL to ``hostname/…/meaningful_segment`` for log readability.
 
     Skips generic path segments (``exports``, ``parquet``, …) to surface the most
     informative part of the URL.
+
+    Parameters
+    ----------
+    url
+        Full URL to shorten.
+
+    Returns
+    -------
+    str
+        Shortened URL with hostname and most informative path segment.
     """
     parsed = urlparse(url)
     parts = [p for p in PurePosixPath(unquote(parsed.path)).parts if p != "/"]
@@ -170,7 +180,6 @@ def download_to_file(
     OSError
         If the destination file cannot be written.
     """
-    logger.info("Starting download", url=_short_url(url))
     logger.debug("Download URL", url=url, dest_dir=dest_dir)
 
     timeout = httpx.Timeout(
@@ -197,28 +206,28 @@ def download_to_file(
             dest_path = dest_dir / filename
 
             if dest_path.exists():
-                logger.warning("File already exists, overwriting", url=_short_url(url))
+                logger.warning("File already exists, overwriting", url=shorten_url(url))
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             downloaded_bytes = 0
-            try:
-                content_length = int(response.headers.get("content-length", 0))
-            except ValueError:
-                logger.warning(
-                    "Invalid Content-Length header",
-                    header=response.headers.get("content-length"),
-                )
-                content_length = 0
+
+            content_length: int | None = None
+            raw_cl = response.headers.get("content-length")
+            if raw_cl is not None:
+                try:
+                    content_length = int(raw_cl)
+                except ValueError:
+                    logger.warning("Invalid Content-Length header", header=raw_cl)
 
             # -- Initialize progress reporter and stream -------------------------------
 
             hasher = FileHasher()
 
             reporter: DownloadProgressReporter = (
-                progress(content_length)
+                progress(content_length or 0)
                 if progress is not None
                 else tqdm(
-                    total=content_length,
+                    total=content_length or 0,
                     unit="iB",
                     unit_scale=True,
                     unit_divisor=1024,
@@ -244,6 +253,6 @@ def download_to_file(
 
             size_mib = round(downloaded_bytes / (1024 * 1024), 2)
 
-            logger.info("Download completed", filename=filename, file_size_mib=size_mib)
+            logger.debug("Download completed", filename=filename)
 
-            return HttpDownloadInfo(dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)
+            return HttpDownloadInfo(path=dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)

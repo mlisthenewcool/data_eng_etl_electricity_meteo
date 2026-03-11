@@ -135,7 +135,7 @@ class DataFrameModelMeta(type):
                 msg = f"No Polars dtype mapping for {python_type!r} on '{field_name}'"
                 raise TypeError(msg)
             col_name = col_meta.name or field_name
-            columns[col_name] = _ResolvedColumn(col_name, dtype=dtype, constraints=col_meta)
+            columns[col_name] = _ResolvedColumn(name=col_name, dtype=dtype, constraints=col_meta)
 
         cls.__columns__ = columns
         return cls

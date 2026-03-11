@@ -46,12 +46,14 @@ def _rotate(
         If the copy fails (permission error, disk full, etc.).
     """
     if current_path.exists():
-        previous_mtime = datetime.fromtimestamp(current_path.stat().st_mtime, tz=UTC).strftime(
-            "%Y-%m-%dT%H"
-        )
+        mtime_utc = datetime.fromtimestamp(current_path.stat().st_mtime, tz=UTC)
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current_path, backup_path)
-        logger.debug("Rotated files", layer=layer, previous_mtime=previous_mtime)
+        logger.debug(
+            "Rotated files",
+            layer=layer,
+            previous_mtime=mtime_utc.strftime("%Y-%m-%dT%H"),
+        )
     else:
         logger.warning(
             "Skipped rotation: no current file (expected on first run)",

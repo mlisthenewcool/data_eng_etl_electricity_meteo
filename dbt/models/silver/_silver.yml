@@ -1,42 +1,48 @@
+# $schema: https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest/dbt_yml_files-latest.json
+# Staging model tests — cross-dataset and staging-specific only.
+# Primary key tests (unique + not_null) live in _sources.yml (defense-in-depth).
+# Source of truth for all column constraints: Python DataFrameModel (pre-write).
+
 version: 2
 
 models:
   - name: stg_dim_installations
     description: "Vue staging des installations de production (colonnes utiles pour la couche gold)."
     columns:
-      - name: id_peps
-        description: "Identifiant unique de l'installation (clé ODRE)."
-        tests:
-          - unique
-          - not_null
       - name: code_iris
-        description: "Code IRIS rattaché à l'installation (jointure vers contours IRIS)."
+        description: "Code IRIS (jointure vers contours IRIS, métropole uniquement)."
         tests:
           - relationships:
               arguments:
                 to: ref('stg_dim_contours_iris')
                 field: code_iris
+              config:
+                severity: warn
+                error_if: ">5000"
       - name: type_energie
         description: "Type d'énergie produite (solaire, eolien, hydraulique, ...)."
         tests:
           - not_null
 
   - name: stg_dim_stations_meteo
-    description: "Vue staging des stations météo avec point geography PostGIS."
+    description: >
+      Table staging des stations météo. Matérialisée (pas une vue) car elle
+      construit la colonne geography depuis lat/lon bruts, et le gold KNN
+      (ORDER BY <->) nécessite un index GiST sur geog.
     columns:
       - name: station_id
         description: "Identifiant unique de la station (renommé depuis 'id')."
-        tests:
-          - unique
-          - not_null
       - name: geog
-        description: "Point geography PostGIS WGS84 pour les requêtes spatiales KNN."
+        description: "Point geography PostGIS WGS84 pour les requêtes spatiales KNN, indexé GiST."
 
   - name: stg_dim_contours_iris
-    description: "Vue staging des contours IRIS (centroïdes uniquement, sans géométrie WKB)."
+    description: >
+      Table staging des contours IRIS. Matérialisée (pas une vue) car elle
+      convertit geometrie (BYTEA brut chargé par le pipeline Python) en geometry
+      PostGIS exploitable. Polars n'a pas de type geometry, donc la conversion
+      BYTEA → PostGIS est déférée à ce modèle dbt (premier accès à PostGIS).
     columns:
       - name: code_iris
         description: "Code IRIS unique (clé IGN)."
-        tests:
-          - unique
-          - not_null
+      - name: geom
+        description: "Polygone IRIS en geometry PostGIS Lambert 93 (EPSG:2154), indexé GiST."

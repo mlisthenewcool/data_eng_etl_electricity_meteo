@@ -1,12 +1,5 @@
-{{
-    config(
-        materialized='view',
-        schema='silver'
-    )
-}}
-
 SELECT
-    id_peps,
+    code_eic_resource_object,
     nom_installation,
     code_iris,
     code_departement,

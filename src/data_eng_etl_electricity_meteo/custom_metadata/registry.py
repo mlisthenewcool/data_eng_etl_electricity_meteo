@@ -1,7 +1,9 @@
 """Registry of custom metadata strategies.
 
-Datasets whose HTTP HEAD returns no caching headers register a fallback metadata fetcher
-here. Imported by both the Airflow DAG factory and standalone CLI scripts.
+Maps dataset names to alternative metadata fetchers for smart-skip change detection.
+Used as a fallback when HTTP HEAD returns no caching headers (OpenDataSoft) or as the
+primary metadata source for custom downloads (Météo France climatologie).
+Imported by both the Airflow DAG factory and standalone CLI scripts.
 """
 
 from functools import partial

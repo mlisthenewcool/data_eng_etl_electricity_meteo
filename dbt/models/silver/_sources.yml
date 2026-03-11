@@ -1,3 +1,9 @@
+# $schema: https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest/dbt_yml_files-latest.json
+# Defense-in-depth: column constraints on raw source tables.
+# Source of truth for constraints: Python DataFrameModel (validates pre-write).
+# These dbt tests are a post-load safety net in Postgres.
+# Synchronization enforced by tests/test_dbt_consistency.py.
+
 version: 2
 
 sources:
@@ -7,9 +13,12 @@ sources:
       - name: dim_installations
         description: "Installations de production d'électricité (source ODRE)."
         columns:
-          - name: id_peps
+          - name: code_eic_resource_object
             tests:
               - unique
+              - not_null
+          - name: type_energie
+            tests:
               - not_null
 
       - name: dim_stations_meteo
@@ -19,6 +28,12 @@ sources:
             tests:
               - unique
               - not_null
+          - name: latitude
+            tests:
+              - not_null
+          - name: longitude
+            tests:
+              - not_null
 
       - name: dim_contours_iris
         description: "Contours IRIS IGN avec centroïdes WGS84."
@@ -26,4 +41,61 @@ sources:
           - name: code_iris
             tests:
               - unique
+              - not_null
+          - name: geometrie
+            tests:
+              - not_null
+          - name: centroid_lat
+            tests:
+              - not_null
+          - name: centroid_lon
+            tests:
+              - not_null
+          - name: type_iris
+            tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ["H", "A", "D", "Z"]
+
+      - name: fact_eco2mix_cons_def
+        description: "Production électrique régionale eco2mix (consolidées et définitives)."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['code_insee_region', 'date_heure']
+        columns:
+          - name: code_insee_region
+            tests:
+              - not_null
+          - name: date_heure
+            tests:
+              - not_null
+
+      - name: fact_eco2mix_tr
+        description: "Production électrique régionale eco2mix (temps réel)."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['code_insee_region', 'date_heure']
+        columns:
+          - name: code_insee_region
+            tests:
+              - not_null
+          - name: date_heure
+            tests:
+              - not_null
+
+      - name: fact_meteo_horaire
+        description: "Données climatologiques horaires Météo France."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['id_station', 'date_heure']
+        columns:
+          - name: id_station
+            tests:
+              - not_null
+          - name: date_heure
+            tests:
               - not_null

@@ -49,7 +49,7 @@ files = '\.(py|yaml|json)$' # run the hook only if any .(py|yaml|json) changed
 [[repos.hooks]]
 id = "dbt-parse"
 name = "dbt-parse"
-entry = "scripts/dbt.sh parse"
+entry = "uv run run-dbt parse"
 language = "system"
 pass_filenames = false
 files = '^dbt/'

@@ -15,14 +15,14 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 
 logger = get_logger("transform")
 
-# Column that contains non-numeric annotations in the consolidated source API.
-# Cast to Int64 (BIGINT) in silver; non-castable values become null.
-_NUMERIC_TEXT_COLUMNS: frozenset[str] = frozenset({"eolien"})
-
 
 # --------------------------------------------------------------------------------------
 # Silver schema
 # --------------------------------------------------------------------------------------
+
+# Column that contains non-numeric annotations in the consolidated source API.
+# Cast to Int64 (BIGINT) in silver; non-castable values become null.
+_NUMERIC_TEXT_COLUMNS: frozenset[str] = frozenset({"eolien"})
 
 
 _ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(
@@ -140,8 +140,8 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
 def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for ODRE eco2mix_cons_def.
 
-    Delegates to the shared eco2mix pipeline: cast non-numeric text → deduplicate on
-    ``(code_insee_region, date_heure)`` → normalize to naive UTC µs → validate.
+    Delegates to the shared eco2mix pipeline: cast non-numeric text → normalize to naive
+    UTC µs.
 
     Parameters
     ----------
@@ -151,12 +151,11 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     Returns
     -------
     pl.LazyFrame
-        Deduplicated LazyFrame ready for the silver layer.
+        LazyFrame ready for the silver layer.
     """
     return transform_eco2mix_silver(
         lf,
         numeric_text_columns=_NUMERIC_TEXT_COLUMNS,
-        schema=SilverSchema,
     )
 
 
@@ -166,9 +165,10 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "odre_eco2mix_cons_def",
+    name="odre_eco2mix_cons_def",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
+    primary_key=("code_insee_region", "date_heure"),
     all_source_columns=_ALL_SOURCE_COLUMNS,
     used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,

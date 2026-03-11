@@ -28,7 +28,7 @@ logger = get_logger("extraction")
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExtractedFileInfo:
     """Extracted file metadata (path, hash, size) returned by ``extract_7z``."""
 
@@ -67,7 +67,7 @@ def _validate_sqlite_header(path: Path) -> None:
             if header != b"SQLite format 3\x00":
                 raise FileIntegrityError(path, reason="Invalid SQLite/GeoPackage header")
     except OSError as error:
-        raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from error
+        raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from None
 
 
 # --------------------------------------------------------------------------------------
@@ -119,31 +119,24 @@ def extract_7z(
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
 
-    logger.info("Starting extraction", archive=archive_path.name, target=target_filename)
-
     with tempfile.TemporaryDirectory(prefix="7z_extract_") as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
 
         # -- Open archive and locate target file ---------------------------------------
 
         with py7zr.SevenZipFile(archive_path, mode="r") as archive:
-            all_files = archive.getnames()
-
             # Flexible search: IGN archives have inconsistent internal structures
             # e.g., "CONTOURS-IRIS_3-0/iris.gpkg" when we search for "iris.gpkg"
-            try:
-                target_internal_path = next(f for f in all_files if f.endswith(target_filename))
-            except StopIteration:
-                raise FileNotFoundInArchiveError(target_filename, archive_path) from None
-
-            logger.debug("Found target in archive", target_path=target_internal_path)
-
-            # -- Get uncompressed size for progress ------------------------------------
-
             target_info = next(
-                info for info in archive.list() if info.filename == target_internal_path
+                (info for info in archive.list() if info.filename.endswith(target_filename)),
+                None,
             )
+            if target_info is None:
+                raise FileNotFoundInArchiveError(target_filename, archive_path=archive_path)
+
+            target_internal_path = target_info.filename
             uncompressed_size = target_info.uncompressed
+            logger.debug("Found target in archive", target_path=target_internal_path)
 
             # -- Extract with progress tracking ----------------------------------------
 
@@ -197,6 +190,4 @@ def extract_7z(
             file_hash = FileHasher.hash_file(dest_path)
             size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            logger.info("Extraction completed", target=target_filename, file_size_mib=size_mib)
-
-            return ExtractedFileInfo(dest_path, file_hash=file_hash, size_mib=size_mib)
+            return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

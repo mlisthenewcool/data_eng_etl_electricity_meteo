@@ -7,9 +7,10 @@ Airflow-agnostic.
 Two factories are provided:
 
 - ``open_standalone_connection()`` — for scripts and tests.
-  Reads credentials from pydantic-settings (env vars or Docker secrets).
-- ``open_airflow_hook_connection()`` — for Airflow tasks.
-  Extracts a ``psycopg.Connection`` from a ``PostgresHook``.
+  Reads credentials from pydantic-settings (Docker secrets files).
+- ``open_airflow_connection()`` — for Airflow tasks.
+  Creates a ``PostgresHook`` from ``AIRFLOW_CONN_ID`` and extracts a
+  ``psycopg.Connection``.
 
 Both return a ``psycopg.Connection`` — callers are responsible for closing it.
 
@@ -21,25 +22,24 @@ Hook methods are stateless per call and do not share a transaction.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import psycopg
-
-if TYPE_CHECKING:
-    from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     PostgresCredentialsError,
 )
 from data_eng_etl_electricity_meteo.core.settings import settings
 
+# Airflow connection id for the project Postgres database.
+# Must match the env var AIRFLOW_CONN_{ID.upper()} in docker-compose.yaml.
+AIRFLOW_CONN_ID = "project_postgres"
+
 
 def open_standalone_connection() -> psycopg.Connection:
     """Open a psycopg connection using settings resolved at startup.
 
     Credentials (``settings.postgres_user`` / ``settings.postgres_password``) are
-    populated by pydantic-settings from whichever source was available: env vars
-    (local dev) or Docker secrets files (Docker / Airflow container).
+    populated by pydantic-settings from Docker secrets files in the ``secrets/``
+    directory (local dev) or ``/run/secrets/`` (Docker container).
     The loader code is identical in both environments.
 
     Returns
@@ -50,23 +50,19 @@ def open_standalone_connection() -> psycopg.Connection:
     Raises
     ------
     PostgresCredentialsError
-        If credentials are missing from both env vars and Docker secrets.
+        If credentials are missing from Docker secrets files.
     psycopg.OperationalError
         If the connection cannot be established.
     """
     if settings.postgres_user is None:
         raise PostgresCredentialsError(
             missing_field="postgres_user",
-            suggestion=(
-                "Set POSTGRES_USER env var or provide a 'postgres_root_username' Docker secret."
-            ),
+            suggestion="Create secrets/postgres_root_username file.",
         )
     if settings.postgres_password is None:
         raise PostgresCredentialsError(
             missing_field="postgres_password",
-            suggestion=(
-                "Set POSTGRES_PASSWORD env var or provide a 'postgres_root_password' Docker secret."
-            ),
+            suggestion="Create secrets/postgres_root_password file.",
         )
 
     return psycopg.connect(
@@ -78,9 +74,10 @@ def open_standalone_connection() -> psycopg.Connection:
     )
 
 
-def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection:
-    """Extract a ``psycopg.Connection`` from an Airflow ``PostgresHook``.
+def open_airflow_connection() -> psycopg.Connection:
+    """Create a ``PostgresHook`` and return a ``psycopg.Connection``.
 
+    Uses ``AIRFLOW_CONN_ID`` to look up the Airflow connection store.
     ``PostgresHook.get_conn()`` returns a psycopg3 connection wrapped in
     ``CompatConnection`` (Airflow's psycopg2/3 abstraction layer) when ``USE_PSYCOPG3``
     is ``True`` — which is guaranteed when psycopg3 and SQLAlchemy 2.x are both
@@ -89,15 +86,14 @@ def open_airflow_hook_connection(hook: PostgresHook) -> psycopg.Connection:
     The ``type: ignore[assignment]`` is necessary because ``CompatConnection`` is not
     recognized by type checkers as a ``psycopg.Connection``.
 
-    Parameters
-    ----------
-    hook
-        Airflow ``PostgresHook`` configured for the project database.
-
     Returns
     -------
     psycopg.Connection
         Open connection. Caller must close it.
     """
+    # Lazy import: Airflow providers only available inside the container.
+    from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
+
+    hook = PostgresHook(AIRFLOW_CONN_ID)
     conn: psycopg.Connection = hook.get_conn()  # type: ignore[assignment]
     return conn

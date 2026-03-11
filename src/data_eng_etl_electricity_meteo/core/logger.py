@@ -45,7 +45,8 @@ _RESET = "\033[0m"
 _DIM = "\033[2m"
 _CYAN = "\033[36m"
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
-_EVENT_PAD = 50
+
+_EVENT_PAD = 60
 
 # Structlog-managed keys that must be preserved as-is by normalization processors.
 _STRUCTLOG_INTERNAL_KEYS = frozenset({"event", "level", "timestamp", "_record", "_from_structlog"})
@@ -78,6 +79,41 @@ def _normalize_value(value: object) -> str | int | float:
     if isinstance(value, Enum):
         return _normalize_value(value.value)
     return repr(value)
+
+
+# --------------------------------------------------------------------------------------
+# Shared processors (console + Airflow)
+# --------------------------------------------------------------------------------------
+
+
+def _visual_len(s: str) -> int:
+    """Return the printable length of *s*, excluding ANSI escape codes."""
+    return len(_ANSI_ESCAPE.sub("", s))
+
+
+def _pad_event(pad_to: int) -> structlog.types.Processor:
+    """Return a processor that right-pads the event string with dots.
+
+    Used in both console (tty) and Airflow modes for visual alignment.
+    ANSI escape codes are excluded from the length calculation.
+
+    Must be inserted **after** ``_prepend_logger_name`` in console chains so that the
+    padding accounts for the ``[name] `` prefix length.  In the Airflow chain
+    (where no logger-name prefix exists), it pads the bare event message.
+
+    Parameters
+    ----------
+    pad_to
+        Target visual width.  Events already at or above this width are left unchanged.
+    """
+
+    def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+        visual_len = _visual_len(event_dict["event"])
+        if visual_len < pad_to:
+            event_dict["event"] += "." * (pad_to - visual_len)
+        return event_dict
+
+    return processor
 
 
 # --------------------------------------------------------------------------------------
@@ -126,11 +162,6 @@ def _flatten_and_normalize(
     return {**internal, **{k: _normalize_value(v) for k, v in flattened.items()}}
 
 
-def _visual_len(s: str) -> int:
-    """Return the printable length of *s*, excluding ANSI escape codes."""
-    return len(_ANSI_ESCAPE.sub("", s))
-
-
 def _build_level_styles() -> dict[str, str]:
     """Build the level → ANSI color mapping for console rendering.
 
@@ -177,22 +208,17 @@ def _colorize_event(
 def _prepend_logger_name(
     *,
     use_colors: bool = False,
-    pad_to: int = 0,
 ) -> structlog.types.Processor:
     """Return a processor that prefixes the event with ``[logger_name]``.
 
     Must be inserted **after** ``_colorize_event`` so the name stays uncolored while the
-    event text keeps its level color.
-
-    When *pad_to* is set, the combined ``[name] event`` string is right-padded to
-    *pad_to* visible characters (ANSI codes excluded from the length calculation).
+    event text keeps its level color, and **before** ``_pad_event`` so that the padding
+    includes the prefix length.
 
     Parameters
     ----------
     use_colors
         Render the logger name in cyan when ``True``.
-    pad_to
-        Target visual width for the ``[name] event`` prefix.  ``0`` disables padding.
     """
 
     def processor(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
@@ -200,12 +226,8 @@ def _prepend_logger_name(
         prefix = (
             f"[{_CYAN}{name}{_RESET}]" if (name and use_colors) else (f"[{name}]" if name else "")
         )
-        full = f"{prefix} {event_dict['event']}" if prefix else event_dict["event"]
-        if pad_to:
-            visual_len = _visual_len(full)
-            if visual_len < pad_to:
-                full += "." * (pad_to - visual_len)
-        event_dict["event"] = full
+        if prefix:
+            event_dict["event"] = f"{prefix} {event_dict['event']}"
         return event_dict
 
     return processor
@@ -280,16 +302,22 @@ def _normalize_types(
 
 
 def _setup_airflow_logger() -> None:
-    """Insert ``_normalize_types`` into Airflow 3's existing structlog chain.
+    """Insert project processors into Airflow 3's existing structlog chain.
 
     Airflow 3 task subprocesses send structured JSON logs to the supervisor via a
     dedicated pipe (``NamedBytesLogger``).
     The supervisor writes them to the log file; the UI renders that JSON.
 
     The existing chain must **not** be flattened — Airflow's
-    ``ExceptionDictTransformer`` produces nested structures (``[{"type": …, "frames":
-    […]}]``) that the UI expects intact. Only scalar type conversion (``Path`` →
-    ``str``, ``Enum`` → value) is injected here via ``_normalize_types``.
+    ``ExceptionDictTransformer`` produces nested structures
+    (``[{"type": …, "frames": […]}]``) that the UI expects intact.
+
+    Injected processors (both inserted before the final renderer):
+
+    1. ``_normalize_types`` — scalar type conversion (``Path`` → ``str``, ``Enum`` →
+       value).
+    2. ``_pad_event`` — right-pads the event message with dots for visual alignment,
+       matching the console (tty) rendering style.
 
     This function is idempotent: calling it multiple times leaves the processor chain
     unchanged after the first insertion.
@@ -298,6 +326,7 @@ def _setup_airflow_logger() -> None:
     processors = list(config.get("processors", []))
     if processors and _normalize_types not in processors:
         processors.insert(-1, _normalize_types)  # insert before the final renderer
+        processors.insert(-1, _pad_event(_EVENT_PAD))
         structlog.configure(processors=processors)
 
 
@@ -350,7 +379,7 @@ def _setup_logger(
     if output is None:
         output = _detect_output_mode()
 
-    # Airflow already has its own structlog chain; only inject our processor.
+    # Airflow already has its own structlog chain; only inject our processors.
     if output == "airflow":
         _setup_airflow_logger()
         return
@@ -378,16 +407,17 @@ def _setup_logger(
         else:
             level_styles = None
 
-        console_chain.append(
-            _prepend_logger_name(use_colors=use_colors, pad_to=_EVENT_PAD if use_colors else 0)
-        )
+        console_chain.append(_prepend_logger_name(use_colors=use_colors))
+
+        # Dot-padding after logger name so the prefix length is included.
+        console_chain.append(_pad_event(_EVENT_PAD))
 
         console_chain.append(
             structlog.dev.ConsoleRenderer(
                 colors=use_colors,
                 sort_keys=False,
                 level_styles=level_styles,
-                pad_event_to=0 if use_colors else _EVENT_PAD,
+                pad_event_to=0,
                 exception_formatter=_rich_traceback(
                     use_colors=use_colors,
                     width=None,

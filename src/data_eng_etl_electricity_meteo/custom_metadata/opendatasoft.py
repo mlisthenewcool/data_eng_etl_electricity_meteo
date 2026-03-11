@@ -1,9 +1,9 @@
 """Remote metadata fetcher for OpenDataSoft export endpoints.
 
 OpenDataSoft ``/exports/parquet`` endpoints generate files on-the-fly and return no HTTP
-caching headers (no ETag, Last-Modified, Content-Length).
-This module fetches ``data_processed`` (with ``modified`` fallback) from the **catalog
-metadata API** and maps it to ``last_modified`` for smart-skip change detection.
+caching headers (no ETag, Last-Modified, Content-Length). This module fetches
+``data_processed`` (with ``modified`` fallback) from the **catalog metadata API** and
+maps it to ``last_modified`` for smart-skip change detection.
 """
 
 import re

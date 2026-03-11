@@ -16,6 +16,7 @@ single Parquet via lazy scanning.
 import re
 import shutil
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,7 +27,6 @@ import httpx
 import polars as pl
 from tqdm import tqdm
 
-from data_eng_etl_electricity_meteo.core.exceptions import DownloadStageError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.progress import (
@@ -62,7 +62,7 @@ _MERGED_FILENAME = "merged.parquet"
 
 # Columns retained at download time (aligned with BRONZE_COLUMNS in
 # meteo_france_climatologie.py). Pruning 196 → 16 columns here avoids
-# OOM during the merge of 95 per-department parquets (~9 GB → ~760 MB).
+# OOM during the merge of 95 per-department Parquet files (~9 GB → ~760 MB).
 _LANDING_COLUMNS = [
     "NUM_POSTE",
     "AAAAMMJJHH",
@@ -232,6 +232,13 @@ def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
         HTTP client.
     path
         Local file path to write.
+
+    Raises
+    ------
+    httpx.HTTPStatusError
+        If the server returns an error status.
+    OSError
+        If writing to the local file fails.
     """
     with client.stream("GET", url) as response:
         response.raise_for_status()
@@ -279,12 +286,13 @@ def _download_department(
             # Column projection: 196 → 16 columns at read time
             df = pl.read_parquet(tmp_path, columns=_LANDING_COLUMNS)
             # Cast to Utf8 for uniform schema across departments
-            df = df.cast({c: pl.Utf8 for c in df.columns})
+            df = df.cast({c: pl.String for c in df.columns})
             logger.debug("Downloaded Parquet (Hydra)", department=dept, rows_count=len(df))
         except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
             logger.warning(
                 "Parquet download failed, falling back to CSV.gz",
                 department=dept,
+                url=parquet_url,
                 error=str(err),
                 error_type=type(err).__qualname__,
             )
@@ -424,7 +432,7 @@ def download_climatologie(
     Parameters
     ----------
     dest_dir
-        Landing directory to write the merged parquet file.
+        Landing directory to write the merged Parquet file.
     progress
         Factory called with ``total_items`` that returns a progress reporter.
         Pass ``None`` (default) to use the built-in tqdm progress bar.
@@ -436,12 +444,14 @@ def download_climatologie(
     Returns
     -------
     Path
-        Path to the merged parquet file.
+        Path to the merged Parquet file.
 
     Raises
     ------
-    DownloadStageError
+    ValueError
         If no data could be downloaded from any department.
+    OSError
+        If the merge of per-department Parquet files fails.
     """
     now = datetime.now(tz=UTC)
     if year_start is None:
@@ -453,8 +463,7 @@ def download_climatologie(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_dir = dest_dir / "_tmp_departments"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(tempfile.mkdtemp(dir=dest_dir, prefix="_tmp_departments_"))
 
     timeout = httpx.Timeout(timeout=settings.download_timeout_seconds)
 
@@ -478,18 +487,20 @@ def download_climatologie(
             resources_by_dept, client=client, tmp_dir=tmp_dir, progress=progress
         )
 
-    # -- Merge temporary parquets into final file --------------------------------------
+    # -- Merge temporary Parquet files into final file ---------------------------------
 
     if result.dept_count == 0:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise DownloadStageError("No climatologie data downloaded from any department")
+        raise ValueError("No climatologie data downloaded from any department")
 
-    # Lazy scan all temporary parquets and write the merged result.
+    # Lazy scan all temporary Parquet files and write the merged result.
     # This avoids loading all departments into memory simultaneously.
     merged_path = dest_dir / _MERGED_FILENAME
     try:
         lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
         lazy_frames.sink_parquet(merged_path)
+    except (pl.exceptions.PolarsError, OSError) as err:
+        raise OSError("Failed to merge department parquets") from err
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

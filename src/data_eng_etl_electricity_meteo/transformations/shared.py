@@ -1,4 +1,13 @@
-"""Shared transformation utilities."""
+"""Shared transformation utilities.
+
+Provides reusable helpers for bronze/silver transforms:
+
+- ``prepare_silver`` — snake_case rename + all-null column removal
+- ``validate_source_columns`` — schema drift detection
+- ``validate_not_empty`` — guard against empty DataFrames
+- ``extract_diagnostics`` — log diagnostic ``_diag_*`` columns
+- ``to_snake_case`` — column name normalisation
+"""
 
 import re
 
@@ -9,30 +18,12 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
     TransformValidationError,
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 logger = get_logger("transform.shared")
 
-
-def _collect(lf: pl.LazyFrame) -> pl.DataFrame:
-    """Collect a LazyFrame, asserting no GPU engine is active.
-
-    Polars type stubs declare ``LazyFrame.collect()`` as returning ``InProcessQuery |
-    DataFrame`` (GPU support). This wrapper narrows the type to ``DataFrame`` so callers
-    avoid ``ty: ignore`` pragmas.
-
-    Parameters
-    ----------
-    lf
-        LazyFrame to collect.
-
-    Returns
-    -------
-    pl.DataFrame
-        Collected DataFrame.
-    """
-    df = lf.collect()
-    assert isinstance(df, pl.DataFrame)
-    return df
+DIAG_PREFIX = "_diag_"
+WARN_PREFIX = "_warn_"
 
 
 def to_snake_case(name: str) -> str:
@@ -54,6 +45,47 @@ def to_snake_case(name: str) -> str:
     s = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", s)
     # Normalize separators and casing
     return s.lower().replace(" ", "_").replace("-", "_")
+
+
+def extract_diagnostics(df: pl.DataFrame) -> pl.DataFrame:
+    """Extract, log, and drop diagnostic columns from a silver DataFrame.
+
+    Warning columns (``_warn_*``) are logged individually at ``warning`` level when
+    their value is > 0. Diagnostic columns (``_diag_*``) are logged as a single ``info``
+    message (zeros omitted).
+
+    Parameters
+    ----------
+    df
+        Silver DataFrame potentially containing ``_warn_*`` / ``_diag_*`` columns.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with all diagnostic columns removed.
+    """
+    warn_cols = [c for c in df.columns if c.startswith(WARN_PREFIX)]
+    diag_cols = [c for c in df.columns if c.startswith(DIAG_PREFIX)]
+
+    # -- Warning columns (one log per non-zero column) ---------------------------------
+
+    for col in warn_cols:
+        value: int = df[col].item(0)
+        if value > 0:
+            key = col.removeprefix(WARN_PREFIX)
+            logger.warning("Data quality issue", metric=key, count=value)
+
+    # -- Diagnostic columns (single grouped log) ---------------------------------------
+
+    diag_values = {}
+    for col in diag_cols:
+        value = df[col].item(0)
+        if value > 0:
+            diag_values[col.removeprefix(DIAG_PREFIX)] = value
+    if diag_values:
+        logger.info("Silver diagnostics", **diag_values)
+
+    return df.drop(warn_cols + diag_cols)
 
 
 def validate_not_empty(df: pl.DataFrame, dataset_name: str) -> None:
@@ -109,47 +141,9 @@ def validate_source_columns(
         raise SourceSchemaDriftError(dataset_name, added=added, removed=removed)
 
 
-def deduplicate_on_composite_key(
-    lf: pl.LazyFrame,
-    key_columns: list[str],
-) -> pl.LazyFrame:
-    """Deduplicate rows on a composite key, keeping the last occurrence.
-
-    Handles DST (Daylight Saving Time) transitions where data sources may return
-    duplicate timestamps: during the autumn clock change (last Sunday of October in
-    France), the hour 2:00-3:00 occurs twice, producing duplicates on time-based keys.
-
-    Row counts for the info log are obtained via cheap single-row aggregations
-    (no full materialization).
-
-    Parameters
-    ----------
-    lf
-        LazyFrame to deduplicate.
-    key_columns
-        Column names forming the composite key.
-
-    Returns
-    -------
-    pl.LazyFrame
-        Deduplicated LazyFrame.
-    """
-    total: int = _collect(lf.select(pl.len())).item()
-    lf = lf.unique(subset=key_columns, keep="last")
-    deduped: int = _collect(lf.select(pl.len())).item()
-    removed = total - deduped
-    if removed > 0:
-        logger.info(
-            "Deduplicated rows",
-            rows_removed=removed,
-            rows_count=deduped,
-            key_columns=key_columns,
-        )
-    return lf
-
-
 def prepare_silver(
     lf: pl.LazyFrame,
+    dataset_name: str,
     expected_columns: frozenset[str] | None = None,
 ) -> pl.LazyFrame:
     """Apply common silver pre-processing: snake_case rename + drop all-null columns.
@@ -164,6 +158,8 @@ def prepare_silver(
     ----------
     lf
         LazyFrame scanned from the bronze parquet.
+    dataset_name
+        Dataset identifier (for error messages).
     expected_columns
         Columns that must be preserved even if entirely null.
         Spurious all-null columns (not in this set) are dropped.
@@ -172,8 +168,22 @@ def prepare_silver(
     -------
     pl.LazyFrame
         LazyFrame with snake_case columns and spurious all-null columns removed.
+
+    Raises
+    ------
+    ValueError
+        If a source column maps to a reserved ``_diag_*`` / ``_warn_*`` name after
+        snake_case conversion.
     """
     lf = lf.rename(to_snake_case)
+
+    # Guard: source columns must not collide with diagnostic prefixes
+    for col in lf.collect_schema().names():
+        if col.startswith(DIAG_PREFIX) or col.startswith(WARN_PREFIX):
+            msg = (
+                f"Source column '{col}' in dataset '{dataset_name}' uses reserved diagnostic prefix"
+            )
+            raise ValueError(msg)
 
     # Drop columns that are entirely null AND not expected by the transform.
     # Spurious all-null columns are injected by some source APIs
@@ -185,7 +195,7 @@ def prepare_silver(
 
     if candidates:
         # Single-row aggregation: cheap even on large datasets.
-        null_flags = _collect(lf.select(pl.col(c).is_null().all() for c in candidates))
+        null_flags = collect_narrow(lf.select(pl.col(c).is_null().all() for c in candidates))
         null_cols = [c for c in candidates if null_flags[c].item()]
         if null_cols:
             logger.warning(

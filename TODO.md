@@ -9,7 +9,13 @@
 ## Maintenant
 
 - [ ] [Données] Ajouter les transformations qui permettent de déterminer les stations
-  météo à requêter (meilleure station à moins de 20 km par exemple).
+  météo à requêter (meilleure station à moins de 20 km par exemple) et créer le nouveau
+  dataset correspondant qui permettra de requêter l'API de Météo France
+- [ ] [Pipeline] Évaluer la cohérence entre les contrôles de qualité de données pour la
+  couche silver manipulée par plusieurs outils : Polars, Postgres et dbt. Reprendre
+  l'architecture si nécessaire et simplifier pour avoir une seule source de référence
+- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
+  déjà créés
 
 ## Ensuite
 
@@ -19,10 +25,10 @@
 - [ ] [Données] Intégrer les appels aux API Météo France (phases 2/3 décrites dans
   [integration_meteo_france.md](docs/integration_meteo_france.md))
 - [ ] [Docs] Documenter pourquoi et comment le silver est maintenu à l'identique entre
-  Postgres et le stockage local
-- [ ] [Docs] Rédiger la documentation minimale du projet V1 (présentation, données,
-  architecture, outils) —
-  [exemple](https://github.com/abeltavares/batch-data-pipeline)
+  Postgres et le stockage Parquet local
+- [ ] [Pipeline] Ajouter un smart skip pour les transformations silver -> gold :
+  exécution uniquement si les données ont réellement changé (dans le cas d'un run manuel
+  sous Airflow ou une exécution en cli). Suivre la même logique que celle existante.
 - [ ] [Pipeline] Définir comment intégrer et gérer l'ajout de nouvelles transformations
   silver (impact sur les données existantes)
 - [ ] [Pipeline] Étudier la possibilité d'ajouter une barre de progression comme tqdm
@@ -33,25 +39,19 @@
 - [ ] [Pipeline] Permettre à l'utilisateur de choisir une action lors d'une
   incohérence (par exemple celle de l'état incohérent entre métadonnées et fichiers).
   À faire pour Airflow et en local avec confirmation cli
-- [ ] [Pipeline] Vérifier la cohérence des types entre Postgres et Polars
 - [ ] [Postgres] Ajouter extension DuckDB : https://github.com/duckdb/pg_duckdb
 - [ ] [Postgres] Résoudre l'accès concurrent au load dans Postgres
 - [ ] [Tests] Ajouter des tests de qualité des données post-load (assertions Polars ou
   SQL : nulls, distribution, cohérence temporelle)
-- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques
-- [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
-  détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
-  NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
 - [ ] [Validation] Ajouter des métriques de validation dans les logs silver (ex :
   `mesure_solaire_count`/`mesure_eolien_count` pour stations,
   `renouvelables`/`actifs` pour installations)
+- [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
+  détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
+  NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
 
 ## Plus tard
 
-- [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par
-  dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
-  `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
-  `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
 - [ ] [Airflow] Créer un DAG de maintenance (hebdomadaire) : nettoyage des fichiers
   bronze obsolètes (`cleanup_old_bronze_versions` existe, mais n'est appelé nulle
   part), validation de la cohérence état/disque (silver file existe ↔ métadonnées
@@ -68,6 +68,10 @@
 - [ ] [Airflow] Intégrer OpenLineage, OpenTelemetry, alertes et SLA
 - [ ] [Airflow] Simplifier le nommage des fichiers générés en `frequency.HOURLY`
   (ne pas inclure les minutes et secondes)
+- [ ] [Airflow] Trouver comment utiliser `catchup` dans les DAGs (là où il y a un
+  `TODO[prod]` dans le code). Plus compliqué qu'il n'y parait, certains DAG auraient
+  peut-être besoin d'un catchup (si par exemple 1 run DAG = récupérer les données en
+  cours seulement). Si le DAG récupère toutes les données, c'est inutile.
 - [ ] [Airflow] Uniformiser les logs (scheduler, triggerer, dag-processor, api-server,
   standalone)
 - [ ] [Benchmark] Ajouter des benchmarks de performance (variables des settings,
@@ -76,12 +80,15 @@
   https://github.com/PyCQA/bandit
 - [ ] [Docker] Permettre l'utilisation de variables d'environnement pour configurer les
   ports du service Airflow plutôt que des valeurs fixes
+- [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par
+  dataset : `quality` (règles de qualité), `schema` (schéma attendu), `tags`,
+  `owner`, `source.license`, `source.documentation_url`, `ingestion.retention_days`,
+  `ingestion.retention_versions`, `ingestion.filters` (paramètres de requête source)
 - [ ] [Données] Implémenter le delta fetch pour `odre_eco2mix_tr` (upsert SQL prêt,
   manque le delta côté source ; séparer les flux def/cons/tr)
 - [ ] [Docs] Documenter comment `export AIRFLOW_..._POSTGRES` fonctionne côté Python
 - [ ] [Docs] Documenter les variables d'environnement qui configurent le logging
 - [ ] [Logging] Ajouter toutes les exceptions custom dans le smoke test visuel
-- [ ] [Logging] Rendre les messages d'erreur plus actionnables
 - [ ] [Optimisation] Compression Parquet bronze/silver
 - [ ] [Pipeline] Ajouter les options `--skip-download`, `--skip-bronze`,
   `--skip-silver`, `--skip-postgres` aux entrypoints CLI + rétention configurable des
@@ -97,6 +104,54 @@
 
 ## Terminé
 
+- [x] [CLI] _(2026-03-11)_ Packaging standard (`[build-system]` hatchling +
+  `[project.scripts]`) : entry points `pipeline`, `pipeline-meteo-clim`, `run-dbt`.
+  Suppression de `PYTHONPATH`, `.env.local.example` et `scripts/dbt.sh`
+- [x] [dbt] _(2026-03-11)_ Macro `test_unique_combination` (clé composite sans
+  dbt-utils), matérialisation table spatiale avec index GiST et index partiels
+  (`post_hook`), centralisation `+schema`/`+materialized` dans `dbt_project.yml`,
+  `$schema` JSON sur les YAML dbt, correction syntaxe `arguments:` et `not_null`
+  couplé avec `accepted_values`
+- [x] [Données] _(2026-03-11)_ Renommage `geom_wkb` → `geometrie` (nom source IGN),
+  nettoyage DuckDB spatial (auto-install extension, context managers isolés, quirk
+  lat/lon documenté inline, bronze `* EXCLUDE` pour détection dérive source).
+  ADR documenté dans `docs/choix_technique_duckdb_spatial.md`
+- [x] [Infra] _(2026-03-11)_ Credentials Postgres via secrets files uniquement
+  (suppression `AliasChoices`), profil dbt unique `default` (suppression dual
+  docker/local), `POSTGRES_HOST` hardcodé dans Docker Compose, escape `$$()` Compose
+  v2, `--only-postgres` dans le CLI, `slots=True` sur les dataclasses value objects
+- [x] [Docs] _(2026-03-10)_ Rédiger la documentation minimale du projet V1
+  (présentation, données, architecture, outils) : `README.md` + licence MIT
+- [x] [Pipeline] _(2026-03-09)_ Correction OOM `unique()` silver : dedup conditionnel
+  via guard `is_duplicated().any()` dans `run_silver()`, `primary_key` dans
+  `DatasetTransformSpec`, suppression de `deduplicate_on_composite_key()`.
+  Documenté dans `docs/oom_unique_silver.md`
+- [x] [Airflow] _(2026-03-09)_ Refactoring logging dbt : dataclass `_DbtResult` avec
+  parsing typé, `chain()` pour les dépendances de tasks
+- [x] [Pipeline] _(2026-03-09)_ `is_healing` centralisé dans `PipelineContext`,
+  propagé aux smart-skips downstream (extraction incluse)
+- [x] [Logging] _(2026-03-09)_ Suppression des logs dupliqués dans `download.py` et
+  `extraction.py` (conformité « no duplicate logs »), `shorten_url` rendu public
+- [x] [Pipeline] _(2026-03-09)_ Vérification de la cohérence des types entre Polars et
+  Postgres dans `pg_loader.py` (`_validate_columns` + `_POLARS_TO_PG_COMPATIBLE`)
+- [x] [Données] _(2026-03-09)_ Remplacement de la clé primaire `id_peps` par
+  `code_eic_resource_object` dans le catalog, Postgres, dbt et les transformations
+- [x] [Pipeline] _(2026-03-09)_ Gestion d'erreurs granulaire (un `except` par
+  opération dans `remote_ingestion.py`), messages spécifiques et actionnables
+  dans `pg_loader.py`, métriques `duration_s` sur toutes les étapes du pipeline
+- [x] [Pipeline] _(2026-03-09)_ `RemoteIngestionPipeline` frozen avec attributs
+  privés, suppression du template Jinja Airflow au profit de
+  `get_current_context()`, `collect_narrow()` dans `utils/polars.py`
+- [x] [Pipeline] _(2026-03-09)_ Optimisation du diff incrémental silver (une seule
+  passe d'inner join au lieu de deux scans)
+- [x] [Airflow] _(2026-03-09)_ Logging dbt enrichi (résultats model/test avec
+  progression, timing, rows affected) et `open_airflow_connection()` encapsulant
+  la création du hook
+- [x] [Tests] _(2026-03-09)_ Nouveaux tests utils (download, extraction, file_hash,
+  progress, remote_metadata), shared et amélioration tests logger
+- [x] [Logging] _(2026-03-09)_ Messages d'erreur plus spécifiques et actionnables,
+  `_pad_event` comme processeur partagé (console + Airflow), padding augmenté
+  à 60 caractères
 - [x] [Pipeline] _(2026-03-08)_ Smart-skip pour la climatologie via métadonnées
   data.gouv.fr (`custom_metadata/datagouv.py`, `last_update` au niveau dataset)
 - [x] [Transformations] _(2026-03-08)_ Pipeline silver entièrement lazy

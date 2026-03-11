@@ -8,7 +8,6 @@ import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
-from data_eng_etl_electricity_meteo.transformations.shared import _collect
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 
 logger = get_logger("transform")
@@ -151,9 +150,8 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
 def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     """Silver transformation for Météo France stations.
 
-    Flattens nested structures and enriches with renewable energy flags.
-    Fully lazy — data quality checks (missing positions, overseas stations) use cheap
-    single-row aggregations.
+    Flattens nested structures and enriches with renewable energy flags. Fully lazy —
+    data quality checks are embedded as ``_warn_*`` / ``_diag_*`` diagnostic columns.
 
     Transformations applied:
     - Filter to active stations only (date_fin is empty)
@@ -199,7 +197,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("current_position").struct.field("altitude").alias("altitude"),
     )
 
-    # -- Data quality checks (cheap single-row aggregations) ---------------------------
+    # -- Data quality checks (embedded as diagnostic columns) --------------------------
 
     _overseas_filter = (
         (pl.col("latitude") < _METRO_LAT_MIN)
@@ -207,27 +205,17 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         | (pl.col("longitude") < _METRO_LON_MIN)
         | (pl.col("longitude") > _METRO_LON_MAX)
     )
-    quality = _collect(
-        lf.select(
-            pl.col("latitude").is_null().sum().alias("no_position"),
-            # Overseas check only counts stations WITH a position
-            (pl.col("latitude").is_not_null() & _overseas_filter).sum().alias("overseas"),
-            pl.len().alias("total"),
-        )
+    lf = lf.with_columns(
+        pl.col("latitude").is_null().sum().alias("_warn_dropped_no_position"),
+        (pl.col("latitude").is_not_null() & _overseas_filter)
+        .sum()
+        .alias("_warn_overseas_stations"),
     )
-
-    no_pos: int = quality["no_position"].item()
-    if no_pos > 0:
-        logger.warning("Dropping stations without position", stations_count=no_pos)
-
-    overseas: int = quality["overseas"].item()
-    total: int = quality["total"].item()
-    if overseas > 0:
-        logger.warning(
-            "Dataset includes overseas stations (no electricity data available)",
-            overseas_count=overseas,
-            metropolitan_count=total - no_pos - overseas,
-        )
+    lf = lf.with_columns(
+        (pl.len() - pl.col("_warn_dropped_no_position") - pl.col("_warn_overseas_stations")).alias(
+            "_diag_metropolitan_stations"
+        ),
+    )
 
     # Drop stations without coordinates (unusable for spatial joins)
     lf = lf.filter(pl.col("latitude").is_not_null())
@@ -267,27 +255,13 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("params_actifs_noms").list.len().alias("nb_parametres"),
     )
 
-    # -- Parse date and select output columns ------------------------------------------
+    # -- Parse date --------------------------------------------------------------------
 
     lf = lf.with_columns(
         pl.col("date_debut").str.slice(0, 10).str.to_date("%Y-%m-%d"),
     )
 
-    return lf.select(
-        "id",
-        "nom",
-        "lieu_dit",
-        "bassin",
-        "date_debut",
-        "latitude",
-        "longitude",
-        "altitude",
-        "mesure_solaire",
-        "mesure_eolien",
-        "params_solaires",
-        "params_eoliens",
-        "nb_parametres",
-    )
+    return lf
 
 
 # --------------------------------------------------------------------------------------
@@ -296,9 +270,10 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
 
 
 SPEC = DatasetTransformSpec(
-    "meteo_france_stations",
+    name="meteo_france_stations",
     bronze_transform=transform_bronze,
     silver_transform=transform_silver,
+    primary_key=("id",),
     all_source_columns=_ALL_SOURCE_COLUMNS,
     used_source_columns=_USED_SOURCE_COLUMNS,
     silver_schema=SilverSchema,

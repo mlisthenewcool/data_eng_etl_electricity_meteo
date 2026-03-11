@@ -16,6 +16,7 @@ from data_eng_etl_electricity_meteo.core.logger import (
     _flatten_and_normalize,
     _flatten_dict,
     _normalize_value,
+    _pad_event,
     _prepend_logger_name,
     _visual_len,
     _walk,
@@ -201,19 +202,36 @@ class TestPrependLoggerName:
         assert name in event_dict["event"]
         assert _CYAN in event_dict["event"]
 
-    def test_padding_pads_short_string(self) -> None:
-        processor = _prepend_logger_name(use_colors=False, pad_to=20)
-        event_dict = {"logger_name": "a", "event": "b"}
+
+# --------------------------------------------------------------------------------------
+# _pad_event
+# --------------------------------------------------------------------------------------
+
+
+class TestPadEvent:
+    def test_pads_short_string(self) -> None:
+        processor = _pad_event(pad_to=20)
+        event_dict = {"event": "hello"}
         processor(_LOGGER, _METHOD_NAME, event_dict)
-        # "[a] b" = 5 chars, padded to 20
+        assert event_dict["event"] == "hello" + "." * 15
         assert len(event_dict["event"]) == 20
 
-    def test_padding_does_not_truncate_long_string(self) -> None:
-        name, msg = "long_name", "long_event"
-        processor = _prepend_logger_name(use_colors=False, pad_to=5)
-        event_dict = {"logger_name": name, "event": msg}
+    def test_does_not_truncate_long_string(self) -> None:
+        processor = _pad_event(pad_to=5)
+        event_dict = {"event": "long_event"}
         processor(_LOGGER, _METHOD_NAME, event_dict)
-        assert event_dict["event"] == f"[{name}] {msg}"
+        assert event_dict["event"] == "long_event"
+
+    def test_accounts_for_logger_name_prefix(self) -> None:
+        """Padding includes the ``[name] `` prefix set by ``_prepend_logger_name``."""
+        prepend = _prepend_logger_name(use_colors=False)
+        pad = _pad_event(pad_to=20)
+        event_dict = {"logger_name": "a", "event": "b"}
+        prepend(_LOGGER, _METHOD_NAME, event_dict)
+        pad(_LOGGER, _METHOD_NAME, event_dict)
+        # "[a] b" = 5 chars, padded to 20
+        assert len(event_dict["event"]) == 20
+        assert event_dict["event"].startswith("[a] b")
 
 
 # --------------------------------------------------------------------------------------

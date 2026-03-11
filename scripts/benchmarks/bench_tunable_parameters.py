@@ -6,11 +6,10 @@ Individual benchmark functions are stubs — implement them as needed.
 
 Usage::
 
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_tunable_parameters.py list
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_tunable_parameters.py \
+    uv run python scripts/benchmarks/bench_tunable_parameters.py list
+    uv run python scripts/benchmarks/bench_tunable_parameters.py \
         run download_chunk_size
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_tunable_parameters.py \
-        run all
+    uv run python scripts/benchmarks/bench_tunable_parameters.py run all
 """
 
 from collections.abc import Callable

@@ -1,13 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "data-eng-etl-electricity-meteo"
-version = "2026.02.10"
+version = "2026.03.11"
 description = "Projet personnel d'ingénierie des données (data engineering)."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "dbt-core>=1.11.6",
+    "dbt-core>=1.11.7",
     "dbt-postgres>=1.10.0",
-    "duckdb>=1.4.4",
+    "duckdb>=1.5.0",
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.7",
     "polars>=1.38.1",
@@ -25,16 +29,20 @@ dependencies = [
 [dependency-groups]
 dev = [
     "apache-airflow-providers-postgres>=6.6.0",
-    "apache-airflow-task-sdk>=1.1.7",
+    "apache-airflow-task-sdk>=1.1.8",
     "marimo>=0.20.4",
     "pip-audit>=2.10.0",
-    "prek>=0.3.4",
+    "prek>=0.3.5",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.4",
-    "ty>=0.0.20",
+    "ruff>=0.15.5",
+    "ty>=0.0.21",
 ]
 
+[project.scripts]
+pipeline = "data_eng_etl_electricity_meteo.cli.run_pipeline:app"
+pipeline-meteo-clim = "data_eng_etl_electricity_meteo.cli.run_pipeline_meteo_france_climatologie:app"
+run-dbt = "data_eng_etl_electricity_meteo.cli.run_dbt:app"
 
 [tool.ruff]
 line-length = 100
@@ -86,7 +94,6 @@ include = ["notebooks", "scripts", "src", "tests"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing --cov-report=html:tests/htmlcov"
-pythonpath = ["src"]
 
 [tool.coverage.run]
 branch = true # check if all branches of if/else statement are used
@@ -98,5 +105,7 @@ show_missing = true
 skip_empty = true
 exclude_also = ['if __name__ == .__main__.:']
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/data_eng_etl_electricity_meteo"]
+
 [tool.marimo.runtime]
-pythonpath = ["src"] # required to use absolute imports inside notebooks

@@ -5,7 +5,7 @@ for a reduced set of departments.
 
 Downloads ~4 real CSV.gz files (~30s depending on network).
 
-Run: uv run --env-file=.env.local python scripts/demo_meteo_failures.py
+Run: uv run python scripts/demo_meteo_failures.py
 """
 
 import tempfile
@@ -60,8 +60,8 @@ def main() -> None:
                 result = meteo_download.download_climatologie(Path(tmpdir))
                 print(f"\nMerged file: {result}")
                 print(f"Size: {result.stat().st_size / 1024**2:.1f} MiB")
-            except meteo_download.DownloadStageError as e:
-                print(f"\nPipeline error: {e}")
+            except (ValueError, OSError) as e:
+                print(f"\nDownload error: {e}")
 
 
 if __name__ == "__main__":

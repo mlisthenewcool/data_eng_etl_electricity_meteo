@@ -19,7 +19,7 @@ from data_eng_etl_electricity_meteo.utils.progress import (
     ThrottledProgressTracker,
 )
 
-logger = get_logger("progress")
+logger = get_logger("pipeline")
 
 
 # --------------------------------------------------------------------------------------

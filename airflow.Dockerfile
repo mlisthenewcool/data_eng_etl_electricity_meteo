@@ -21,12 +21,12 @@ RUN apt-get update \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Pre-create data directory with correct ownership before volume mount.
-# Without this, mkdir(parents=True) fails at runtime (airflow user can't
-# create dirs under /opt/airflow/).
+# Without this, mkdir(parents=True) fails at runtime
+# (airflow user can't create dirs under /opt/airflow/).
 RUN mkdir -p /opt/airflow/data && chown -R airflow:root /opt/airflow/data
 
 # --------------------------------------------------------------------------------------
-# Python dependencies (as airflow)
+# Python dependencies (as airflow user)
 # --------------------------------------------------------------------------------------
 
 USER airflow
@@ -44,12 +44,11 @@ RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spa
 # Airflow configuration (structural — same in dev and prod)
 # --------------------------------------------------------------------------------------
 
-# TODO[prod]: set AIRFLOW__CORE__DAGS_FOLDER instead of bind-mounting dags/
-
 # -- Path ------------------------------------------------------------------------------
 ENV PYTHONPATH="/opt/airflow/src"
 
 # -- Core ------------------------------------------------------------------------------
+# TODO[prod]: set AIRFLOW__CORE__DAGS_FOLDER instead of bind-mounting dags/
 ENV AIRFLOW__CORE__EXECUTOR="LocalExecutor" \
     AIRFLOW__CORE__DEFAULT_TIMEZONE="UTC" \
     AIRFLOW__CORE__LOAD_EXAMPLES="False" \

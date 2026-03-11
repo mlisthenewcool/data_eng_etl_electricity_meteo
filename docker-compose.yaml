@@ -63,10 +63,10 @@ services:
     environment:
 
       # -- Project database (pydantic Settings → loaders/postgres.py) ------------------
-      POSTGRES_HOST: "${POSTGRES_HOST}"
+      POSTGRES_HOST: "postgres_service"
       POSTGRES_PORT: "${POSTGRES_PORT}"
       POSTGRES_DB_NAME: "${POSTGRES_DB_NAME}"
-      DBT_TARGET: "docker"
+      AIRFLOW_DB_NAME: "${AIRFLOW_DB_NAME}"
 
       # -- Logging ---------------------------------------------------------------------
       # Airflow 3 logging (vérifié sur 3.1.7) :
@@ -87,8 +87,11 @@ services:
       # AIRFLOW__LOGGING__SIMPLE_LOG_FORMAT: "%(asctime)s --- %(levelname)-8s --- %(message)s"
 
       # -- Airflow internal database ---------------------------------------------------
-      # printf "%s" avoids interpreting % in secrets as format specifiers
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${AIRFLOW_DB_NAME}\"'"
+      # printf "%s" avoids interpreting % in secrets as format specifiers.
+      # $$ escapes $ for Compose: passes a literal $ to the container shell,
+      # so $$(cat ...) and $${VAR} are evaluated at runtime, not at parse-time.
+      # All variables used here must be declared above in this environment: block.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: "bash -c 'printf \"%s\" \"postgresql+psycopg://$$(cat /run/secrets/postgres_root_username):$$(cat /run/secrets/postgres_root_password)@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${AIRFLOW_DB_NAME}\"'"
 
       # -- Authentication & API --------------------------------------------------------
       AIRFLOW__API__SECRET_KEY_SECRET: /run/secrets/airflow_api_secret_key
@@ -100,6 +103,7 @@ services:
       # Note: AIRFLOW_CONN_*_CMD is NOT supported (only AIRFLOW__SECTION__KEY_CMD).
       # AIRFLOW_CONN_PROJECT_POSTGRES is exported in the startup command below,
       # built from Docker secrets at runtime — no plaintext credentials in compose.
+      # The connection id must match loaders/pg_connection.py::AIRFLOW_CONN_ID.
 
     # -- Volumes -----------------------------------------------------------------------
 
@@ -128,9 +132,10 @@ services:
       - bash
       - -c
       - |
-        export AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$(cat /run/secrets/postgres_root_username):$(cat /run/secrets/postgres_root_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB_NAME}"
-        export POSTGRES_USER="$(cat /run/secrets/postgres_root_username)"
-        export POSTGRES_PASSWORD="$(cat /run/secrets/postgres_root_password)"
+        AIRFLOW_CONN_PROJECT_POSTGRES="postgresql+psycopg://$$(cat /run/secrets/postgres_root_username):$$(cat /run/secrets/postgres_root_password)@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${POSTGRES_DB_NAME}"
+        POSTGRES_USER="$$(cat /run/secrets/postgres_root_username)"
+        POSTGRES_PASSWORD="$$(cat /run/secrets/postgres_root_password)"
+        export AIRFLOW_CONN_PROJECT_POSTGRES POSTGRES_USER POSTGRES_PASSWORD
         exec airflow standalone
 
     secrets:

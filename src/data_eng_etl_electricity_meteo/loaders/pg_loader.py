@@ -17,6 +17,7 @@ runtime via ``psql.SQL().format()`` with ``psql.Identifier`` quoting:
 """
 
 import tempfile
+import time
 from typing import LiteralString, cast
 
 import polars as pl
@@ -38,6 +39,7 @@ from data_eng_etl_electricity_meteo.pipeline.types import (
     IncrementalDiffMetrics,
     LoadPostgresMetrics,
 )
+from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 logger = get_logger("pg_loader")
 
@@ -47,6 +49,12 @@ _COPY_SPOOL_THRESHOLD = 128 * 1024 * 1024
 # Columns managed server-side (DEFAULT NOW()) — excluded from schema validation.
 _SERVER_MANAGED_COLUMNS: set[str] = {"inserted_at", "updated_at"}
 _SILVER_SCHEMA = "silver"
+
+
+def _qualified_table(pg_table: str) -> str:
+    """Return the schema-qualified table name for logging and metrics."""
+    return f"{_SILVER_SCHEMA}.{pg_table}"
+
 
 # Polars base type → compatible Postgres data_type (from information_schema).
 # Unknown Polars types are silently skipped (no false positive).
@@ -74,7 +82,7 @@ _POLARS_TO_PG_COMPATIBLE: dict[str, set[str]] = {
 # --------------------------------------------------------------------------------------
 
 
-def load_silver_to_postgres(
+def load_silver_to_postgres(  # noqa: PLR0912
     dataset: RemoteDatasetConfig,
     *,
     conn: psycopg.Connection,
@@ -106,17 +114,18 @@ def load_silver_to_postgres(
     Returns
     -------
     LoadPostgresMetrics
+        Table, mode, and row-count metrics from the load.
 
     Raises
     ------
     PostgresLoadError
-        On any load failure: missing DDL/upsert file, unreadable parquet, or any
+        On any load failure: missing DDL/upsert file, unreadable Parquet, or any
         ``psycopg`` database error.
     """
     mode = dataset.ingestion.mode
     resolver = RemotePathResolver(dataset.name)
     pg_table = dataset.postgres.table
-    qualified_table = f"{_SILVER_SCHEMA}.{pg_table}"
+    qualified_table = _qualified_table(pg_table)
 
     try:
         ddl_sql = _format_sql_template(
@@ -135,30 +144,19 @@ def load_silver_to_postgres(
     else:
         source_path = resolver.silver_current_path
 
-    logger.info(
-        "Starting Postgres load",
-        table=qualified_table,
-        mode=mode,
-    )
-
     try:
         df = pl.read_parquet(source_path)
     except (pl.exceptions.PolarsError, OSError) as err:
         raise PostgresLoadError("Failed to read silver Parquet") from err
 
-    # -- Early exit for incremental with empty delta -----------------------------------
-
-    if mode == IngestionMode.INCREMENTAL and len(df) == 0:
-        logger.info(
-            "Postgres load skipped: no new or changed rows",
-            table=qualified_table,
-        )
-        return LoadPostgresMetrics(
-            table=qualified_table,
-            mode=mode,
-            rows_loaded=0,
-            diff=diff,
-        )
+    t0 = time.monotonic()
+    logger.info(
+        "Starting Postgres load",
+        table=qualified_table,
+        mode=mode,
+        rows_count=len(df),
+        columns_count=len(df.columns),
+    )
 
     # -- DDL, schema validation, and load (single transaction) -------------------------
 
@@ -173,21 +171,31 @@ def load_silver_to_postgres(
                 rows = _load_incremental(df, cur=cur, dataset_name=dataset.name, pg_table=pg_table)
 
         conn.commit()
-    except (SchemaValidationError, FileNotFoundError) as err:
+    except SchemaValidationError as err:
         conn.rollback()
-        raise PostgresLoadError("Schema validation or SQL file error") from err
+        raise PostgresLoadError(
+            f"Column mismatch between DataFrame and Postgres table {qualified_table}"
+        ) from err
+    except FileNotFoundError as err:
+        conn.rollback()
+        raise PostgresLoadError("Upsert SQL file not found") from err
     except psycopg.Error as err:
         conn.rollback()
-        raise PostgresLoadError("Database error during load") from err
+        detail = getattr(err, "diag", None)
+        pg_msg = (detail.message_primary if detail else None) or str(err)
+        raise PostgresLoadError(
+            f"Database error during COPY to {qualified_table}: {pg_msg}"
+        ) from err
     except (pl.exceptions.PolarsError, OSError) as err:
         conn.rollback()
-        raise PostgresLoadError("Data serialization error during load") from err
+        raise PostgresLoadError(
+            f"Failed to serialize DataFrame for COPY to {qualified_table}"
+        ) from err
 
     logger.info(
         "Postgres load completed",
-        table=qualified_table,
-        mode=mode,
         rows_loaded=rows,
+        duration_s=round(time.monotonic() - t0, 2),
     )
 
     # -- Post-load sync verification for incremental datasets --------------------------
@@ -256,15 +264,18 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
 
     errors: list[str] = []
     for col in sorted(extra):
-        errors.append(f"Unexpected column: {col}")
+        errors.append(f"Column '{col}' in DataFrame but not in Postgres table")
     for col in sorted(missing):
-        errors.append(f"Missing column: {col}")
+        errors.append(f"Column '{col}' in Postgres table but not in DataFrame")
     for col in sorted(df_cols & pg_cols):
         polars_type_name = type(df.schema[col].base_type()).__name__
         pg_type = pg_columns[col]
         compatible = _POLARS_TO_PG_COMPATIBLE.get(polars_type_name)
         if compatible is not None and pg_type not in compatible:
-            errors.append(f"{col}: Polars {polars_type_name} vs Postgres {pg_type}")
+            errors.append(
+                f"Type mismatch on '{col}': DataFrame has {polars_type_name},"
+                f" Postgres expects {pg_type}"
+            )
 
     if errors:
         raise SchemaValidationError(errors)
@@ -279,6 +290,7 @@ def _prepare_for_copy(df: pl.DataFrame) -> pl.DataFrame:
     List elements are individually double-quoted and inner ``"`` / ``\`` are escaped so
     that values containing commas, braces, or quotes produce valid Postgres array
     literals.
+    Returns the DataFrame unchanged when no Binary or List columns are present.
     """
     exprs: list[pl.Expr] = []
 
@@ -381,37 +393,37 @@ def _verify_and_maybe_full_refresh(
     int | None
         Rows loaded during full refresh fallback, or ``None`` if already in sync.
     """
+    silver_path = resolver.silver_current_path
+
     try:
-        silver_full = pl.read_parquet(resolver.silver_current_path)
+        expected_count: int = collect_narrow(pl.scan_parquet(silver_path).select(pl.len())).item()
     except (pl.exceptions.PolarsError, OSError) as err:
         logger.warning("Cannot read silver snapshot for sync check", error=str(err))
         return None
 
     try:
         with conn.cursor() as cur:
-            pg_count = _verify_sync(pg_table, cur=cur, expected_count=len(silver_full))
+            pg_count = _verify_sync(pg_table, cur=cur, expected_count=expected_count)
             if pg_count is None:
                 return None
 
             # Mismatch → full refresh from current.parquet
             logger.warning(
                 "Full refresh triggered by row count mismatch",
-                table=pg_table,
                 pg_rows=pg_count,
-                parquet_rows=len(silver_full),
+                parquet_rows=expected_count,
             )
+            silver_full = pl.read_parquet(silver_path)
             cur.execute(ddl_sql)
             rows = _load_snapshot(silver_full, cur=cur, pg_table=pg_table)
 
         conn.commit()
-    except psycopg.Error as err:
+    except (psycopg.Error, pl.exceptions.PolarsError, OSError):
         conn.rollback()
-        raise PostgresLoadError("Full refresh fallback failed") from err
-    except (pl.exceptions.PolarsError, OSError) as err:
-        conn.rollback()
-        raise PostgresLoadError("Data serialization error during full refresh") from err
+        logger.exception("Full refresh fallback failed, keeping initial incremental load")
+        return None
 
-    logger.info("Full refresh fallback completed", table=pg_table, rows_loaded=rows)
+    logger.info("Full refresh fallback completed", rows_loaded=rows)
     return rows
 
 
@@ -480,7 +492,11 @@ def _load_incremental(
 
     cur.execute(upsert_sql)
 
-    return cur.rowcount
+    rows = cur.rowcount
+    if rows < 0:
+        logger.warning("Upsert rowcount unavailable")
+        rows = 0
+    return rows
 
 
 def run_standalone_postgres_load(dataset: RemoteDatasetConfig) -> LoadPostgresMetrics:
@@ -497,6 +513,7 @@ def run_standalone_postgres_load(dataset: RemoteDatasetConfig) -> LoadPostgresMe
     Returns
     -------
     LoadPostgresMetrics
+        Table, mode, and row-count metrics from the load.
 
     Raises
     ------
