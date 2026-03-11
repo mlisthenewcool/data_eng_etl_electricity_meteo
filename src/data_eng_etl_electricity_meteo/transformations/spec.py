@@ -119,6 +119,7 @@ class DatasetTransformSpec:
         )
         lf = self.silver_transform(lf)
         df = collect_narrow(lf)
+        validate_not_empty(df, dataset_name=self.name)
         df = extract_diagnostics(df)
 
         # -- Conditional dedup -----------------------------------------------------
@@ -139,6 +140,5 @@ class DatasetTransformSpec:
             )
 
         df = df.select(self.silver_schema.polars_schema().names())
-        validate_not_empty(df, dataset_name=self.name)
         self.silver_schema.validate(df)
         return df

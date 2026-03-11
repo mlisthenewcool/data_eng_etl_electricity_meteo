@@ -43,12 +43,12 @@
 - [ ] [Postgres] Résoudre l'accès concurrent au load dans Postgres
 - [ ] [Tests] Ajouter des tests de qualité des données post-load (assertions Polars ou
   SQL : nulls, distribution, cohérence temporelle)
-- [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
-  détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
-  NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
 - [ ] [Validation] Ajouter des métriques de validation dans les logs silver (ex :
   `mesure_solaire_count`/`mesure_eolien_count` pour stations,
   `renouvelables`/`actifs` pour installations)
+- [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
+  détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
+  NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
 
 ## Plus tard
 
@@ -104,6 +104,22 @@
 
 ## Terminé
 
+- [x] [CLI] _(2026-03-11)_ Packaging standard (`[build-system]` hatchling +
+  `[project.scripts]`) : entry points `pipeline`, `pipeline-meteo-clim`, `run-dbt`.
+  Suppression de `PYTHONPATH`, `.env.local.example` et `scripts/dbt.sh`
+- [x] [dbt] _(2026-03-11)_ Macro `test_unique_combination` (clé composite sans
+  dbt-utils), matérialisation table spatiale avec index GiST et index partiels
+  (`post_hook`), centralisation `+schema`/`+materialized` dans `dbt_project.yml`,
+  `$schema` JSON sur les YAML dbt, correction syntaxe `arguments:` et `not_null`
+  couplé avec `accepted_values`
+- [x] [Données] _(2026-03-11)_ Renommage `geom_wkb` → `geometrie` (nom source IGN),
+  nettoyage DuckDB spatial (auto-install extension, context managers isolés, quirk
+  lat/lon documenté inline, bronze `* EXCLUDE` pour détection dérive source).
+  ADR documenté dans `docs/choix_technique_duckdb_spatial.md`
+- [x] [Infra] _(2026-03-11)_ Credentials Postgres via secrets files uniquement
+  (suppression `AliasChoices`), profil dbt unique `default` (suppression dual
+  docker/local), `POSTGRES_HOST` hardcodé dans Docker Compose, escape `$$()` Compose
+  v2, `--only-postgres` dans le CLI, `slots=True` sur les dataclasses value objects
 - [x] [Docs] _(2026-03-10)_ Rédiger la documentation minimale du projet V1
   (présentation, données, architecture, outils) : `README.md` + licence MIT
 - [x] [Pipeline] _(2026-03-09)_ Correction OOM `unique()` silver : dedup conditionnel

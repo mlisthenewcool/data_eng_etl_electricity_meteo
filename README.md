@@ -166,8 +166,7 @@ uv sync
 
 # Configurer l'environnement
 cp .env.example .env
-cp .env.local.example .env.local
-# Éditer .env et .env.local selon votre configuration
+# Éditer .env selon votre configuration
 ```
 
 ### Créer les secrets Docker
@@ -209,20 +208,20 @@ Les DAGs sont générés dynamiquement depuis `catalog.yaml` :
 
 ```bash
 # Pipeline complet pour un dataset
-uv run --env-file=.env.local python -m data_eng_etl_electricity_meteo.cli.run_pipeline <nom_dataset>
+uv run pipeline <nom_dataset>
 
 # Pipeline climatologie (téléchargement multi-fichiers)
-uv run --env-file=.env.local python -m data_eng_etl_electricity_meteo.cli.run_meteo_climatologie
+uv run pipeline-meteo-clim
 ```
 
 **dbt (couche gold)** :
 
 ```bash
 # Exécuter les modèles gold
-./scripts/dbt.sh run
+uv run run-dbt run
 
 # Lancer les tests dbt
-./scripts/dbt.sh test
+uv run run-dbt test
 ```
 
 ## Pipeline en détail
@@ -236,12 +235,26 @@ hash SHA-256 du fichier téléchargé. Si le hash correspond à la version préc
 Pour la climatologie Météo France, un téléchargement custom fusionne 95 fichiers
 départementaux (un par département métropolitain) en un seul fichier landing.
 
-### Bronze : normalisation
+### Bronze : conversion de format
 
-Chaque dataset source est converti en Parquet versionné. La transformation bronze
-est minimale : sélection de colonnes, renommage, conversion de types basiques.
-Le traitement utilise des `LazyFrame` Polars avec `sink_parquet` pour le streaming
+Chaque dataset source est converti en Parquet versionné. Le rôle de bronze est la
+**conversion de format** (source &rarr; Parquet), pas la logique métier. Le
+traitement utilise des `LazyFrame` Polars avec `sink_parquet` pour le streaming
 mémoire sur les gros fichiers.
+
+| Dataset                     | Format source | Bronze fait quoi                                       |
+|-----------------------------|---------------|--------------------------------------------------------|
+| `odre_installations`        | Parquet       | Identité (`scan_parquet`)                              |
+| `odre_eco2mix_tr`           | Parquet       | Identité (`scan_parquet`)                              |
+| `odre_eco2mix_cons_def`     | Parquet       | Identité (`scan_parquet`)                              |
+| `meteo_france_stations`     | JSON          | Conversion format (`read_json`)                        |
+| `meteo_france_climatologie` | CSV.gz        | Casting types + remplacement sentinelles (`"mq"`, `""`) |
+| `ign_contours_iris`         | GPKG (SQLite) | Lecture DuckDB spatial (`ST_read` + `ST_AsWKB`)        |
+
+`ign_contours_iris` est le seul dataset à utiliser DuckDB en bronze : le format
+GeoPackage (SQLite + géométrie GDAL) ne peut pas être lu par Polars. DuckDB
+`ST_read` assure la lecture et `ST_AsWKB` convertit la géométrie native en WKB
+binaire standard, stocké tel quel dans le Parquet bronze.
 
 Les versions sont horodatées (`YYYY-MM-DDTHH-MM-SS.parquet`) et un lien symbolique
 `latest` pointe toujours vers la version la plus récente.
@@ -253,8 +266,19 @@ renommage de colonnes, typage strict, filtrage, colonnes dérivées, déduplicat
 Le schéma de sortie est validé par un `DataFrameModel` déclaratif (contraintes
 `nullable`, `unique`, `dtype`, bornes, valeurs autorisées).
 
-Pour les datasets géospatiaux (IGN), DuckDB est utilisé pour les calculs de centroids
-(`ST_Transform`, `ST_X`, `ST_Y`) directement depuis les fichiers GPKG.
+| Dataset                     | Silver fait quoi                                                            |
+|-----------------------------|-----------------------------------------------------------------------------|
+| `odre_installations`        | Clé primaire synthétique, cascade géographique, filtrage type IRIS          |
+| `odre_eco2mix_tr`           | Renommage, typage datetime TZ, colonnes production                         |
+| `odre_eco2mix_cons_def`     | Renommage, typage datetime TZ, colonnes production                         |
+| `meteo_france_stations`     | Aplatissement structures imbriquées, extraction positions/paramètres        |
+| `meteo_france_climatologie` | Renommage, colonnes dérivées (vitesse vent, précipitations)                |
+| `ign_contours_iris`         | Centroids DuckDB spatial (`ST_Centroid` + `ST_Transform` Lambert&rarr;WGS84) |
+
+Pour `ign_contours_iris`, DuckDB spatial est aussi utilisé en silver pour les calculs
+géospatiaux (centroid, reprojection EPSG:2154 &rarr; 4326). Le WKB brut est
+enregistré comme table virtuelle DuckDB, les centroids sont extraits en `(lat, lon)`
+puis le résultat est renvoyé en LazyFrame Polars.
 
 ### Chargement Postgres
 

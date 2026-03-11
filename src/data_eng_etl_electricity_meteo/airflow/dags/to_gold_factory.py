@@ -8,7 +8,7 @@ and runs ``dbt run`` then ``dbt test`` inside the Airflow container.
 import subprocess
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 import orjson
 from airflow.sdk import DAG, Asset, AssetAll, chain, dag, task
@@ -37,8 +37,6 @@ _DBT_COMMON_ARGS: list[str] = [
     str(settings.dbt_project_dir),
     "--profiles-dir",
     str(settings.dbt_project_dir),
-    "--target",
-    settings.dbt_target,
     "--log-path",
     str(settings.dbt_log_path),
     "--target-path",
@@ -145,7 +143,7 @@ class _DbtResult:
         log_fn("dbt result", status=self.status, **kwargs)
 
 
-def _run_dbt(subcommand: str, extra_args: list[str] | None = None) -> None:
+def _run_dbt(subcommand: Literal["run", "test"], extra_args: list[str] | None = None) -> None:
     """Run a dbt subcommand, streaming JSON log lines through structlog.
 
     Extracts rich data from dbt result events (Q007/Q012/Q034): model name, progress

@@ -13,7 +13,7 @@ from data_eng_etl_electricity_meteo.core.logger import get_logger
 logger = get_logger("remote_metadata")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ChangeDetectionResult:
     """Change detection verdict (boolean-evaluable)."""
 
@@ -25,7 +25,7 @@ class ChangeDetectionResult:
         return self.has_changed
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RemoteFileMetadata:
     """ETag, Last-Modified, and Content-Length from an HTTP HEAD."""
 

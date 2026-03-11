@@ -1,3 +1,4 @@
+# $schema: https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest/dbt_yml_files-latest.json
 # Defense-in-depth: column constraints on raw source tables.
 # Source of truth for constraints: Python DataFrameModel (validates pre-write).
 # These dbt tests are a post-load safety net in Postgres.
@@ -41,7 +42,7 @@ sources:
             tests:
               - unique
               - not_null
-          - name: geom_wkb
+          - name: geometrie
             tests:
               - not_null
           - name: centroid_lat
@@ -52,11 +53,17 @@ sources:
               - not_null
           - name: type_iris
             tests:
+              - not_null
               - accepted_values:
-                  values: ["H", "A", "D", "Z"]
+                  arguments:
+                    values: ["H", "A", "D", "Z"]
 
       - name: fact_eco2mix_cons_def
         description: "Production électrique régionale eco2mix (consolidées et définitives)."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['code_insee_region', 'date_heure']
         columns:
           - name: code_insee_region
             tests:
@@ -67,6 +74,10 @@ sources:
 
       - name: fact_eco2mix_tr
         description: "Production électrique régionale eco2mix (temps réel)."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['code_insee_region', 'date_heure']
         columns:
           - name: code_insee_region
             tests:
@@ -77,6 +88,10 @@ sources:
 
       - name: fact_meteo_horaire
         description: "Données climatologiques horaires Météo France."
+        tests:
+          - unique_combination:
+              arguments:
+                combination: ['id_station', 'date_heure']
         columns:
           - name: id_station
             tests:

@@ -1,7 +1,5 @@
 {{
     config(
-        materialized='table',
-        schema='gold',
         indexes=[
             {'columns': ['code_eic_resource_object'], 'unique': True},
             {'columns': ['type_energie']},
@@ -70,11 +68,11 @@ CROSS JOIN LATERAL (
         st.station_lon,
         st.geog
     FROM {{ ref('stg_dim_stations_meteo') }} AS st
+    -- OR explicit (not CASE) so the planner can match the partial GiST
+    -- indexes idx_stations_geog_solaire / idx_stations_geog_eolien.
     WHERE
-        CASE ir.type_energie
-            WHEN 'solaire' THEN st.mesure_solaire
-            WHEN 'eolien'  THEN st.mesure_eolien
-        END
+        (ir.type_energie = 'solaire' AND st.mesure_solaire)
+        OR (ir.type_energie = 'eolien' AND st.mesure_eolien)
     ORDER BY ir.geog <-> st.geog
     LIMIT 1
 ) AS nearest

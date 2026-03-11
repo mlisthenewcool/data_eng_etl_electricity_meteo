@@ -35,7 +35,7 @@ _READ_TIMEOUT = 30
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HttpDownloadInfo:
     """Downloaded file information (path, hash, size)."""
 

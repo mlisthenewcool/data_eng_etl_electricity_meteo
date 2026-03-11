@@ -11,28 +11,11 @@ import duckdb
 import polars as pl
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
-from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.transformations.dataframe_model import Column, DataFrameModel
 from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransformSpec
 from data_eng_etl_electricity_meteo.utils.polars import collect_narrow
 
 logger = get_logger("transform")
-
-
-@contextmanager
-def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
-    """Open a DuckDB in-memory connection with the spatial extension loaded.
-
-    On Airflow the extension is pre-installed in the Docker image, so ``INSTALL`` is
-    skipped to avoid unnecessary network/disk checks.
-    """
-    with duckdb.connect(":memory:") as conn:
-        if not settings.is_running_on_airflow:
-            conn.execute("INSTALL spatial;")
-        conn.execute("LOAD spatial;")
-        conn.execute("SET threads = 1")
-        conn.execute("SET memory_limit = '1GB'")
-        yield conn
 
 
 # --------------------------------------------------------------------------------------
@@ -45,7 +28,7 @@ _ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(
         "cleabs",
         "code_insee",
         "code_iris",
-        "geom_wkb",
+        "geometrie",
         "iris",
         "nom_commune",
         "nom_iris",
@@ -65,10 +48,45 @@ class SilverSchema(DataFrameModel):
     code_insee: str
     nom_commune: str
     type_iris: Annotated[str, Column(isin=["H", "A", "D", "Z"])]
-    geom_wkb: Annotated[bytes, Column(dtype=pl.Binary(), nullable=False)]
+    geometrie: Annotated[bytes, Column(dtype=pl.Binary(), nullable=False)]
     # Metropolitan France only (overseas territories excluded at source level)
     centroid_lat: Annotated[float, Column(nullable=False, ge=41.0, le=52.0)]
     centroid_lon: Annotated[float, Column(nullable=False, ge=-6.0, le=10.0)]
+
+
+# --------------------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------------------
+
+
+@contextmanager
+def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
+    """Open a DuckDB in-memory connection with the spatial extension loaded.
+
+    DuckDB >=0.9 auto-installs missing extensions on ``LOAD``, so an explicit
+    ``INSTALL`` is unnecessary (the project requires duckdb >=1.5.0).
+    In Docker the extension is pre-installed in the image; locally it is fetched on
+    first use then cached.
+    """
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("LOAD spatial")
+        conn.execute("SET threads = 1")
+        conn.execute("SET memory_limit = '1GB'")
+        yield conn
+
+
+@contextmanager
+def _gpkg_safe_read_path(gpkg_path: Path) -> Iterator[Path]:
+    """Copy a GeoPackage to a temp location to avoid GDAL file locks.
+
+    GeoPackage (.gpkg) is SQLite-based.
+    GDAL acquires file locks when reading, which causes indefinite hangs in Airflow's
+    LocalExecutor if another process holds a lock on the same file.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_gpkg = Path(tmp_dir) / gpkg_path.name
+        shutil.copy2(gpkg_path, tmp_gpkg)
+        yield tmp_gpkg
 
 
 # --------------------------------------------------------------------------------------
@@ -80,13 +98,8 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """Bronze transformation for IGN Contours IRIS.
 
     Reads GeoPackage from landing layer (with original filename preserved) and applies
-    basic filtering and geometry conversion.
-
-    The GeoPackage (.gpkg) format is SQLite-based.
-    GDAL (used internally by DuckDB's ST_read) acquires file locks when reading, which
-    can cause indefinite hangs in Airflow's LocalExecutor if another process holds a
-    lock on the same file.
-    To avoid this, the file is copied to a temporary location before reading.
+    basic filtering and geometry conversion. The file is copied to a temp location
+    before reading to avoid GDAL file lock contention (see ``_gpkg_safe_read_path``).
 
     Parameters
     ----------
@@ -107,21 +120,17 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """
     logger.debug("Reading GeoPackage from landing")
 
-    # Copy .gpkg to a temp file to avoid SQLite/GDAL file lock contention
-    # that causes intermittent hangs in Airflow (LocalExecutor).
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_gpkg = Path(tmp_dir) / landing_path.name
-        shutil.copy2(landing_path, tmp_gpkg)
-        logger.debug("Copied GeoPackage to temp file", tmp_path=tmp_gpkg)
-
+    with _gpkg_safe_read_path(landing_path) as tmp_gpkg:
         with _duckdb_spatial_conn() as conn:
-            # noinspection SqlResolve
+            # EXCLUDE + re-add as WKB: keeps the column name identical
+            # to the source while converting native geometry to binary.
+            # * passes new source columns through for drift detection.
             query = """
-        SELECT\
-            cleabs, code_insee, nom_commune, iris, code_iris, nom_iris, type_iris,\
-            ST_AsWKB(geometrie) AS geom_wkb \
-        FROM ST_read(?, layer = 'contours_iris')
-        """
+                SELECT
+                    * EXCLUDE(geometrie),
+                    ST_AsWKB(geometrie) AS geometrie
+                FROM ST_read(?, layer = 'contours_iris')
+            """
             df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
             logger.debug(
                 "DuckDB spatial query completed",
@@ -173,40 +182,37 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
     with _duckdb_spatial_conn() as conn:
         conn.register("bronze_data", df)
 
-        # Compute centroids and transform to WGS84.
-        # geom_wkb is stored as WKB in Lambert 93 (EPSG:2154).
-        # The CTE computes ST_GeomFromWKB + ST_Centroid + ST_Transform once per row;
-        # the outer SELECT extracts X/Y from the already-transformed point.
-        # Note: DuckDB's ST_Transform from Lambert 93 to WGS84 returns coordinates
-        # in (lat, lon) order instead of standard (lon, lat), so ST_X gives lat
-        # and ST_Y gives lon (counterintuitive but verified empirically).
-        # noinspection SqlResolve
+        # geometrie is WKB in Lambert 93 (EPSG:2154). The CTE computes
+        # centroid + reprojection once per row; the outer SELECT
+        # extracts X/Y.
         query = """
-        WITH centroids AS (
+            WITH centroids AS (
+                SELECT
+                    code_iris,
+                    nom_iris,
+                    code_insee,
+                    nom_commune,
+                    type_iris,
+                    geometrie,
+                    ST_Transform(
+                        ST_Centroid(ST_GeomFromWKB(geometrie)),
+                        'EPSG:2154',
+                        'EPSG:4326'
+                    ) AS centroid_wgs84
+                FROM bronze_data
+            )
             SELECT
                 code_iris,
                 nom_iris,
                 code_insee,
                 nom_commune,
                 type_iris,
-                geom_wkb,
-                ST_Transform(
-                    ST_Centroid(ST_GeomFromWKB(geom_wkb)),
-                    'EPSG:2154',
-                    'EPSG:4326'
-                ) AS centroid_wgs84
-            FROM bronze_data
-        )
-        SELECT
-            code_iris,
-            nom_iris,
-            code_insee,
-            nom_commune,
-            type_iris,
-            geom_wkb,
-            ST_X(centroid_wgs84) AS centroid_lat,
-            ST_Y(centroid_wgs84) AS centroid_lon
-        FROM centroids
+                geometrie,
+                -- DuckDB PROJ returns (lat, lon) for EPSG:4326
+                -- (non-standard axis order)
+                ST_X(centroid_wgs84) AS centroid_lat,  -- X = latitude
+                ST_Y(centroid_wgs84) AS centroid_lon   -- Y = longitude
+            FROM centroids
         """
 
         logger.debug("Computing centroids with DuckDB spatial extension")

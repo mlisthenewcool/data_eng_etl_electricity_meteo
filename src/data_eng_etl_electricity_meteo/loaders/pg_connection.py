@@ -7,7 +7,7 @@ Airflow-agnostic.
 Two factories are provided:
 
 - ``open_standalone_connection()`` — for scripts and tests.
-  Reads credentials from pydantic-settings (env vars or Docker secrets).
+  Reads credentials from pydantic-settings (Docker secrets files).
 - ``open_airflow_connection()`` — for Airflow tasks.
   Creates a ``PostgresHook`` from ``AIRFLOW_CONN_ID`` and extracts a
   ``psycopg.Connection``.
@@ -38,8 +38,8 @@ def open_standalone_connection() -> psycopg.Connection:
     """Open a psycopg connection using settings resolved at startup.
 
     Credentials (``settings.postgres_user`` / ``settings.postgres_password``) are
-    populated by pydantic-settings from whichever source was available: env vars
-    (local dev) or Docker secrets files (Docker / Airflow container).
+    populated by pydantic-settings from Docker secrets files in the ``secrets/``
+    directory (local dev) or ``/run/secrets/`` (Docker container).
     The loader code is identical in both environments.
 
     Returns
@@ -50,23 +50,19 @@ def open_standalone_connection() -> psycopg.Connection:
     Raises
     ------
     PostgresCredentialsError
-        If credentials are missing from both env vars and Docker secrets.
+        If credentials are missing from Docker secrets files.
     psycopg.OperationalError
         If the connection cannot be established.
     """
     if settings.postgres_user is None:
         raise PostgresCredentialsError(
             missing_field="postgres_user",
-            suggestion=(
-                "Set POSTGRES_USER env var or provide a 'postgres_root_username' Docker secret."
-            ),
+            suggestion="Create secrets/postgres_root_username file.",
         )
     if settings.postgres_password is None:
         raise PostgresCredentialsError(
             missing_field="postgres_password",
-            suggestion=(
-                "Set POSTGRES_PASSWORD env var or provide a 'postgres_root_password' Docker secret."
-            ),
+            suggestion="Create secrets/postgres_root_password file.",
         )
 
     return psycopg.connect(

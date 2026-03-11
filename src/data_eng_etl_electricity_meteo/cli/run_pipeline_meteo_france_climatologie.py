@@ -6,11 +6,9 @@ For datasets without extra arguments, use ``cli/run_pipeline.py``.
 
 Usage::
 
-    uv run --env-file=.env.local src/.../cli/run_meteo_climatologie.py
-    uv run --env-file=.env.local src/.../cli/run_meteo_climatologie.py \
-        --skip-postgres
-    uv run --env-file=.env.local src/.../cli/run_meteo_climatologie.py \
-        --year-start 2024 --year-end 2025
+    uv run pipeline-meteo-clim
+    uv run pipeline-meteo-clim --skip-postgres
+    uv run pipeline-meteo-clim --year-start 2024 --year-end 2025
 """
 
 from datetime import UTC, datetime
@@ -18,7 +16,7 @@ from functools import partial
 
 import typer
 
-from data_eng_etl_electricity_meteo.cli.runner import run_pipeline
+from data_eng_etl_electricity_meteo.cli.pipeline_runner import run_pipeline
 from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
     download_climatologie,
 )

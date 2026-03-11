@@ -1,3 +1,4 @@
+# $schema: https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest/dbt_project-latest.json
 name: data_eng_gold
 version: '1.0.0'
 config-version: 2
@@ -19,5 +20,7 @@ models:
       columns: true
     silver:
       +materialized: view
+      +schema: silver
     gold:
       +materialized: table
+      +schema: gold

@@ -1,6 +1,6 @@
--- geom_wkb: polygon geometry as WKB bytes in Lambert 93 (EPSG:2154).
+-- geometrie: polygon geometry as WKB bytes in Lambert 93 (EPSG:2154).
+-- Converted to PostGIS geometry in dbt staging model (stg_dim_contours_iris).
 -- centroid_lat/centroid_lon: polygon centroid in WGS84 (EPSG:4326).
--- Future: geom_wkb could migrate to PostGIS geometry(Polygon, 2154).
 
 CREATE TABLE IF NOT EXISTS {schema}.{table} (
     code_iris       TEXT PRIMARY KEY,
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS {schema}.{table} (
     code_insee      TEXT,
     nom_commune     TEXT,
     type_iris       TEXT,
-    geom_wkb        BYTEA,
+    geometrie       BYTEA,
     centroid_lat    DOUBLE PRECISION,
     centroid_lon    DOUBLE PRECISION,
     inserted_at     TIMESTAMP DEFAULT NOW()

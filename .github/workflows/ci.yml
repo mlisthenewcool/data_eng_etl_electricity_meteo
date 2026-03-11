@@ -59,7 +59,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: dbt parse
-        run: uv run dbt parse --project-dir dbt --profiles-dir dbt --target docker
+        run: uv run dbt parse --project-dir dbt --profiles-dir dbt
 
       - name: Dependency audit (pip-audit)
         # CVE-2025-62727: starlette 0.48.0, transitive dep of Airflow (dev only)

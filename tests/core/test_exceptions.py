@@ -119,13 +119,13 @@ class TestPipelineStageErrorMessage:
 class TestPostgresCredentialsErrorToDict:
     def test_context_contains_missing_field_and_suggestion(self) -> None:
         exc = PostgresCredentialsError(
-            missing_field="POSTGRES_PASSWORD",
-            suggestion="Set POSTGRES_PASSWORD or mount Docker secret",
+            missing_field="postgres_password",
+            suggestion="Create secrets/postgres_root_password file.",
         )
         result = exc.to_dict()
         assert result == {
-            "missing_field": "POSTGRES_PASSWORD",
-            "suggestion": "Set POSTGRES_PASSWORD or mount Docker secret",
+            "missing_field": "postgres_password",
+            "suggestion": "Create secrets/postgres_root_password file.",
         }
         assert "stage" not in result
 

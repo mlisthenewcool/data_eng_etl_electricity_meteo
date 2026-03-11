@@ -1,10 +1,3 @@
-{{
-    config(
-        materialized='view',
-        schema='silver'
-    )
-}}
-
 SELECT
     code_eic_resource_object,
     nom_installation,

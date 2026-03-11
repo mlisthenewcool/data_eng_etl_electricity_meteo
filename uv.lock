@@ -804,8 +804,8 @@ wheels = [
 
 [[package]]
 name = "data-eng-etl-electricity-meteo"
-version = "2026.2.10"
-source = { virtual = "." }
+version = "2026.3.11"
+source = { editable = "." }
 dependencies = [
     { name = "dbt-core" },
     { name = "dbt-postgres" },

@@ -15,14 +15,14 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 
 logger = get_logger("transform")
 
-# Column that contains non-numeric annotations in the consolidated source API.
-# Cast to Int64 (BIGINT) in silver; non-castable values become null.
-_NUMERIC_TEXT_COLUMNS: frozenset[str] = frozenset({"eolien"})
-
 
 # --------------------------------------------------------------------------------------
 # Silver schema
 # --------------------------------------------------------------------------------------
+
+# Column that contains non-numeric annotations in the consolidated source API.
+# Cast to Int64 (BIGINT) in silver; non-castable values become null.
+_NUMERIC_TEXT_COLUMNS: frozenset[str] = frozenset({"eolien"})
 
 
 _ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(

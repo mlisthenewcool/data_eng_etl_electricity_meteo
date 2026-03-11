@@ -28,7 +28,7 @@ logger = get_logger("extraction")
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExtractedFileInfo:
     """Extracted file metadata (path, hash, size) returned by ``extract_7z``."""
 

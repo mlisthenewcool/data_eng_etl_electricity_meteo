@@ -15,16 +15,16 @@ from data_eng_etl_electricity_meteo.transformations.spec import DatasetTransform
 
 logger = get_logger("transform")
 
+
+# --------------------------------------------------------------------------------------
+# Silver schema
+# --------------------------------------------------------------------------------------
+
 # Columns that contain non-numeric annotations in the real-time source API.
 # Cast to Int64 (BIGINT) in silver; non-castable values become null.
 _NUMERIC_TEXT_COLUMNS: frozenset[str] = frozenset(
     {"pompage", "stockage_batterie", "destockage_batterie"}
 )
-
-
-# --------------------------------------------------------------------------------------
-# Silver schema
-# --------------------------------------------------------------------------------------
 
 
 _ALL_SOURCE_COLUMNS: frozenset[str] = frozenset(

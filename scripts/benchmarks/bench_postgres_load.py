@@ -10,10 +10,9 @@ Requirements
 
 Usage::
 
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_postgres_load.py
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_postgres_load.py \
-        --json results.json
-    PYTHONPATH=src uv run python scripts/benchmarks/bench_postgres_load.py \
+    uv run python scripts/benchmarks/bench_postgres_load.py
+    uv run python scripts/benchmarks/bench_postgres_load.py --json results.json
+    uv run python scripts/benchmarks/bench_postgres_load.py \
         --dataset odre_installations
 """
 

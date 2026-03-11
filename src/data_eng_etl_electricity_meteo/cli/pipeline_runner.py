@@ -11,7 +11,7 @@ Do **not** raise ``SystemExit`` when running on Airflow. Let Airflow handle exce
 import time
 from datetime import UTC, datetime
 
-from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
+from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
     DataCatalogError,
@@ -34,12 +34,28 @@ from data_eng_etl_electricity_meteo.pipeline.types import PipelineRunSnapshot
 logger = get_logger("cli")
 
 
+def _load_postgres(dataset: RemoteDatasetConfig) -> None:
+    """Run the Postgres load step, exit on failure.
+
+    Parameters
+    ----------
+    dataset
+        Remote dataset configuration from the catalog.
+    """
+    try:
+        _ = run_standalone_postgres_load(dataset)
+    except PostgresLoadError as err:
+        err.log(logger.critical)
+        raise SystemExit(1)
+
+
 def run_pipeline(
     dataset_name: str,
     *,
     custom_download: CustomDownloadFunc | None = None,
     custom_metadata: CustomMetadataFunc | None = None,
     skip_postgres: bool = False,
+    only_postgres: bool = False,
 ) -> None:
     """Run the full remote-ingestion pipeline for a single dataset.
 
@@ -55,9 +71,11 @@ def run_pipeline(
         no caching headers (e.g. OpenDataSoft catalog API).
     skip_postgres
         When ``True``, skip the final Postgres load step.
+    only_postgres
+        When ``True``, skip ingestion and only run the Postgres load from the existing
+        silver Parquet.
     """
     t0 = time.monotonic()
-    start_datetime = datetime.now(tz=UTC)
 
     # -- Load catalog and dataset configuration ----------------------------------------
 
@@ -67,6 +85,10 @@ def run_pipeline(
     except DataCatalogError as error:
         error.log(logger.critical)
         raise SystemExit(1)
+
+    if only_postgres:
+        _load_postgres(dataset)
+        return None
 
     logger.debug(
         "Data catalog loaded",
@@ -81,7 +103,7 @@ def run_pipeline(
 
     # -- Prepare version and pipeline --------------------------------------------------
 
-    version = dataset.ingestion.frequency.format_datetime_as_version(start_datetime)
+    version = dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
     manager = RemoteIngestionPipeline(
         dataset=dataset,
         _custom_download=custom_download,
@@ -101,9 +123,11 @@ def run_pipeline(
         raise SystemExit(1)
 
     if download_ctx is None:
-        return
+        return None
 
     # -- Extract (optional) ------------------------------------------------------------
+
+    extract_ctx = None
 
     if dataset.source.format.is_archive:
         try:
@@ -112,11 +136,12 @@ def run_pipeline(
             error.log(logger.critical)
             raise SystemExit(1)
 
+        # extract_archive returns None when the extracted content hash is
+        # unchanged (smart-skip). Landing files are already cleaned up.
         if extract_ctx is None:
-            return
+            return None
     else:
         logger.debug("Extraction skipped: format is not archive")
-        extract_ctx = None
 
     # -- Convert to Bronze -------------------------------------------------------------
 
@@ -140,14 +165,11 @@ def run_pipeline(
 
     # -- Postgres load -----------------------------------------------------------------
 
-    if skip_postgres:
+    if not skip_postgres:
+        _load_postgres(dataset)
+    else:
         logger.info("Postgres load skipped: --skip-postgres")
-        return
-
-    try:
-        _ = run_standalone_postgres_load(dataset)
-    except PostgresLoadError as err:
-        err.log(logger.critical)
-        raise SystemExit(1)
 
     logger.info("Pipeline completed", duration_s=round(time.monotonic() - t0, 2))
+
+    return None

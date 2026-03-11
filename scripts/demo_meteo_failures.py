@@ -5,7 +5,7 @@ for a reduced set of departments.
 
 Downloads ~4 real CSV.gz files (~30s depending on network).
 
-Run: uv run --env-file=.env.local python scripts/demo_meteo_failures.py
+Run: uv run python scripts/demo_meteo_failures.py
 """
 
 import tempfile

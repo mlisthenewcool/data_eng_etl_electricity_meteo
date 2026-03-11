@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Annotated, ClassVar
 
 from pydantic import (
-    AliasChoices,
     BeforeValidator,
     DirectoryPath,
     Field,
@@ -49,9 +48,10 @@ class Settings(BaseSettings):
 
     Notes
     -----
-    Credential resolution (``postgres_user`` / ``postgres_password``) uses
-    ``AliasChoices`` so both env-var names and Docker secret filenames are accepted
-    transparently.
+    Credentials (``postgres_user`` / ``postgres_password``) are resolved from secrets
+    files via ``SecretsSettingsSource``. Env vars under the alias names
+    (``POSTGRES_ROOT_USERNAME`` / ``POSTGRES_ROOT_PASSWORD``) are technically accepted
+    by pydantic-settings but are not documented or supported.
 
     Computed path fields typed as ``DirectoryPath``
     (``data_dir_path``, ``postgres_dir_path``) validate that the target directory exists
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
         env_file=_ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,  # env vars are defined in capitals
-        extra="ignore",  # 'forbid' crashes because of PYTHONPATH
+        extra="ignore",  # .env contains AIRFLOW_DB_NAME (Docker Compose only, not a field)
         frozen=True,  # Immutable settings
     )
 
@@ -101,20 +101,21 @@ class Settings(BaseSettings):
 
     postgres_host: str = Field(default="localhost", description="Postgres host")
     postgres_port: int = Field(default=5432, description="Postgres port", gt=0, le=65535)
-    postgres_db_name: str = Field(default="default_db_name", description="Postgres database name")
+    postgres_db_name: str = Field(default="electricity_meteo", description="Postgres database name")
 
-    # AliasChoices accepts both the env-var name and the Docker secrets filename.
-    # Local dev : set POSTGRES_USER / POSTGRES_PASSWORD env vars.
-    # Docker    : SecretsSettingsSource reads postgres_root_{username,password}.
+    # Credentials are resolved from secrets files (secrets/ directory).
+    # SecretsSettingsSource matches the validation_alias to the filename.
+    # Env vars under the alias names (POSTGRES_ROOT_USERNAME / POSTGRES_ROOT_PASSWORD)
+    # are technically accepted by pydantic-settings but not documented or supported.
     postgres_user: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("postgres_user", "postgres_root_username"),
-        description="Postgres user",
+        validation_alias="postgres_root_username",
+        description="Postgres user (from secrets file)",
     )
     postgres_password: SecretStr | None = Field(
         default=None,
-        validation_alias=AliasChoices("postgres_password", "postgres_root_password"),
-        description="Postgres password",
+        validation_alias="postgres_root_password",
+        description="Postgres password (from secrets file)",
     )
 
     # -- Airflow settings --------------------------------------------------------------
@@ -158,11 +159,6 @@ class Settings(BaseSettings):
         return self._ROOT_DIR / "postgres"
 
     # -- dbt settings ------------------------------------------------------------------
-
-    dbt_target: str = Field(
-        default="dev",
-        description="dbt profile target name (override to 'docker' in containers)",
-    )
 
     @computed_field
     @cached_property
