@@ -82,8 +82,12 @@ def _create_dag(
             Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come from the
             Airflow connection store.
             """
-            # closing() ensures close-without-commit (unlike `with conn:`
-            # which auto-commits on success).
+            # closing() calls conn.close() on exit — nothing more.
+            # `with conn:` would be incorrect here: in psycopg3, Connection.__exit__
+            # manages the *transaction* (commit/rollback) but does NOT close the
+            # connection — causing a connection leak. It would also add redundant
+            # transaction management on top of load_silver_to_postgres(), which
+            # already calls conn.commit() / conn.rollback() internally.
             with closing(open_airflow_connection()) as conn:
                 metrics = load_silver_to_postgres(dataset, conn=conn)
 

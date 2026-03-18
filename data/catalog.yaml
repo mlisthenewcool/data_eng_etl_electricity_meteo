@@ -79,7 +79,7 @@ datasets:
       # Custom multi-file download : 95 fichiers par département (Parquet Hydra si dispo, sinon CSV.gz)
       # Le téléchargement est géré par utils/meteo_download.py, pas le pipeline standard
       # Doc API climatologie : https://portail-api.meteofrance.fr/web/fr/api/DonneesPubliquesClimatologie
-      url: "https://object.files.data.gouv.fr/meteofrance/data/synchro_ftp/BASE/HOR/"
+      url: "https://www.data.gouv.fr/fr/datasets/6569b4473bedf2e7abad3b72/"
       format: "csv_gz"
     ingestion:
       frequency: "daily"

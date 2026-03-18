@@ -14,7 +14,7 @@ dependencies = [
     "duckdb>=1.5.0",
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.7",
-    "polars>=1.38.1",
+    "polars>=1.39.0",
     "psycopg[c]>=3.3.3",
     "py7zr>=1.1.0",
     "pyarrow>=23.0.1",
@@ -28,15 +28,15 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "apache-airflow-providers-postgres>=6.6.0",
+    "apache-airflow-providers-postgres>=6.6.1",
     "apache-airflow-task-sdk>=1.1.8",
     "marimo>=0.20.4",
     "pip-audit>=2.10.0",
-    "prek>=0.3.5",
+    "prek>=0.3.6",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.5",
-    "ty>=0.0.21",
+    "ruff>=0.15.6",
+    "ty>=0.0.23",
 ]
 
 [project.scripts]

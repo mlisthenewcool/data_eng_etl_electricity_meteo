@@ -58,8 +58,8 @@ def main() -> None:
         ):
             try:
                 result = meteo_download.download_climatologie(Path(tmpdir))
-                print(f"\nMerged file: {result}")
-                print(f"Size: {result.stat().st_size / 1024**2:.1f} MiB")
+                print(f"\nMerged file: {result.path}")
+                print(f"Size: {result.size_mib} MiB")
             except (ValueError, OSError) as e:
                 print(f"\nDownload error: {e}")
 

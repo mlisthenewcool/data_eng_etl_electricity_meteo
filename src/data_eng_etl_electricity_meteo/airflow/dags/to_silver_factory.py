@@ -19,10 +19,9 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 )
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
-from data_eng_etl_electricity_meteo.custom_downloads.registry import CUSTOM_DOWNLOADS
-from data_eng_etl_electricity_meteo.custom_metadata.registry import CUSTOM_METADATA
 from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
+from data_eng_etl_electricity_meteo.pipeline.strategies import get_strategy
 from data_eng_etl_electricity_meteo.pipeline.types import PipelineContext, PipelineRunSnapshot
 
 logger = get_logger("dag.to_silver")
@@ -180,11 +179,7 @@ def _generate_all_dags() -> dict[str, DAG]:
             continue  # move to next dataset
 
         try:
-            manager = RemoteIngestionPipeline(
-                dataset=dataset,
-                _custom_download=CUSTOM_DOWNLOADS.get(dataset.name),
-                _custom_metadata=CUSTOM_METADATA.get(dataset.name),
-            )
+            manager = RemoteIngestionPipeline(dataset=dataset, strategy=get_strategy(dataset.name))
         except TransformNotFoundError as error:
             error.log(logger.warning)
             continue  # move to next dataset

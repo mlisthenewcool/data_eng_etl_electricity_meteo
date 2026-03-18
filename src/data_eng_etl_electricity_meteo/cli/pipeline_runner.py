@@ -23,13 +23,10 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.loaders.pg_loader import run_standalone_postgres_load
-from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
-    CustomDownloadFunc,
-    CustomMetadataFunc,
-    RemoteIngestionPipeline,
-)
+from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
-from data_eng_etl_electricity_meteo.pipeline.types import PipelineRunSnapshot
+from data_eng_etl_electricity_meteo.pipeline.strategies import get_strategy
+from data_eng_etl_electricity_meteo.pipeline.types import DownloadStrategy, PipelineRunSnapshot
 
 logger = get_logger("cli")
 
@@ -52,8 +49,7 @@ def _load_postgres(dataset: RemoteDatasetConfig) -> None:
 def run_pipeline(
     dataset_name: str,
     *,
-    custom_download: CustomDownloadFunc | None = None,
-    custom_metadata: CustomMetadataFunc | None = None,
+    strategy: DownloadStrategy | None = None,
     skip_postgres: bool = False,
     only_postgres: bool = False,
 ) -> None:
@@ -63,12 +59,8 @@ def run_pipeline(
     ----------
     dataset_name
         Catalog identifier (e.g. ``odre_installations``).
-    custom_download
-        Optional callable replacing the standard single-URL download
-        (e.g. multi-file merge for climatologie).
-    custom_metadata
-        Optional callable providing remote metadata when the standard HTTP HEAD returns
-        no caching headers (e.g. OpenDataSoft catalog API).
+    strategy
+        Download strategy. When ``None``, uses ``get_strategy(dataset_name)``.
     skip_postgres
         When ``True``, skip the final Postgres load step.
     only_postgres
@@ -104,11 +96,8 @@ def run_pipeline(
     # -- Prepare version and pipeline --------------------------------------------------
 
     version = dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
-    manager = RemoteIngestionPipeline(
-        dataset=dataset,
-        _custom_download=custom_download,
-        _custom_metadata=custom_metadata,
-    )
+    resolved_strategy = strategy if strategy is not None else get_strategy(dataset_name)
+    manager = RemoteIngestionPipeline(dataset=dataset, strategy=resolved_strategy)
 
     # -- Load previous run state -------------------------------------------------------
 

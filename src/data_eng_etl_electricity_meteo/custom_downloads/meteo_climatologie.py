@@ -29,6 +29,8 @@ from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
+from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
+from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 from data_eng_etl_electricity_meteo.utils.progress import (
     BatchProgressFactory,
     DownloadProgressReporter,
@@ -243,7 +245,7 @@ def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
     with client.stream("GET", url) as response:
         response.raise_for_status()
         with path.open("wb") as f:
-            for chunk in response.iter_bytes():
+            for chunk in response.iter_bytes():  # TODO: add chunk_size from settings
                 f.write(chunk)
 
 
@@ -417,11 +419,11 @@ def _download_all_departments(
 
 def download_climatologie(
     dest_dir: Path,
-    progress: BatchProgressFactory | None = None,
     *,
+    progress: BatchProgressFactory | None = None,
     year_start: int | None = None,
     year_end: int | None = None,
-) -> Path:
+) -> HttpDownloadInfo:
     """Download all departmental data and merge into a single Parquet.
 
     Starts from a base of hardcoded CSV.gz URLs for all 95 departments, then enriches
@@ -443,8 +445,8 @@ def download_climatologie(
 
     Returns
     -------
-    Path
-        Path to the merged Parquet file.
+    HttpDownloadInfo
+        Merged file path, content hash, and size.
 
     Raises
     ------
@@ -514,4 +516,6 @@ def download_climatologie(
     else:
         logger.info("Climatologie merge completed", **log_kwargs)
 
-    return merged_path
+    file_hash = FileHasher.hash_file(merged_path)
+    size_mib = round(merged_path.stat().st_size / (1024 * 1024), 2)
+    return HttpDownloadInfo(path=merged_path, file_hash=file_hash, size_mib=size_mib)

@@ -17,10 +17,11 @@ from functools import partial
 import typer
 
 from data_eng_etl_electricity_meteo.cli.pipeline_runner import run_pipeline
-from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
-    download_climatologie,
+from data_eng_etl_electricity_meteo.pipeline.strategies import (
+    climatologie_download,
+    datagouv_metadata,
 )
-from data_eng_etl_electricity_meteo.custom_metadata.registry import CUSTOM_METADATA
+from data_eng_etl_electricity_meteo.pipeline.types import DownloadStrategy
 
 DATASET_NAME = "meteo_france_climatologie"
 
@@ -50,12 +51,14 @@ def main(
     """Run the Météo France climatologie pipeline (95 departmental files)."""
     run_pipeline(
         DATASET_NAME,
-        custom_download=partial(
-            download_climatologie,
-            year_start=year_start,
-            year_end=year_end,
+        strategy=DownloadStrategy(
+            fetch_metadata=datagouv_metadata,
+            download_file=partial(
+                climatologie_download,
+                year_start=year_start,
+                year_end=year_end,
+            ),
         ),
-        custom_metadata=CUSTOM_METADATA.get(DATASET_NAME),
         skip_postgres=skip_postgres,
     )
 
