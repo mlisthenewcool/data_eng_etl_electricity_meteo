@@ -175,8 +175,8 @@ def _generate_all_dags() -> dict[str, DAG]:
         try:
             asset = get_silver_file_asset(dataset)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
-            continue  # move to next dataset
+            logger.exception("Invalid asset configuration", dataset_name=dataset.name)
+            continue
 
         try:
             manager = RemoteIngestionPipeline(dataset=dataset, strategy=get_strategy(dataset.name))

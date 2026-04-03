@@ -209,10 +209,10 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("latitude").is_null().sum().alias("_warn_dropped_no_position"),
         (pl.col("latitude").is_not_null() & _overseas_filter)
         .sum()
-        .alias("_warn_overseas_stations"),
+        .alias("_diag_overseas_stations"),
     )
     lf = lf.with_columns(
-        (pl.len() - pl.col("_warn_dropped_no_position") - pl.col("_warn_overseas_stations")).alias(
+        (pl.len() - pl.col("_warn_dropped_no_position") - pl.col("_diag_overseas_stations")).alias(
             "_diag_metropolitan_stations"
         ),
     )

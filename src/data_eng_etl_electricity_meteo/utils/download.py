@@ -232,14 +232,22 @@ def download_to_file(
                 )
             )
 
+            # Prevents downstream stages from reading a partial file if
+            # the download is interrupted (smart-skip compares hashes).
+            tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
+
             try:
-                with dest_path.open("wb") as f:
+                with tmp_path.open("wb") as f:
                     for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
                         f.write(chunk)
                         hasher.update(chunk)
                         chunk_len = len(chunk)
                         downloaded_bytes += chunk_len
                         reporter.update(chunk_len)
+                tmp_path.rename(dest_path)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)
+                raise
             finally:
                 reporter.close()
 

@@ -113,6 +113,10 @@ def extract_7z(
         If *target_filename* not found in archive.
     FileIntegrityError
         If validation enabled and file is invalid.
+    py7zr.Bad7zFile
+        If the archive is corrupt or unreadable.
+    OSError
+        If extraction or file move fails.
     """
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)

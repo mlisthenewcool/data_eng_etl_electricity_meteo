@@ -54,6 +54,11 @@ def extract_diagnostics(df: pl.DataFrame) -> pl.DataFrame:
     their value is > 0. Diagnostic columns (``_diag_*``) are logged as a single ``info``
     message (zeros omitted).
 
+    Diagnostic columns must be **scalar aggregations broadcast to all rows**
+    (e.g. ``pl.col(...).sum()`` inside ``with_columns``).
+    This function reads ``item(0)`` — per-row diagnostic columns would silently return
+    only the first row's value.
+
     Parameters
     ----------
     df

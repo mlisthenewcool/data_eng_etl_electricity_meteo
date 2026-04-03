@@ -126,8 +126,8 @@ def _generate_all_dags() -> dict[str, DAG]:
             silver_file_asset = get_silver_file_asset(dataset)
             silver_pg_asset = get_silver_pg_asset(dataset)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
-            continue  # move to next dataset
+            logger.exception("Invalid asset configuration", dataset_name=dataset.name)
+            continue
 
         dags[dataset.name] = _create_dag(
             dataset, schedule=silver_file_asset, outlet=silver_pg_asset

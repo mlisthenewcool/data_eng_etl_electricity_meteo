@@ -403,19 +403,31 @@ def _verify_and_maybe_full_refresh(
     try:
         with conn.cursor() as cur:
             pg_count = _verify_sync(pg_table, cur=cur, expected_count=expected_count)
-            if pg_count is None:
-                return None
+    except psycopg.Error:
+        conn.rollback()
+        logger.exception("Row count verification failed, keeping initial incremental load")
+        return None
 
-            # Mismatch → full refresh from current.parquet
-            logger.warning(
-                "Full refresh triggered by row count mismatch",
-                pg_rows=pg_count,
-                parquet_rows=expected_count,
-            )
-            silver_full = pl.read_parquet(silver_path)
+    if pg_count is None:
+        return None
+
+    # Mismatch → full refresh from current.parquet
+    logger.warning(
+        "Full refresh triggered by row count mismatch",
+        pg_rows=pg_count,
+        parquet_rows=expected_count,
+    )
+
+    try:
+        silver_full = pl.read_parquet(silver_path)
+    except (pl.exceptions.PolarsError, OSError):
+        logger.exception("Cannot read silver snapshot for full refresh")
+        return None
+
+    try:
+        with conn.cursor() as cur:
             cur.execute(ddl_sql)
             rows = _load_snapshot(silver_full, cur=cur, pg_table=pg_table)
-
         conn.commit()
     except (psycopg.Error, pl.exceptions.PolarsError, OSError):
         conn.rollback()

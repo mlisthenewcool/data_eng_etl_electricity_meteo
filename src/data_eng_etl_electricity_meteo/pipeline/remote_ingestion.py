@@ -540,7 +540,10 @@ class RemoteIngestionPipeline:
             self._resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
             df.write_parquet(self._resolver.silver_current_path)
         except OSError as err:
-            self._file_manager.rollback_silver()
+            try:
+                self._file_manager.rollback_silver()
+            except OSError:
+                logger.warning("Silver rollback also failed after write error")
             raise SilverStageError("Silver Parquet write failed") from err
 
         columns = df.columns
@@ -645,6 +648,9 @@ class RemoteIngestionPipeline:
         # -- Changed rows: hash-based comparison instead of full column join -----------
 
         # pl.struct hashing is null-aware, so null vs value diffs are detected.
+        # Note: pl.struct().hash() is not stable across Polars versions. After a
+        # Polars upgrade, all hashes may differ, causing a full delta write
+        # (safe — over-reports changes, no data loss).
         non_key_cols = [c for c in new_lf.collect_schema().names() if c not in pk]
         hash_expr = pl.struct(non_key_cols).hash().alias("_row_hash")
 
