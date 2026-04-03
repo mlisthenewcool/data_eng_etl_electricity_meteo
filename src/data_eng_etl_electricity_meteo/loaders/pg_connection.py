@@ -9,15 +9,16 @@ Two factories are provided:
 - ``open_standalone_connection()`` — for scripts and tests.
   Reads credentials from pydantic-settings (Docker secrets files).
 - ``open_airflow_connection()`` — for Airflow tasks.
-  Creates a ``PostgresHook`` from ``AIRFLOW_CONN_ID`` and extracts a
-  ``psycopg.Connection``.
+  Resolves credentials from the Airflow connection store, then calls
+  ``psycopg.connect()`` directly.
 
-Both return a ``psycopg.Connection`` — callers are responsible for closing it.
+Both return a native ``psycopg.Connection`` — callers are responsible for closing it.
 
-``get_conn()`` is used instead of Hook convenience methods (``run``, ``copy_expert``)
-because the loader needs a single atomic transaction spanning DDL, schema validation,
-TRUNCATE/staging, COPY streaming, and upsert.
-Hook methods are stateless per call and do not share a transaction.
+``psycopg.connect()`` is called directly (instead of ``PostgresHook.get_conn()``)
+because the loader uses psycopg3-specific APIs (binary ``COPY`` protocol) and
+``get_conn()`` returns ``CompatConnection`` — a Protocol abstracting psycopg2/3 that
+hides the concrete ``psycopg.Connection`` type from type checkers.  Credentials are
+resolved via ``Connection.get()`` from the Airflow Task SDK — no hook needed.
 """
 
 from __future__ import annotations
@@ -75,25 +76,35 @@ def open_standalone_connection() -> psycopg.Connection:
 
 
 def open_airflow_connection() -> psycopg.Connection:
-    """Create a ``PostgresHook`` and return a ``psycopg.Connection``.
+    """Resolve Airflow credentials and open a native ``psycopg.Connection``.
 
-    Uses ``AIRFLOW_CONN_ID`` to look up the Airflow connection store.
-    ``PostgresHook.get_conn()`` returns a psycopg3 connection wrapped in
-    ``CompatConnection`` (Airflow's psycopg2/3 abstraction layer) when ``USE_PSYCOPG3``
-    is ``True`` — which is guaranteed when psycopg3 and SQLAlchemy 2.x are both
-    installed (always the case in this project).
-
-    The ``type: ignore[assignment]`` is necessary because ``CompatConnection`` is not
-    recognized by type checkers as a ``psycopg.Connection``.
+    Uses ``Connection.get()`` from the Airflow Task SDK to retrieve host, port, dbname,
+    user and password from the Airflow connection store, then calls
+    ``psycopg.connect()`` directly — the same pattern as
+    ``open_standalone_connection()`` but sourcing credentials from Airflow instead of
+    pydantic-settings.
 
     Returns
     -------
     psycopg.Connection
         Open connection. Caller must close it.
-    """
-    # Lazy import: Airflow providers only available inside the container.
-    from airflow.providers.postgres.hooks.postgres import PostgresHook  # noqa: PLC0415
 
-    hook = PostgresHook(AIRFLOW_CONN_ID)
-    conn: psycopg.Connection = hook.get_conn()  # type: ignore[assignment]
-    return conn
+    Raises
+    ------
+    airflow.exceptions.AirflowNotFoundException
+        If ``AIRFLOW_CONN_ID`` is not defined in the Airflow connection store.
+    psycopg.OperationalError
+        If the connection cannot be established.
+    """
+    # Lazy import: Airflow SDK needs the runtime context (secrets backend)
+    # which is only available inside the container.
+    from airflow.sdk.definitions.connection import Connection  # noqa: PLC0415
+
+    airflow_conn = Connection.get(AIRFLOW_CONN_ID)
+    return psycopg.connect(
+        host=airflow_conn.host,
+        port=airflow_conn.port,
+        dbname=airflow_conn.schema,
+        user=airflow_conn.login,
+        password=airflow_conn.password,
+    )

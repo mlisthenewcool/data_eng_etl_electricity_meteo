@@ -181,8 +181,7 @@ def load_silver_to_postgres(  # noqa: PLR0912
         raise PostgresLoadError("Upsert SQL file not found") from err
     except psycopg.Error as err:
         conn.rollback()
-        detail = getattr(err, "diag", None)
-        pg_msg = (detail.message_primary if detail else None) or str(err)
+        pg_msg = err.diag.message_primary or str(err)
         raise PostgresLoadError(
             f"Database error during COPY to {qualified_table}: {pg_msg}"
         ) from err
@@ -251,8 +250,8 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
     (Polars dtype vs Postgres data_type from ``information_schema``).
     """
     cur.execute(
-        "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = %s AND table_name = %s",
+        """SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s""",
         (_SILVER_SCHEMA, pg_table),
     )
     pg_columns: dict[str, str] = {row[0]: row[1] for row in cur.fetchall()}

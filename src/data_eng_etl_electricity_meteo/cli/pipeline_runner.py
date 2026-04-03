@@ -43,7 +43,7 @@ def _load_postgres(dataset: RemoteDatasetConfig) -> None:
         _ = run_standalone_postgres_load(dataset)
     except PostgresLoadError as err:
         err.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 def run_pipeline(
@@ -76,7 +76,7 @@ def run_pipeline(
         dataset = catalog.get_remote_dataset(dataset_name)
     except DataCatalogError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if only_postgres:
         _load_postgres(dataset)
@@ -109,7 +109,7 @@ def run_pipeline(
         download_ctx = manager.download(version, previous_snapshot=previous_snapshot)
     except DownloadStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if download_ctx is None:
         return None
@@ -123,7 +123,7 @@ def run_pipeline(
             extract_ctx = manager.extract_archive(download_ctx, previous_snapshot=previous_snapshot)
         except ExtractStageError as error:
             error.log(logger.critical)
-            raise SystemExit(1)
+            raise SystemExit(1) from None
 
         # extract_archive returns None when the extracted content hash is
         # unchanged (smart-skip). Landing files are already cleaned up.
@@ -138,7 +138,7 @@ def run_pipeline(
         bronze_ctx = manager.to_bronze(extract_ctx or download_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # -- Silver ------------------------------------------------------------------------
 
@@ -146,7 +146,7 @@ def run_pipeline(
         silver_ctx = manager.to_silver(bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # -- Save run state ----------------------------------------------------------------
 

@@ -15,7 +15,6 @@ single Parquet via lazy scanning.
 
 import re
 import shutil
-import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -25,7 +24,6 @@ from typing import TypedDict
 
 import httpx
 import polars as pl
-from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
@@ -33,7 +31,7 @@ from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
 from data_eng_etl_electricity_meteo.utils.progress import (
     BatchProgressFactory,
-    DownloadProgressReporter,
+    TqdmProgressReporter,
 )
 
 logger = get_logger("dl.meteo_clim")
@@ -278,7 +276,7 @@ def _download_department(
     parquet_url = resource["parquet_url"]
     csv_url = resource["csv_url"]
 
-    df: pl.DataFrame | None = None
+    out_path = tmp_dir / f"{dept}.parquet"
 
     # Try Parquet (Hydra) first — ~20x smaller than CSV.gz
     if parquet_url:
@@ -298,31 +296,31 @@ def _download_department(
                 error=str(err),
                 error_type=type(err).__qualname__,
             )
-            df = None
+        else:
+            df.write_parquet(out_path)
+            return len(df)
         finally:
             tmp_path.unlink(missing_ok=True)
 
     # Fallback to CSV.gz
-    if df is None:
-        tmp_path = tmp_dir / f"{dept}.csv.gz"
-        try:
-            _stream_to_file(csv_url, client=client, path=tmp_path)
-            # Column projection + infer_schema=False → 16 Utf8 columns
-            df = pl.read_csv(tmp_path, separator=";", infer_schema=False, columns=_LANDING_COLUMNS)
-            logger.debug("Downloaded CSV.gz", department=dept, rows_count=len(df))
-        except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
-            logger.warning(
-                "Failed to download department",
-                department=dept,
-                url=csv_url,
-                error=str(err),
-                error_type=type(err).__qualname__,
-            )
-            return 0
-        finally:
-            tmp_path.unlink(missing_ok=True)
+    tmp_path = tmp_dir / f"{dept}.csv.gz"
+    try:
+        _stream_to_file(csv_url, client=client, path=tmp_path)
+        # Column projection + infer_schema=False → 16 Utf8 columns
+        df = pl.read_csv(tmp_path, separator=";", infer_schema=False, columns=_LANDING_COLUMNS)
+        logger.debug("Downloaded CSV.gz", department=dept, rows_count=len(df))
+    except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
+        logger.warning(
+            "Failed to download department",
+            department=dept,
+            url=csv_url,
+            error=str(err),
+            error_type=type(err).__qualname__,
+        )
+        return 0
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
-    out_path = tmp_dir / f"{dept}.parquet"
     df.write_parquet(out_path)
     return len(df)
 
@@ -377,17 +375,12 @@ def _download_all_departments(
             for resource in resources.values()
         }
 
-        reporter: DownloadProgressReporter = (
-            progress(len(futures))
-            if progress is not None
-            else tqdm(
-                total=len(futures),
-                unit="dept",
-                desc="Downloading departments",
-                file=sys.stderr,
-                leave=False,
+        if progress is not None:
+            reporter = progress(len(futures))
+        else:
+            reporter = TqdmProgressReporter.for_items(
+                len(futures), unit="dept", desc="Downloading departments"
             )
-        )
 
         try:
             for future in as_completed(futures):
@@ -456,10 +449,8 @@ def download_climatologie(
         If the merge of per-department Parquet files fails.
     """
     now = datetime.now(tz=UTC)
-    if year_start is None:
-        year_start = now.year - 1
-    if year_end is None:
-        year_end = now.year
+    year_start: int = now.year - 1 if year_start is None else year_start
+    year_end: int = now.year if year_end is None else year_end
 
     # -- Initialize directories and HTTP client ----------------------------------------
 

@@ -4,9 +4,10 @@ Higher-level (Airflow-aware) reporters live in ``pipeline.progress`` and build o
 the types defined here.
 """
 
+import sys
 import time
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, Self
 
 from py7zr.callbacks import ExtractCallback
 from tqdm import tqdm
@@ -156,12 +157,67 @@ class BaseExtractCallback(ExtractCallback):
 # --------------------------------------------------------------------------------------
 
 
-class TqdmExtractCallback(BaseExtractCallback):
-    """Bridge between py7zr extraction and tqdm progress bar."""
+class TqdmProgressReporter:
+    """Interactive tqdm bar implementing DownloadProgressReporter."""
 
     def __init__(self, pbar: tqdm) -> None:
-        self.pbar = pbar
+        self._pbar = pbar
+
+    @classmethod
+    def for_bytes(cls, total: int, *, desc: str, mininterval: float = 1.0) -> Self:
+        """Byte-level progress (KiB/MiB/GiB auto-scaling)."""
+        return cls(
+            tqdm(
+                total=total,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc=desc,
+                mininterval=mininterval,
+                file=sys.stderr,
+                leave=False,
+            )
+        )
+
+    @classmethod
+    def for_items(cls, total: int, *, unit: str, desc: str) -> Self:
+        """Item-level progress (departments, files, etc.)."""
+        return cls(
+            tqdm(
+                total=total,
+                unit=unit,
+                desc=desc,
+                file=sys.stderr,
+                leave=False,
+            )
+        )
+
+    def update(self, n: int) -> None:
+        """Accumulate *n* units of progress."""
+        self._pbar.update(n)
+
+    def close(self) -> None:
+        """Close the underlying tqdm bar."""
+        self._pbar.close()
+
+
+class TqdmExtractCallback(BaseExtractCallback):
+    """Interactive tqdm bar for py7zr extraction."""
+
+    def __init__(self, total: int, *, desc: str) -> None:
+        self._pbar = tqdm(
+            total=total,
+            unit="B",
+            unit_scale=True,
+            desc=desc,
+            leave=False,
+            file=sys.stderr,
+        )
 
     def report_update(self, decompressed_bytes: str) -> None:
         """Update the progress bar with decompressed bytes."""
-        self.pbar.update(int(decompressed_bytes))
+        self._pbar.update(int(decompressed_bytes))
+
+    def close(self) -> None:
+        """Close the underlying tqdm bar."""
+        self._pbar.close()

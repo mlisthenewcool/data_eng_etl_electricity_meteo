@@ -9,7 +9,7 @@ from data_eng_etl_electricity_meteo.core.enums import PipelineStage
 class _LogMethod(Protocol):
     """Signature of a structlog bound logger method."""
 
-    def __call__(self, event: str, /, **kw: Any) -> None: ...
+    def __call__(self, event: str | None, *args: Any, **kw: Any) -> Any: ...
 
 
 class BaseProjectException(Exception):
@@ -227,35 +227,35 @@ class DownloadStageError(PipelineStageError):
     """Raised when the download stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.DOWNLOAD, message, context or None)
+        super().__init__(PipelineStage.DOWNLOAD, message, context)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.EXTRACT, message, context or None)
+        super().__init__(PipelineStage.EXTRACT, message, context)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.BRONZE, message, context or None)
+        super().__init__(PipelineStage.BRONZE, message, context)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.SILVER, message, context or None)
+        super().__init__(PipelineStage.SILVER, message, context)
 
 
 class PostgresLoadError(PipelineStageError):
     """Raised when loading silver Parquet into Postgres fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.LOAD_POSTGRES, message, context or None)
+        super().__init__(PipelineStage.LOAD_POSTGRES, message, context)
 
 
 class PostgresCredentialsError(PostgresLoadError):
@@ -273,7 +273,7 @@ class GoldStageError(PipelineStageError):
     """Raised when the gold aggregation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.GOLD, message, context or None)
+        super().__init__(PipelineStage.GOLD, message, context)
 
 
 # --------------------------------------------------------------------------------------

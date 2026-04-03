@@ -11,10 +11,10 @@ requires-python = ">=3.13"
 dependencies = [
     "dbt-core>=1.11.7",
     "dbt-postgres>=1.10.0",
-    "duckdb>=1.5.0",
+    "duckdb>=1.5.1",
     "httpx[http2]>=0.28.1",
-    "orjson>=3.11.7",
-    "polars>=1.39.0",
+    "orjson>=3.11.8",
+    "polars>=1.39.3",
     "psycopg[c]>=3.3.3",
     "py7zr>=1.1.0",
     "pyarrow>=23.0.1",
@@ -28,15 +28,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "apache-airflow-providers-postgres>=6.6.1",
     "apache-airflow-task-sdk>=1.1.8",
-    "marimo>=0.20.4",
+    "marimo>=0.22.0",
     "pip-audit>=2.10.0",
-    "prek>=0.3.6",
+    "prek>=0.3.8",
     "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.15.6",
-    "ty>=0.0.23",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.9",
+    "ty>=0.0.28",
 ]
 
 [project.scripts]

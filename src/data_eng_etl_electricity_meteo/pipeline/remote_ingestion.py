@@ -343,6 +343,7 @@ class RemoteIngestionPipeline:
 
         updated_context = PipelineContext(
             version=context.version,
+            is_healing=context.is_healing,
             download=DownloadMetrics(
                 remote_metadata=context.download.remote_metadata,
                 download_info=context.download.download_info,
@@ -460,6 +461,7 @@ class RemoteIngestionPipeline:
 
         return PipelineContext(
             version=context.version,
+            is_healing=context.is_healing,
             download=context.download,
             bronze=BronzeMetrics(
                 file_size_mib=parquet_size,
@@ -582,6 +584,7 @@ class RemoteIngestionPipeline:
 
         return PipelineContext(
             version=context.version,
+            is_healing=context.is_healing,
             download=context.download,
             bronze=context.bronze,
             silver=SilverMetrics(

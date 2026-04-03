@@ -1,7 +1,6 @@
 """7z archive extraction with progress bar and integrity checks."""
 
 import shutil
-import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,7 +8,6 @@ from pathlib import Path
 
 import py7zr
 from py7zr.callbacks import ExtractCallback
-from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     ArchiveNotFoundError,
@@ -140,54 +138,50 @@ def extract_7z(
 
             # -- Extract with progress tracking ----------------------------------------
 
-            owned_pbar: tqdm | None = None
+            owned_callback: TqdmExtractCallback | None = None
             if progress is not None:
                 callback: ExtractCallback = progress(uncompressed_size)
             else:
-                owned_pbar = tqdm(
-                    total=uncompressed_size,
-                    unit="B",
-                    unit_scale=True,
+                owned_callback = TqdmExtractCallback(
+                    uncompressed_size,
                     desc=f"Extracting {target_filename}",
-                    leave=False,
-                    file=sys.stderr,
                 )
-                callback = TqdmExtractCallback(owned_pbar)
+                callback = owned_callback
 
             try:
                 archive.extract(
                     path=tmp_dir_path, targets=[target_internal_path], callback=callback
                 )
             finally:
-                if owned_pbar is not None:
-                    owned_pbar.close()
+                if owned_callback is not None:
+                    owned_callback.close()
 
-            # -- Move to final destination ---------------------------------------------
+        # -- Move to final destination (archive closed) --------------------------------
 
-            extracted_file = tmp_dir_path / target_internal_path
+        extracted_file = tmp_dir_path / target_internal_path
 
-            # Preserve original filename from archive (not the nested internal path)
-            dest_path = dest_dir / target_filename
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # Preserve original filename from archive (not the nested internal path)
+        dest_path = dest_dir / target_filename
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Move to final destination (not atomic across filesystems,
-            # but the source temp dir is cleaned up regardless)
-            if dest_path.exists():
-                dest_path.unlink()
-            shutil.move(src=extracted_file, dst=dest_path)
+        # Move to final destination (not atomic across filesystems,
+        # but the source temp dir is cleaned up regardless)
+        if dest_path.exists():
+            dest_path.unlink()
+        shutil.move(src=extracted_file, dst=dest_path)
 
-            # -- Validate (optional SQLite check) and compute metadata -----------------
+        # -- Validate (optional SQLite check) and compute metadata ---------------------
 
-            if validate_sqlite:
-                try:
-                    _validate_sqlite_header(dest_path)
-                except FileIntegrityError:
-                    # Avoid leaving a corrupt file that a subsequent run might accept
-                    if dest_path.exists():
-                        dest_path.unlink()
-                    raise
+        if validate_sqlite:
+            try:
+                _validate_sqlite_header(dest_path)
+            except FileIntegrityError:
+                # Avoid leaving a corrupt file that a subsequent run might accept
+                if dest_path.exists():
+                    dest_path.unlink()
+                raise
 
-            file_hash = FileHasher.hash_file(dest_path)
-            size_mib = round(dest_path.stat().st_size / 1024**2, 2)
+        file_hash = FileHasher.hash_file(dest_path)
+        size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)
+        return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

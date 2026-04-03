@@ -6,18 +6,19 @@ Airflow handles retries at the task level, so no retry logic is included here.
 """
 
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 import httpx
-from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
-from data_eng_etl_electricity_meteo.utils.progress import DownloadProgressReporter
+from data_eng_etl_electricity_meteo.utils.progress import (
+    DownloadProgressReporter,
+    TqdmProgressReporter,
+)
 
 logger = get_logger("download")
 
@@ -223,18 +224,11 @@ def download_to_file(
 
             hasher = FileHasher()
 
-            reporter: DownloadProgressReporter = (
+            reporter = (
                 progress(content_length or 0)
                 if progress is not None
-                else tqdm(
-                    total=content_length or 0,
-                    unit="iB",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc=f"Downloading {filename}",
-                    file=sys.stderr,
-                    leave=False,
-                    mininterval=1.0,
+                else TqdmProgressReporter.for_bytes(
+                    content_length or 0, desc=f"Downloading {filename}"
                 )
             )
 

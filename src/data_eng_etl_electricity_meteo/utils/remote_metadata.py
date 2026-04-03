@@ -98,7 +98,7 @@ class RemoteFileMetadata:
         )
 
     def _check_content_length(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare Content-Length. Returns ``None`` if neither side has a size."""
+        """Compare Content-Length. Returns ``None`` if either side has no size."""
         if self.content_length is None or other.content_length is None:
             return None
         if self.content_length != other.content_length:

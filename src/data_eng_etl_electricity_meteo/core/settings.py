@@ -232,6 +232,8 @@ def _load_settings() -> Settings:
     depends on ``settings.logging_level`` (circular), and calling
     ``structlog.configure()`` here would overwrite Airflow's own config.
     """
+    _SECRET_FIELDS = {"postgres_password"}
+
     try:
         return Settings()
     except ValidationError as exc:
@@ -239,9 +241,9 @@ def _load_settings() -> Settings:
         for error in exc.errors():
             field = error["loc"][-1]
             msg = error["msg"]
-            value = error.get("input")
+            value = "***" if field in _SECRET_FIELDS else error.get("input")
             print(f"\t* {field}={value!r} — {msg}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 settings = _load_settings()

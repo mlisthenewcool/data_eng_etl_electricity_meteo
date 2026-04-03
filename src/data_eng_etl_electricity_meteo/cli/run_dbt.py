@@ -39,17 +39,21 @@ def app() -> None:
     os.environ["POSTGRES_USER"] = settings.postgres_user
     os.environ["POSTGRES_PASSWORD"] = settings.postgres_password.get_secret_value()
 
-    os.execvp(
-        "dbt",
-        [
+    try:
+        os.execvp(
             "dbt",
-            *sys.argv[1:],
-            "--project-dir",
-            str(settings.dbt_project_dir),
-            "--profiles-dir",
-            str(settings.dbt_project_dir),
-        ],
-    )
+            [
+                "dbt",
+                *sys.argv[1:],
+                "--project-dir",
+                str(settings.dbt_project_dir),
+                "--profiles-dir",
+                str(settings.dbt_project_dir),
+            ],
+        )
+    except FileNotFoundError:
+        logger.critical("dbt not found in PATH")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

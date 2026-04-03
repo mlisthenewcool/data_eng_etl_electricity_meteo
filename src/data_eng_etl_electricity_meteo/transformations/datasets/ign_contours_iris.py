@@ -208,10 +208,10 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
                 nom_commune,
                 type_iris,
                 geometrie,
-                -- DuckDB PROJ returns (lat, lon) for EPSG:4326
-                -- (non-standard axis order)
-                ST_X(centroid_wgs84) AS centroid_lat,  -- X = latitude
-                ST_Y(centroid_wgs84) AS centroid_lon   -- Y = longitude
+                -- EPSG:4326 formal axis order: (latitude, longitude)
+                -- PROJ applies this order, so X = latitude, Y = longitude
+                ST_X(centroid_wgs84) AS centroid_lat,
+                ST_Y(centroid_wgs84) AS centroid_lon
             FROM centroids
         """
 

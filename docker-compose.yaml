@@ -9,7 +9,7 @@ services:
 
   postgres_service:
     container_name: postgres_container
-    image: postgis/postgis:17-3.5
+    image: postgis/postgis:17-3.6
     restart: always
     shm_size: 256mb # TODO[prod]: benchmark with real workload (memory for Postgres operations)
     ports:
