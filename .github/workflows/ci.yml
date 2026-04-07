@@ -62,8 +62,7 @@ jobs:
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt
 
       - name: Dependency audit (pip-audit)
-        # CVE-2025-62727: starlette 0.48.0, transitive dep of Airflow (dev only)
-        run: uv run pip-audit --ignore-vuln CVE-2025-62727
+        run: uv run pip-audit
 
   security:
     name: Secret scanning
