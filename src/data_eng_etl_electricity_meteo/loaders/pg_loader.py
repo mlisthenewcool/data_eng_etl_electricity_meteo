@@ -182,9 +182,7 @@ def load_silver_to_postgres(  # noqa: PLR0912
     except psycopg.Error as err:
         conn.rollback()
         pg_msg = err.diag.message_primary or str(err)
-        raise PostgresLoadError(
-            f"Database error during COPY to {qualified_table}: {pg_msg}"
-        ) from err
+        raise PostgresLoadError(f"Database error for {qualified_table}: {pg_msg}") from err
     except (pl.exceptions.PolarsError, OSError) as err:
         conn.rollback()
         raise PostgresLoadError(

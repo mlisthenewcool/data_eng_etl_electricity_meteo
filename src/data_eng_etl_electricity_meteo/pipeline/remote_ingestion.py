@@ -28,6 +28,7 @@ import polars as pl
 from data_eng_etl_electricity_meteo.core.data_catalog import IngestionMode, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
     BronzeStageError,
+    DownloadError,
     DownloadStageError,
     ExtractionError,
     ExtractStageError,
@@ -250,7 +251,7 @@ class RemoteIngestionPipeline:
                 f"{version}.{self.dataset.source.format.value}",
                 settings.download_timeout_seconds,
             )
-        except (httpx.HTTPError, OSError, ValueError) as err:
+        except (httpx.HTTPError, OSError, DownloadError) as err:
             raise DownloadStageError(
                 f"File download failed: {self.dataset.source.url_as_str}"
             ) from err
@@ -539,7 +540,7 @@ class RemoteIngestionPipeline:
         try:
             self._resolver.silver_current_path.parent.mkdir(parents=True, exist_ok=True)
             df.write_parquet(self._resolver.silver_current_path)
-        except OSError as err:
+        except (pl.exceptions.PolarsError, OSError) as err:
             try:
                 self._file_manager.rollback_silver()
             except OSError:
@@ -559,7 +560,7 @@ class RemoteIngestionPipeline:
                 raise SilverStageError("Silver incremental diff computation failed") from err
             try:
                 delta.write_parquet(self._resolver.silver_delta_path)
-            except OSError as err:
+            except (pl.exceptions.PolarsError, OSError) as err:
                 raise SilverStageError("Silver delta write failed") from err
 
         try:

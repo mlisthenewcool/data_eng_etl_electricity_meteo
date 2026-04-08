@@ -375,7 +375,7 @@ def climatologie_download(  # noqa: PLR0913
 
     Raises
     ------
-    ValueError
+    DownloadError
         If no data could be downloaded from any department.
     OSError
         If the merge of per-department Parquet files fails.

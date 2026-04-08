@@ -96,8 +96,8 @@ def open_airflow_connection() -> psycopg.Connection:
     psycopg.OperationalError
         If the connection cannot be established.
     """
-    # Lazy import: Airflow SDK needs the runtime context (secrets backend)
-    # which is only available inside the container.
+    # Lazy import: avoid pulling the Airflow import chain when only
+    # open_standalone_connection() is used (CLI, tests).
     from airflow.sdk.definitions.connection import Connection  # noqa: PLC0415
 
     airflow_conn = Connection.get(AIRFLOW_CONN_ID)

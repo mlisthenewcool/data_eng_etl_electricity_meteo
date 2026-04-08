@@ -61,9 +61,12 @@ class RemoteFileMetadata:
                 reason="Missing metadata on current or previous state",
             )
 
-        for check in (self._check_etag, self._check_last_modified, self._check_content_length):
-            if (result := check(other)) is not None:
-                return result
+        if (result := self._check_etag(other)) is not None:
+            return result
+        if (result := self._check_last_modified(other)) is not None:
+            return result
+        if (result := self._check_content_length(other)) is not None:
+            return result
 
         return ChangeDetectionResult(
             has_changed=True,

@@ -65,6 +65,15 @@ class FileNotFoundInArchiveError(ExtractionError):
         super().__init__("File not found in archive.")
 
 
+class CorruptArchiveError(ExtractionError):
+    """Raised when the archive is corrupt or unreadable."""
+
+    def __init__(self, archive_path: Path, reason: str) -> None:
+        self.archive_path = archive_path
+        self.reason = reason
+        super().__init__("Archive is corrupt or unreadable.")
+
+
 class FileIntegrityError(ExtractionError):
     """Raised when file validation (hash, size, etc.) fails."""
 
@@ -72,6 +81,19 @@ class FileIntegrityError(ExtractionError):
         self.path = path
         self.reason = reason
         super().__init__("File integrity check failed.")
+
+
+# --------------------------------------------------------------------------------------
+# Download errors
+# --------------------------------------------------------------------------------------
+
+
+class DownloadError(BaseProjectException):
+    """Raised when a download utility fails to retrieve data."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__("Download failed.")
 
 
 # --------------------------------------------------------------------------------------

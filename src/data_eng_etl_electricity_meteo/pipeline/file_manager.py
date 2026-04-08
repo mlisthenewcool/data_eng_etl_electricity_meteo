@@ -155,7 +155,10 @@ class RemoteFileManager:
                 target_version=target_version,
             )
         except OSError:
-            if temp_link.exists():
+            # Clean up the temp symlink on failure. Use is_symlink() instead
+            # of exists() because exists() follows the symlink and checks
+            # the target — a dangling symlink would be silently skipped.
+            if temp_link.is_symlink():
                 temp_link.unlink()
             raise
 

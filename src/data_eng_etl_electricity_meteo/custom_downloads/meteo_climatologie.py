@@ -25,6 +25,7 @@ from typing import TypedDict
 import httpx
 import polars as pl
 
+from data_eng_etl_electricity_meteo.core.exceptions import DownloadError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
@@ -235,8 +236,8 @@ def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
 
     Raises
     ------
-    httpx.HTTPStatusError
-        If the server returns an error status.
+    httpx.HTTPError
+        If the request fails (network, timeout, or HTTP error status).
     OSError
         If writing to the local file fails.
     """
@@ -443,7 +444,7 @@ def download_climatologie(
 
     Raises
     ------
-    ValueError
+    DownloadError
         If no data could be downloaded from any department.
     OSError
         If the merge of per-department Parquet files fails.
@@ -484,7 +485,9 @@ def download_climatologie(
 
     if result.dept_count == 0:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise ValueError("No climatologie data downloaded from any department")
+        raise DownloadError(
+            f"No climatologie data downloaded from any department (period {year_start}-{year_end})"
+        )
 
     # Lazy scan all temporary Parquet files and write the merged result.
     # This avoids loading all departments into memory simultaneously.
