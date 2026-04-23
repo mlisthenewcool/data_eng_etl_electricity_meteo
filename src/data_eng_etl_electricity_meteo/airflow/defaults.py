@@ -12,7 +12,7 @@ from typing import Any
 # --------------------------------------------------------------------------------------
 
 
-START_DATE = datetime(year=2026, month=1, day=24, tzinfo=UTC)
+START_DATE = datetime(year=2026, month=4, day=23, tzinfo=UTC)
 
 # --------------------------------------------------------------------------------------
 # Default task arguments

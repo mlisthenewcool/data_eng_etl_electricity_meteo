@@ -84,8 +84,10 @@ class Settings(BaseSettings):
     # -- General settings --------------------------------------------------------------
 
     logging_level: Annotated[
-        LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
-    ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
+        LogLevel,
+        BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v),
+        Field(description="The logger verbosity level"),
+    ] = LogLevel.INFO
 
     # -- Data settings -----------------------------------------------------------------
 
@@ -205,19 +207,28 @@ class Settings(BaseSettings):
         1. ``init_settings``    — values passed at instantiation (tests, overrides)
         2. ``env_settings``     — environment variables
         3. ``dotenv_settings``  — ``.env`` file
-        4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``)
+        4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``), added
+           **only if the directory exists**.
+           In CI and other environments without secrets files, credentials come from env
+           vars via ``env_settings`` — adding the source unconditionally would emit a
+           spurious ``UserWarning`` from pydantic-settings about the missing directory.
 
         The built-in ``file_secret_settings``
         (which reads from ``model_config['secrets_dir']``) is intentionally replaced by
         an explicit ``SecretsSettingsSource`` so the path is a class constant rather
         than a configurable setting.
         """
-        return (
+        sources: tuple[PydanticBaseSettingsSource, ...] = (
             init_settings,
             env_settings,
             dotenv_settings,
-            SecretsSettingsSource(settings_cls, secrets_dir=cls._SECRETS_DIR),
         )
+        if cls._SECRETS_DIR.exists():
+            sources = (
+                *sources,
+                SecretsSettingsSource(settings_cls, secrets_dir=cls._SECRETS_DIR),
+            )
+        return sources
 
 
 # --------------------------------------------------------------------------------------

@@ -61,55 +61,52 @@ class RemoteFileMetadata:
                 reason="Missing metadata on current or previous state",
             )
 
-        if (result := self._check_etag(other)) is not None:
-            return result
-        if (result := self._check_last_modified(other)) is not None:
-            return result
-        if (result := self._check_content_length(other)) is not None:
-            return result
+        if self.etag is not None and other.etag is not None:
+            return _compare_etag(self.etag, other.etag)
+        if self.last_modified is not None and other.last_modified is not None:
+            return _compare_last_modified(self.last_modified, other.last_modified)
+        if self.content_length is not None and other.content_length is not None:
+            return _compare_content_length(self.content_length, other.content_length)
 
         return ChangeDetectionResult(
             has_changed=True,
             reason="No matching metadata found to confirm identity",
         )
 
-    def _check_etag(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare ETags. Returns ``None`` if either side lacks an ETag."""
-        if not (self.etag and other.etag):
-            return None
-        if self.etag != other.etag:
-            return ChangeDetectionResult(
-                has_changed=True,
-                reason=f"ETag changed: {other.etag} -> {self.etag}",
-            )
-        return ChangeDetectionResult(has_changed=False, reason="ETag identical")
 
-    def _check_last_modified(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare Last-Modified dates. Returns ``None`` if either side lacks a date."""
-        if not (self.last_modified and other.last_modified):
-            return None
-        if self.last_modified == other.last_modified:
-            return ChangeDetectionResult(has_changed=False, reason="File date is identical")
-        if self.last_modified > other.last_modified:
-            return ChangeDetectionResult(
-                has_changed=True,
-                reason=f"File is newer: {self.last_modified}",
-            )
+def _compare_etag(current: str, previous: str) -> ChangeDetectionResult:
+    """Compare two ETags."""
+    if current != previous:
         return ChangeDetectionResult(
             has_changed=True,
-            reason=f"File date went backward (rollback?): {self.last_modified}",
+            reason=f"ETag changed: {previous} -> {current}",
         )
+    return ChangeDetectionResult(has_changed=False, reason="ETag identical")
 
-    def _check_content_length(self, other: Self) -> ChangeDetectionResult | None:
-        """Compare Content-Length. Returns ``None`` if either side has no size."""
-        if self.content_length is None or other.content_length is None:
-            return None
-        if self.content_length != other.content_length:
-            return ChangeDetectionResult(
-                has_changed=True,
-                reason=f"Size changed: {other.content_length} -> {self.content_length}",
-            )
-        return ChangeDetectionResult(has_changed=False, reason="Size identical")
+
+def _compare_last_modified(current: datetime, previous: datetime) -> ChangeDetectionResult:
+    """Compare two Last-Modified dates."""
+    if current == previous:
+        return ChangeDetectionResult(has_changed=False, reason="File date is identical")
+    if current > previous:
+        return ChangeDetectionResult(
+            has_changed=True,
+            reason=f"File is newer: {current}",
+        )
+    return ChangeDetectionResult(
+        has_changed=True,
+        reason=f"File date went backward (rollback?): {current}",
+    )
+
+
+def _compare_content_length(current: int, previous: int) -> ChangeDetectionResult:
+    """Compare two Content-Length values."""
+    if current != previous:
+        return ChangeDetectionResult(
+            has_changed=True,
+            reason=f"Size changed: {previous} -> {current}",
+        )
+    return ChangeDetectionResult(has_changed=False, reason="Size identical")
 
 
 def _parse_etag(raw: str) -> str | None:

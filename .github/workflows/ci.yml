@@ -16,13 +16,6 @@ jobs:
     name: Code quality & tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      # Dummy credentials for dbt parse (no DB connection needed)
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB_NAME: ci_dummy
-      POSTGRES_USER: ci_dummy
-      POSTGRES_PASSWORD: ci_dummy
     steps:
       # persist-credentials: false → don't leave GITHUB_TOKEN in .git/config
       # (reduces attack surface from third-party code run during `uv sync`).
@@ -61,6 +54,14 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: dbt parse
+        # Dummy credentials for dbt parse: resolves env_var() references in
+        # profiles.yml without needing a real DB connection.
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB_NAME: ci_dummy
+          POSTGRES_USER: ci_dummy
+          POSTGRES_PASSWORD: ci_dummy
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt
 
       - name: Dependency audit (pip-audit)

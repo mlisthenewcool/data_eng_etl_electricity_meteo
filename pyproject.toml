@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "data-eng-etl-electricity-meteo"
-version = "2026.03.11"
+version = "2026.04.23"
 description = "Projet personnel d'ingénierie des données (data engineering)."
 readme = "README.md"
 # TODO: bump to ">=3.14" when dbt-core relaxes its `mashumaro<3.15` constraint.
-# mashumaro <3.15 breaks at import on Python 3.14 (UnserializableField on
-# JSONObjectSchema.schema: Optional[str]). dbt-core 1.11.8 classifiers list only
-# Python 3.10-3.13. Revisit on each `uv sync --upgrade` cycle.
+#  mashumaro <3.15 breaks at import on Python 3.14 (UnserializableField on
+#  JSONObjectSchema.schema: Optional[str]). dbt-core 1.11.8 classifiers list only
+#  Python 3.10-3.13. Revisit on each `uv sync --upgrade` cycle.
 requires-python = ">=3.13"
 dependencies = [
     "dbt-core>=1.11.8",

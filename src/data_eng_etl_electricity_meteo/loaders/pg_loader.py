@@ -285,8 +285,12 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
     (Polars dtype vs Postgres data_type from ``information_schema``).
     """
     cur.execute(
-        """SELECT column_name, data_type FROM information_schema.columns
-        WHERE table_schema = %s AND table_name = %s""",
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+        """,
         (_SILVER_SCHEMA, pg_table),
     )
     pg_columns: dict[str, str] = {row[0]: row[1] for row in cur.fetchall()}
@@ -390,6 +394,48 @@ def _read_silver_current_count(silver_current_path: Path) -> int | None:
         return None
 
 
+def _fetch_scalar_int(cur: psycopg.Cursor) -> int:
+    """Fetch the single scalar ``int`` of a single-row query.
+
+    For queries guaranteed by SQL semantics to return exactly one row with exactly one
+    integer column (``SELECT COUNT(*)``, ``SELECT MAX(id)``, …).
+    The return type is concrete ``int`` — never ``Optional`` — so callers don't need to
+    handle a theoretically-impossible ``None``.
+
+    Mirrors SQLAlchemy's ``scalar_one()`` semantics: a contract violation
+    (no row, wrong arity, wrong type) raises ``PostgresLoadError``.
+
+    Raises
+    ------
+    PostgresLoadError
+        If the cursor has no row, or the row has more than one column, or the value is
+        not an ``int``.
+    """
+    # ``bool`` subclasses ``int``, so ``(True,)`` would match ``(int(value),)`` and the
+    # helper would silently return ``True``/``False`` on a Postgres ``boolean`` column.
+    # Reject that shape so the helper's name matches its behaviour. Order matters: the
+    # ``bool`` arm must come first, else ``int`` captures bool.
+    match cur.fetchone():
+        case (bool(),) as row:
+            raise PostgresLoadError(f"Query returned bool, not int: {row!r}")
+        case (int(value),):
+            return value
+        case None:
+            raise PostgresLoadError("Query returned no row (expected exactly one)")
+        case unexpected:
+            raise PostgresLoadError(f"Query returned unexpected shape: {unexpected!r}")
+
+
+def _count_rows(pg_table: str, *, cur: psycopg.Cursor) -> int:
+    """Return row count of ``silver.{pg_table}`` via ``SELECT COUNT(*)``."""
+    cur.execute(
+        psql.SQL("SELECT COUNT(*) FROM {table}").format(
+            table=psql.Identifier(_SILVER_SCHEMA, pg_table)
+        )
+    )
+    return _fetch_scalar_int(cur)
+
+
 def _detect_preload_drift(
     silver_current_path: Path,
     *,
@@ -426,14 +472,7 @@ def _detect_preload_drift(
     try:
         with conn.cursor() as cur:
             cur.execute(ddl_sql)
-            cur.execute(
-                psql.SQL("SELECT COUNT(*) FROM {table}").format(
-                    table=psql.Identifier(_SILVER_SCHEMA, pg_table)
-                )
-            )
-            row = cur.fetchone()
-            assert row is not None  # COUNT(*) always returns a row
-            pg_count: int = row[0]
+            pg_count = _count_rows(pg_table, cur=cur)
         conn.commit()
     except psycopg.Error:
         conn.rollback()
@@ -465,14 +504,7 @@ def _verify_sync(
     int | None
         Actual Postgres row count if there is a mismatch, ``None`` if in sync.
     """
-    cur.execute(
-        psql.SQL("SELECT COUNT(*) FROM {table}").format(
-            table=psql.Identifier(_SILVER_SCHEMA, pg_table)
-        )
-    )
-    row = cur.fetchone()
-    assert row is not None  # COUNT(*) always returns a row
-    actual: int = row[0]
+    actual = _count_rows(pg_table, cur=cur)
     if actual != expected_count:
         return actual
     return None
