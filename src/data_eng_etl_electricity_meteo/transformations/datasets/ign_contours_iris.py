@@ -119,23 +119,22 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """
     logger.debug("Reading GeoPackage from landing")
 
-    with _gpkg_safe_read_path(landing_path) as tmp_gpkg:
-        with _duckdb_spatial_conn() as conn:
-            # EXCLUDE + re-add as WKB: keeps the column name identical
-            # to the source while converting native geometry to binary.
-            # * passes new source columns through for drift detection.
-            query = """
-                SELECT
-                    * EXCLUDE(geometrie),
-                    ST_AsWKB(geometrie) AS geometrie
-                FROM ST_read(?, layer = 'contours_iris')
-            """
-            df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
-            logger.debug(
-                "DuckDB spatial query completed",
-                rows_count=len(df),
-                columns_count=len(df.columns),
-            )
+    with _gpkg_safe_read_path(landing_path) as tmp_gpkg, _duckdb_spatial_conn() as conn:
+        # EXCLUDE + re-add as WKB: keeps the column name identical
+        # to the source while converting native geometry to binary.
+        # * passes new source columns through for drift detection.
+        query = """
+            SELECT
+                * EXCLUDE(geometrie),
+                ST_AsWKB(geometrie) AS geometrie
+            FROM ST_read(?, layer = 'contours_iris')
+        """
+        df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
+        logger.debug(
+            "DuckDB spatial query completed",
+            rows_count=len(df),
+            columns_count=len(df.columns),
+        )
     return df.lazy()
 
 

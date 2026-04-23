@@ -339,7 +339,7 @@ def standard_download(
     )
 
 
-def climatologie_download(  # noqa: PLR0913
+def climatologie_download(
     _url: str,
     dest_dir: Path,
     _fallback_filename: str,

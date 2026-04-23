@@ -287,7 +287,7 @@ def _download_department(
             # Column projection: 196 → 16 columns at read time
             df = pl.read_parquet(tmp_path, columns=_LANDING_COLUMNS)
             # Cast to Utf8 for uniform schema across departments
-            df = df.cast({c: pl.String for c in df.columns})
+            df = df.cast(dict.fromkeys(df.columns, pl.String))
             logger.debug("Downloaded Parquet (Hydra)", department=dept, rows_count=len(df))
         except (httpx.HTTPError, pl.exceptions.PolarsError, OSError) as err:
             logger.warning(

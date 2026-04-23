@@ -50,7 +50,7 @@ class TestNormalizeValue:
                 id="datetime_becomes_isoformat",
             ),
             pytest.param(
-                datetime(2026, 3, 12, 6, 52, 34),
+                datetime(2026, 3, 12, 6, 52, 34),  # noqa: DTZ001 — testing naive datetime handling
                 "2026-03-12T06:52:34",
                 id="naive_datetime_becomes_isoformat",
             ),

@@ -273,13 +273,16 @@ class RemoteIngestionPipeline:
 
         # -- 5. Smart-skip: content hash comparison (skipped in healing mode) ----------
 
-        if not context.is_healing and previous_snapshot is not None:
-            if self._should_skip_on_hash(
+        if (
+            not context.is_healing
+            and previous_snapshot is not None
+            and self._should_skip_on_hash(
                 previous_hash=previous_snapshot.download.file_hash,
                 current_hash=context.download.download_info.file_hash,
-            ):
-                self._cleanup_landing()
-                return None
+            )
+        ):
+            self._cleanup_landing()
+            return None
 
         return context
 
@@ -359,13 +362,17 @@ class RemoteIngestionPipeline:
 
         # -- Smart-skip: hash comparison against previous extraction -------------------
 
-        if not context.is_healing and previous_snapshot and previous_snapshot.extraction:
-            if self._should_skip_on_hash(
+        if (
+            not context.is_healing
+            and previous_snapshot
+            and previous_snapshot.extraction
+            and self._should_skip_on_hash(
                 previous_hash=previous_snapshot.extraction.file_hash,
                 current_hash=extract_info.file_hash,
-            ):
-                self._cleanup_landing()
-                return None
+            )
+        ):
+            self._cleanup_landing()
+            return None
 
         return updated_context
 

@@ -296,11 +296,12 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
     extra = df_cols - pg_cols
     missing = pg_cols - df_cols
 
-    errors: list[str] = []
-    for col in sorted(extra):
-        errors.append(f"Column '{col}' in DataFrame but not in Postgres table")
-    for col in sorted(missing):
-        errors.append(f"Column '{col}' in Postgres table but not in DataFrame")
+    errors: list[str] = [
+        f"Column '{col}' in DataFrame but not in Postgres table" for col in sorted(extra)
+    ]
+    errors.extend(
+        f"Column '{col}' in Postgres table but not in DataFrame" for col in sorted(missing)
+    )
     for col in sorted(df_cols & pg_cols):
         polars_type_name = type(df.schema[col].base_type()).__name__
         pg_type = pg_columns[col]

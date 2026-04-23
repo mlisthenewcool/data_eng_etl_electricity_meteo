@@ -1,5 +1,6 @@
-# PostGIS 17-x.x extends Postgres 17 with spatial functions (ST_Distance, KNN via <->).
-# Postgres 17 is the latest version supported by Airflow.
+# PostGIS 18-x.x extends Postgres 18 with spatial functions (ST_Distance, KNN via <->).
+# dbt-postgres 1.10 is implicitly tested against PG 18 (CI uses `postgres:latest`,
+# which resolves to PG 18 since September 2025). psycopg 3.2.8+ supports PG 18 libpq.
 
 services:
 
@@ -9,14 +10,14 @@ services:
 
   postgres_service:
     container_name: postgres_container
-    image: postgis/postgis:17-3.6
+    image: postgis/postgis:18-3.6
     restart: always
     shm_size: 256mb # TODO[prod]: benchmark with real workload (memory for Postgres operations)
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
 
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro # executed only on empty volume
 
     environment:

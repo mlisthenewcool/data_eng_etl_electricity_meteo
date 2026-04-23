@@ -112,6 +112,17 @@ class RemoteFileMetadata:
         return ChangeDetectionResult(has_changed=False, reason="Size identical")
 
 
+def _parse_etag(raw: str) -> str | None:
+    """Unquote an HTTP ETag, handling strong (``"..."``) and weak (``W/"..."``) forms.
+
+    Per RFC 7232 §2.3, a weak ETag is always prefixed with ``W/`` and surrounded by
+    quotes. Strong ETags are just quoted.
+    """
+    if raw.startswith('W/"'):
+        return raw[3:-1] or None
+    return raw.strip('"') or None
+
+
 def get_remote_file_metadata(
     url: str,
     *,
@@ -167,12 +178,7 @@ def get_remote_file_metadata(
 
     headers = response.headers
 
-    # ETags may be quoted (RFC 7232 §2.3) or weak-prefixed (W/"…")
-    raw_etag = headers.get("etag", "")
-    if raw_etag.startswith('W/"'):
-        etag = raw_etag[3:-1] or None
-    else:
-        etag = raw_etag.strip('"') or None
+    etag = _parse_etag(headers.get("etag", ""))
 
     # Parse Last-Modified (RFC 7231 HTTP-date format)
     last_modified = None

@@ -19,7 +19,7 @@ Usage::
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import polars as pl
 import typer
@@ -120,17 +120,18 @@ def _benchmark_one(
 
 @app.command()
 def main(
-    dataset: list[str] | None = typer.Option(
-        None,
-        "--dataset",
-        "-d",
-        help="Run only for these datasets (repeatable). Omit to run all.",
-    ),
-    json_output: Path | None = typer.Option(
-        None,
-        "--json",
-        help="Write results to a JSON file.",
-    ),
+    dataset: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--dataset",
+            "-d",
+            help="Run only for these datasets (repeatable). Omit to run all.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write results to a JSON file."),
+    ] = None,
 ) -> None:
     """Benchmark silver-layer Postgres loading for all (or selected) datasets."""
     catalog = DataCatalog.load(settings.data_catalog_file_path)

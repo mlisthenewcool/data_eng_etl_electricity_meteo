@@ -1,6 +1,6 @@
 """Unit tests for the core data catalog module."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -65,7 +65,7 @@ def test_ingestion_frequency_airflow_schedule(
 
 
 class TestIngestionFrequencyFormatDatetimeAsVersion:
-    _DT = datetime(year=2024, month=3, day=15, hour=10, minute=30, second=0)
+    _DT = datetime(year=2024, month=3, day=15, hour=10, minute=30, second=0, tzinfo=UTC)
     _F = IngestionFrequency
 
     # fmt: off
