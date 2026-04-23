@@ -7,7 +7,11 @@ name = "data-eng-etl-electricity-meteo"
 version = "2026.03.11"
 description = "Projet personnel d'ingénierie des données (data engineering)."
 readme = "README.md"
-requires-python = ">=3.14"
+# TODO: bump to ">=3.14" when dbt-core relaxes its `mashumaro<3.15` constraint.
+# mashumaro <3.15 breaks at import on Python 3.14 (UnserializableField on
+# JSONObjectSchema.schema: Optional[str]). dbt-core 1.11.8 classifiers list only
+# Python 3.10-3.13. Revisit on each `uv sync --upgrade` cycle.
+requires-python = ">=3.13"
 dependencies = [
     "dbt-core>=1.11.8",
     "dbt-postgres>=1.10.0",
@@ -45,9 +49,10 @@ run-dbt = "data_eng_etl_electricity_meteo.cli.run_dbt:app"
 
 [tool.ruff]
 line-length = 100
-# Runtime is Python 3.14, but source stays syntaxically compatible with py313
-# (keeps `except (E1, E2):` parens, keeps quoted forward refs). Gives rollback
-# optionality while still benefiting from 3.14 runtime perf and PEP 649.
+# Explicit target-version aligned on requires-python. Kept explicit so that a
+# future bump of requires-python doesn't silently activate 3.14-only style rules
+# (PEP 758 unparenthesized except, PEP 649 quoted-annotation removal) before
+# we're ready to adopt the new syntax.
 target-version = "py313"
 include = ["notebooks/**/*.py", "scripts/**/*.py", "src/**/*.py", "tests/**/*.py"]
 

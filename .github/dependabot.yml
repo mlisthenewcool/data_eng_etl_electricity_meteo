@@ -5,49 +5,64 @@
 # releases (and potential zero-day regressions) age out. Security updates
 # bypass the cooldown by default.
 #
-# Shared schedule/cooldown config is factored via YAML anchors (&schedule,
-# &cooldown) defined on the first entry and referenced by the others.
+# NOTE: Dependabot's YAML parser does NOT support YAML anchors (&foo / *foo),
+# so schedule/cooldown blocks are duplicated on each entry.
 
 version: 2
 updates:
   # -- Python dependencies (pyproject.toml + uv.lock) --------------------------------
   - package-ecosystem: "uv"
     directory: "/"
-    schedule: &schedule
+    schedule:
       interval: "weekly"
       day: "monday"
       time: "06:00"
       timezone: "Europe/Paris"
-    cooldown: &cooldown
+    cooldown:
       default-days: 7
     groups:
       python:
-        patterns: [ "*" ]
+        patterns: ["*"]
 
   # -- GitHub Actions (pinned by commit SHA) -----------------------------------------
   # Dependabot updates the SHA and refreshes the `# vX.Y.Z` comment automatically.
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule: *schedule
-    cooldown: *cooldown
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
     groups:
       actions:
-        patterns: [ "*" ]
+        patterns: ["*"]
 
   # -- Dockerfile base images (FROM ...) ---------------------------------------------
   - package-ecosystem: "docker"
     directory: "/"
-    schedule: *schedule
-    cooldown: *cooldown
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
     groups:
       docker:
-        patterns: [ "*" ]
+        patterns: ["*"]
 
   # -- docker-compose images (image: ...) --------------------------------------------
   - package-ecosystem: "docker-compose"
     directory: "/"
-    schedule: *schedule
-    cooldown: *cooldown
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
     groups:
       docker-compose:
-        patterns: [ "*" ]
+        patterns: ["*"]

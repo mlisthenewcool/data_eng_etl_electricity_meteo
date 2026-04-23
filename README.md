@@ -3,7 +3,7 @@
 Pipeline de données corrélant la **production électrique française** avec les
 **données météorologiques**, de la collecte brute jusqu'aux modèles analytiques.
 
-![Python 3.14+](https://img.shields.io/badge/Python-3.14+-3776ab?logo=python&logoColor=white)
+![Python 3.13+](https://img.shields.io/badge/Python-3.13+-3776ab?logo=python&logoColor=white)
 ![Polars](https://img.shields.io/badge/Polars-CD792C?logo=polars&logoColor=white)
 ![DuckDB](https://img.shields.io/badge/DuckDB-FFF000?logo=duckdb&logoColor=black)
 ![Apache Airflow](https://img.shields.io/badge/Airflow-017CEE?logo=apacheairflow&logoColor=white)
@@ -142,7 +142,7 @@ capable de mesurer les paramètres pertinents.
 ├── docs/                      # Documentation technique détaillée
 ├── scripts/                   # Utilitaires (formateur docstrings, benchmarks)
 ├── docker-compose.yaml        # Postgres + Airflow
-├── airflow.Dockerfile         # Image custom (Python 3.14, psycopg3, DuckDB)
+├── airflow.Dockerfile         # Image custom (Python 3.13, psycopg3, DuckDB)
 └── pyproject.toml             # Dépendances et config outils (ruff, ty, pytest)
 ```
 
@@ -150,7 +150,7 @@ capable de mesurer les paramètres pertinents.
 
 ### Prérequis
 
-- **Python 3.14+**
+- **Python 3.13+**
 - **[uv](https://docs.astral.sh/uv/)** (gestionnaire de dépendances)
 - **Docker** et **Docker Compose**
 
