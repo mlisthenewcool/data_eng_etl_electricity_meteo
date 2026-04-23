@@ -18,6 +18,7 @@ runtime via ``psql.SQL().format()`` with ``psql.Identifier`` quoting:
 
 import tempfile
 import time
+from pathlib import Path
 from typing import LiteralString, cast
 
 import polars as pl
@@ -94,8 +95,19 @@ def load_silver_to_postgres(  # noqa: PLR0912
 
     - ``snapshot``   : ``TRUNCATE {table}`` then ``COPY`` directly into it.
     - ``incremental``: read ``delta.parquet`` (new + changed rows only), ``COPY``
-      into a temp staging table, then execute the upsert. After commit, verify row count
-      sync with the full silver snapshot; on mismatch, fallback to full refresh.
+      into a temp staging table, then execute the upsert.
+
+    For incremental loads, drift between PG and silver is detected in two places:
+
+    1. **Pre-load** — verify ``pg_count_before + rows_added == silver_current_count``
+       before running the upsert. If drift already exists
+       (prior aborted load, manual PG operation, rows dropped from source), the
+       incremental wouldn't restore sync, so fall back to a full refresh and skip the
+       wasted upsert.
+    2. **Post-load** — belt-and-suspenders verification after commit. Catches
+       drift introduced by this run
+       (bug in diff metrics, UPSERT not behaving as expected) that the pre-check
+       couldn't anticipate.
 
     Manages the transaction entirely: commits on success, rolls back on failure.
     The caller is only responsible for closing the connection.
@@ -109,12 +121,12 @@ def load_silver_to_postgres(  # noqa: PLR0912
         Open psycopg connection.
     diff
         Incremental diff metrics from the silver stage, or ``None``.
-        Forwarded into the returned ``LoadPostgresMetrics`` for observability.
+        Required for the pre-load drift check on incremental mode.
 
     Returns
     -------
     LoadPostgresMetrics
-        Table, mode, and row-count metrics from the load.
+        Table, mode (original intent), and row-count metrics from the load.
 
     Raises
     ------
@@ -137,9 +149,30 @@ def load_silver_to_postgres(  # noqa: PLR0912
     except FileNotFoundError as err:
         raise PostgresLoadError("DDL file not found") from err
 
+    # -- Pre-load drift detection (incremental only) -----------------------------------
+    # If PG is already out of sync with the previous silver state, the incremental
+    # upsert cannot restore sync (delta only carries the LATEST diff's inserts and
+    # updates, not historical drift). Downgrade to snapshot mode up front to skip
+    # the wasted incremental load.
+
+    load_mode = mode
+    if (
+        mode == IngestionMode.INCREMENTAL
+        and diff is not None
+        and _detect_preload_drift(
+            resolver.silver_current_path,
+            conn=conn,
+            ddl_sql=ddl_sql,
+            pg_table=pg_table,
+            rows_added=diff.rows_added,
+        )
+        is not None
+    ):
+        load_mode = IngestionMode.SNAPSHOT
+
     # -- Choose source file: delta for incremental, current for snapshot ---------------
 
-    if mode == IngestionMode.INCREMENTAL:
+    if load_mode == IngestionMode.INCREMENTAL:
         source_path = resolver.silver_delta_path
     else:
         source_path = resolver.silver_current_path
@@ -153,7 +186,7 @@ def load_silver_to_postgres(  # noqa: PLR0912
     logger.info(
         "Starting Postgres load",
         table=qualified_table,
-        mode=mode,
+        mode=load_mode,
         rows_count=len(df),
         columns_count=len(df.columns),
     )
@@ -165,7 +198,7 @@ def load_silver_to_postgres(  # noqa: PLR0912
             cur.execute(ddl_sql)
             _validate_columns(df, cur=cur, pg_table=pg_table)
 
-            if mode == IngestionMode.SNAPSHOT:
+            if load_mode == IngestionMode.SNAPSHOT:
                 rows = _load_snapshot(df, cur=cur, pg_table=pg_table)
             else:
                 rows = _load_incremental(df, cur=cur, dataset_name=dataset.name, pg_table=pg_table)
@@ -181,11 +214,8 @@ def load_silver_to_postgres(  # noqa: PLR0912
         raise PostgresLoadError("Upsert SQL file not found") from err
     except psycopg.Error as err:
         conn.rollback()
-        detail = getattr(err, "diag", None)
-        pg_msg = (detail.message_primary if detail else None) or str(err)
-        raise PostgresLoadError(
-            f"Database error during COPY to {qualified_table}: {pg_msg}"
-        ) from err
+        pg_msg = err.diag.message_primary or str(err)
+        raise PostgresLoadError(f"Database error for {qualified_table}: {pg_msg}") from err
     except (pl.exceptions.PolarsError, OSError) as err:
         conn.rollback()
         raise PostgresLoadError(
@@ -198,11 +228,15 @@ def load_silver_to_postgres(  # noqa: PLR0912
         duration_s=round(time.monotonic() - t0, 2),
     )
 
-    # -- Post-load sync verification for incremental datasets --------------------------
+    # -- Post-load sync verification (defense-in-depth for incremental) ----------------
+    # The pre-check validated the pre-condition (PG in sync with silver_previous).
+    # The post-check validates the post-condition (PG in sync with silver_current).
+    # Catches bugs that the pre-check couldn't anticipate (incorrect diff metrics,
+    # UPSERT not behaving as expected, delta file inconsistent with metrics).
 
-    if mode == IngestionMode.INCREMENTAL:
+    if load_mode == IngestionMode.INCREMENTAL:
         fallback_rows = _verify_and_maybe_full_refresh(
-            resolver, conn=conn, ddl_sql=ddl_sql, pg_table=pg_table
+            resolver.silver_current_path, conn=conn, ddl_sql=ddl_sql, pg_table=pg_table
         )
         if fallback_rows is not None:
             rows = fallback_rows
@@ -251,8 +285,12 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
     (Polars dtype vs Postgres data_type from ``information_schema``).
     """
     cur.execute(
-        "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema = %s AND table_name = %s",
+        """
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+        """,
         (_SILVER_SCHEMA, pg_table),
     )
     pg_columns: dict[str, str] = {row[0]: row[1] for row in cur.fetchall()}
@@ -262,11 +300,12 @@ def _validate_columns(df: pl.DataFrame, *, cur: psycopg.Cursor, pg_table: str) -
     extra = df_cols - pg_cols
     missing = pg_cols - df_cols
 
-    errors: list[str] = []
-    for col in sorted(extra):
-        errors.append(f"Column '{col}' in DataFrame but not in Postgres table")
-    for col in sorted(missing):
-        errors.append(f"Column '{col}' in Postgres table but not in DataFrame")
+    errors: list[str] = [
+        f"Column '{col}' in DataFrame but not in Postgres table" for col in sorted(extra)
+    ]
+    errors.extend(
+        f"Column '{col}' in Postgres table but not in DataFrame" for col in sorted(missing)
+    )
     for col in sorted(df_cols & pg_cols):
         polars_type_name = type(df.schema[col].base_type()).__name__
         pg_type = pg_columns[col]
@@ -342,6 +381,116 @@ def _copy_df(df: pl.DataFrame, *, cur: psycopg.Cursor, copy_sql: psql.Composed) 
                 copy.write(chunk)
 
 
+def _read_silver_current_count(silver_current_path: Path) -> int | None:
+    """Read the row count of ``current.parquet`` via a lazy scan.
+
+    Returns ``None`` if the Parquet cannot be read (missing file, corrupt), so callers
+    can skip the check rather than fail the entire load.
+    """
+    try:
+        return collect_narrow(pl.scan_parquet(silver_current_path).select(pl.len())).item()
+    except (pl.exceptions.PolarsError, OSError) as err:
+        logger.warning("Cannot read silver snapshot count", error=str(err))
+        return None
+
+
+def _fetch_scalar_int(cur: psycopg.Cursor) -> int:
+    """Fetch the single scalar ``int`` of a single-row query.
+
+    For queries guaranteed by SQL semantics to return exactly one row with exactly one
+    integer column (``SELECT COUNT(*)``, ``SELECT MAX(id)``, …).
+    The return type is concrete ``int`` — never ``Optional`` — so callers don't need to
+    handle a theoretically-impossible ``None``.
+
+    Mirrors SQLAlchemy's ``scalar_one()`` semantics: a contract violation
+    (no row, wrong arity, wrong type) raises ``PostgresLoadError``.
+
+    Raises
+    ------
+    PostgresLoadError
+        If the cursor has no row, or the row has more than one column, or the value is
+        not an ``int``.
+    """
+    # ``bool`` subclasses ``int``, so ``(True,)`` would match ``(int(value),)`` and the
+    # helper would silently return ``True``/``False`` on a Postgres ``boolean`` column.
+    # Reject that shape so the helper's name matches its behaviour. Order matters: the
+    # ``bool`` arm must come first, else ``int`` captures bool.
+    match cur.fetchone():
+        case (bool(),) as row:
+            raise PostgresLoadError(f"Query returned bool, not int: {row!r}")
+        case (int(value),):
+            return value
+        case None:
+            raise PostgresLoadError("Query returned no row (expected exactly one)")
+        case unexpected:
+            raise PostgresLoadError(f"Query returned unexpected shape: {unexpected!r}")
+
+
+def _count_rows(pg_table: str, *, cur: psycopg.Cursor) -> int:
+    """Return row count of ``silver.{pg_table}`` via ``SELECT COUNT(*)``."""
+    cur.execute(
+        psql.SQL("SELECT COUNT(*) FROM {table}").format(
+            table=psql.Identifier(_SILVER_SCHEMA, pg_table)
+        )
+    )
+    return _fetch_scalar_int(cur)
+
+
+def _detect_preload_drift(
+    silver_current_path: Path,
+    *,
+    conn: psycopg.Connection,
+    ddl_sql: psql.Composed,
+    pg_table: str,
+    rows_added: int,
+) -> int | None:
+    """Detect PG/silver desynchronization before an incremental load.
+
+    Invariant
+    ---------
+    After a successful incremental load, ``pg_count == silver_current_count`` must hold.
+    An upsert on ``delta.parquet`` only adds ``rows_added`` rows
+    (updates don't change the count), so this requires::
+
+        pg_count_before + rows_added == silver_current_count
+
+    A mismatch means drift has already accumulated between PG and silver (prior aborted
+    load, manual operation on PG, rows dropped from source between snapshots).
+    In that case, the incremental cannot restore sync and should be skipped in favor of
+    a full refresh.
+
+    Returns
+    -------
+    int | None
+        PG row count if drift is detected, ``None`` if in sync or the check could not
+        run (Parquet read failure, Postgres error).
+    """
+    expected_count = _read_silver_current_count(silver_current_path)
+    if expected_count is None:
+        return None
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(ddl_sql)
+            pg_count = _count_rows(pg_table, cur=cur)
+        conn.commit()
+    except psycopg.Error:
+        conn.rollback()
+        logger.exception("Drift pre-check failed, proceeding with incremental")
+        return None
+
+    if pg_count + rows_added == expected_count:
+        return None
+
+    logger.warning(
+        "Drift detected before load, switching to full refresh",
+        pg_rows=pg_count,
+        expected_pg_rows=expected_count - rows_added,
+        silver_rows=expected_count,
+    )
+    return pg_count
+
+
 def _verify_sync(
     pg_table: str,
     *,
@@ -355,21 +504,14 @@ def _verify_sync(
     int | None
         Actual Postgres row count if there is a mismatch, ``None`` if in sync.
     """
-    cur.execute(
-        psql.SQL("SELECT COUNT(*) FROM {table}").format(
-            table=psql.Identifier(_SILVER_SCHEMA, pg_table)
-        )
-    )
-    row = cur.fetchone()
-    assert row is not None  # COUNT(*) always returns a row
-    actual: int = row[0]
+    actual = _count_rows(pg_table, cur=cur)
     if actual != expected_count:
         return actual
     return None
 
 
 def _verify_and_maybe_full_refresh(
-    resolver: RemotePathResolver,
+    silver_current_path: Path,
     *,
     conn: psycopg.Connection,
     ddl_sql: psql.Composed,
@@ -379,8 +521,9 @@ def _verify_and_maybe_full_refresh(
 
     Parameters
     ----------
-    resolver
-        Path resolver for reading the full silver snapshot.
+    silver_current_path
+        Path to ``current.parquet`` — read twice
+        (count for the check, then full DataFrame if a full refresh is triggered).
     conn
         Open psycopg connection (already committed after initial load).
     ddl_sql
@@ -393,30 +536,38 @@ def _verify_and_maybe_full_refresh(
     int | None
         Rows loaded during full refresh fallback, or ``None`` if already in sync.
     """
-    silver_path = resolver.silver_current_path
-
-    try:
-        expected_count: int = collect_narrow(pl.scan_parquet(silver_path).select(pl.len())).item()
-    except (pl.exceptions.PolarsError, OSError) as err:
-        logger.warning("Cannot read silver snapshot for sync check", error=str(err))
+    expected_count = _read_silver_current_count(silver_current_path)
+    if expected_count is None:
         return None
 
     try:
         with conn.cursor() as cur:
             pg_count = _verify_sync(pg_table, cur=cur, expected_count=expected_count)
-            if pg_count is None:
-                return None
+    except psycopg.Error:
+        conn.rollback()
+        logger.exception("Row count verification failed, keeping initial incremental load")
+        return None
 
-            # Mismatch → full refresh from current.parquet
-            logger.warning(
-                "Full refresh triggered by row count mismatch",
-                pg_rows=pg_count,
-                parquet_rows=expected_count,
-            )
-            silver_full = pl.read_parquet(silver_path)
+    if pg_count is None:
+        return None
+
+    # Mismatch → full refresh from current.parquet
+    logger.warning(
+        "Full refresh triggered by row count mismatch",
+        pg_rows=pg_count,
+        parquet_rows=expected_count,
+    )
+
+    try:
+        silver_full = pl.read_parquet(silver_current_path)
+    except (pl.exceptions.PolarsError, OSError):
+        logger.exception("Cannot read silver snapshot for full refresh")
+        return None
+
+    try:
+        with conn.cursor() as cur:
             cur.execute(ddl_sql)
             rows = _load_snapshot(silver_full, cur=cur, pg_table=pg_table)
-
         conn.commit()
     except (psycopg.Error, pl.exceptions.PolarsError, OSError):
         conn.rollback()

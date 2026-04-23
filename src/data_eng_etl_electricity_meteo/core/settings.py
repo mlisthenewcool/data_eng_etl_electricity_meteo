@@ -84,8 +84,10 @@ class Settings(BaseSettings):
     # -- General settings --------------------------------------------------------------
 
     logging_level: Annotated[
-        LogLevel, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
-    ] = Field(default=LogLevel.INFO, description="The logger verbosity level")
+        LogLevel,
+        BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v),
+        Field(description="The logger verbosity level"),
+    ] = LogLevel.INFO
 
     # -- Data settings -----------------------------------------------------------------
 
@@ -205,19 +207,28 @@ class Settings(BaseSettings):
         1. ``init_settings``    — values passed at instantiation (tests, overrides)
         2. ``env_settings``     — environment variables
         3. ``dotenv_settings``  — ``.env`` file
-        4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``)
+        4. ``SecretsSettingsSource`` — Docker secrets files (``_SECRETS_DIR``), added
+           **only if the directory exists**.
+           In CI and other environments without secrets files, credentials come from env
+           vars via ``env_settings`` — adding the source unconditionally would emit a
+           spurious ``UserWarning`` from pydantic-settings about the missing directory.
 
         The built-in ``file_secret_settings``
         (which reads from ``model_config['secrets_dir']``) is intentionally replaced by
         an explicit ``SecretsSettingsSource`` so the path is a class constant rather
         than a configurable setting.
         """
-        return (
+        sources: tuple[PydanticBaseSettingsSource, ...] = (
             init_settings,
             env_settings,
             dotenv_settings,
-            SecretsSettingsSource(settings_cls, secrets_dir=cls._SECRETS_DIR),
         )
+        if cls._SECRETS_DIR.exists():
+            sources = (
+                *sources,
+                SecretsSettingsSource(settings_cls, secrets_dir=cls._SECRETS_DIR),
+            )
+        return sources
 
 
 # --------------------------------------------------------------------------------------
@@ -232,6 +243,8 @@ def _load_settings() -> Settings:
     depends on ``settings.logging_level`` (circular), and calling
     ``structlog.configure()`` here would overwrite Airflow's own config.
     """
+    _SECRET_FIELDS = {"postgres_password"}
+
     try:
         return Settings()
     except ValidationError as exc:
@@ -239,9 +252,9 @@ def _load_settings() -> Settings:
         for error in exc.errors():
             field = error["loc"][-1]
             msg = error["msg"]
-            value = error.get("input")
+            value = "***" if field in _SECRET_FIELDS else error.get("input")
             print(f"\t* {field}={value!r} — {msg}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 settings = _load_settings()

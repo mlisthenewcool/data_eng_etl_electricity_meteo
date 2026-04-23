@@ -242,14 +242,14 @@ Chaque dataset source est converti en Parquet versionné. Le rôle de bronze est
 traitement utilise des `LazyFrame` Polars avec `sink_parquet` pour le streaming
 mémoire sur les gros fichiers.
 
-| Dataset                     | Format source | Bronze fait quoi                                       |
-|-----------------------------|---------------|--------------------------------------------------------|
-| `odre_installations`        | Parquet       | Identité (`scan_parquet`)                              |
-| `odre_eco2mix_tr`           | Parquet       | Identité (`scan_parquet`)                              |
-| `odre_eco2mix_cons_def`     | Parquet       | Identité (`scan_parquet`)                              |
-| `meteo_france_stations`     | JSON          | Conversion format (`read_json`)                        |
+| Dataset                     | Format source | Bronze fait quoi                                        |
+|-----------------------------|---------------|---------------------------------------------------------|
+| `odre_installations`        | Parquet       | Identité (`scan_parquet`)                               |
+| `odre_eco2mix_tr`           | Parquet       | Identité (`scan_parquet`)                               |
+| `odre_eco2mix_cons_def`     | Parquet       | Identité (`scan_parquet`)                               |
+| `meteo_france_stations`     | JSON          | Conversion format (`read_json`)                         |
 | `meteo_france_climatologie` | CSV.gz        | Casting types + remplacement sentinelles (`"mq"`, `""`) |
-| `ign_contours_iris`         | GPKG (SQLite) | Lecture DuckDB spatial (`ST_read` + `ST_AsWKB`)        |
+| `ign_contours_iris`         | GPKG (SQLite) | Lecture DuckDB spatial (`ST_read` + `ST_AsWKB`)         |
 
 `ign_contours_iris` est le seul dataset à utiliser DuckDB en bronze : le format
 GeoPackage (SQLite + géométrie GDAL) ne peut pas être lu par Polars. DuckDB
@@ -266,13 +266,13 @@ renommage de colonnes, typage strict, filtrage, colonnes dérivées, déduplicat
 Le schéma de sortie est validé par un `DataFrameModel` déclaratif (contraintes
 `nullable`, `unique`, `dtype`, bornes, valeurs autorisées).
 
-| Dataset                     | Silver fait quoi                                                            |
-|-----------------------------|-----------------------------------------------------------------------------|
-| `odre_installations`        | Clé primaire synthétique, cascade géographique, filtrage type IRIS          |
-| `odre_eco2mix_tr`           | Renommage, typage datetime TZ, colonnes production                         |
-| `odre_eco2mix_cons_def`     | Renommage, typage datetime TZ, colonnes production                         |
-| `meteo_france_stations`     | Aplatissement structures imbriquées, extraction positions/paramètres        |
-| `meteo_france_climatologie` | Renommage, colonnes dérivées (vitesse vent, précipitations)                |
+| Dataset                     | Silver fait quoi                                                             |
+|-----------------------------|------------------------------------------------------------------------------|
+| `odre_installations`        | Clé primaire synthétique, cascade géographique, filtrage type IRIS           |
+| `odre_eco2mix_tr`           | Renommage, typage datetime TZ, colonnes production                           |
+| `odre_eco2mix_cons_def`     | Renommage, typage datetime TZ, colonnes production                           |
+| `meteo_france_stations`     | Aplatissement structures imbriquées, extraction positions/paramètres         |
+| `meteo_france_climatologie` | Renommage, colonnes dérivées (vitesse vent, précipitations)                  |
 | `ign_contours_iris`         | Centroids DuckDB spatial (`ST_Centroid` + `ST_Transform` Lambert&rarr;WGS84) |
 
 Pour `ign_contours_iris`, DuckDB spatial est aussi utilisé en silver pour les calculs

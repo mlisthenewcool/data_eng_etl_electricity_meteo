@@ -63,10 +63,9 @@ class SilverSchema(DataFrameModel):
 def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
     """Open a DuckDB in-memory connection with the spatial extension loaded.
 
-    DuckDB >=0.9 auto-installs missing extensions on ``LOAD``, so an explicit
-    ``INSTALL`` is unnecessary (the project requires duckdb >=1.5.0).
-    In Docker the extension is pre-installed in the image; locally it is fetched on
-    first use then cached.
+    DuckDB auto-installs missing extensions on ``LOAD``, so an explicit ``INSTALL`` is
+    unnecessary. In Docker the extension is pre-installed in the image; locally it is
+    fetched on first use then cached.
     """
     with duckdb.connect(":memory:") as conn:
         conn.execute("LOAD spatial")
@@ -120,23 +119,22 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
     """
     logger.debug("Reading GeoPackage from landing")
 
-    with _gpkg_safe_read_path(landing_path) as tmp_gpkg:
-        with _duckdb_spatial_conn() as conn:
-            # EXCLUDE + re-add as WKB: keeps the column name identical
-            # to the source while converting native geometry to binary.
-            # * passes new source columns through for drift detection.
-            query = """
-                SELECT
-                    * EXCLUDE(geometrie),
-                    ST_AsWKB(geometrie) AS geometrie
-                FROM ST_read(?, layer = 'contours_iris')
-            """
-            df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
-            logger.debug(
-                "DuckDB spatial query completed",
-                rows_count=len(df),
-                columns_count=len(df.columns),
-            )
+    with _gpkg_safe_read_path(landing_path) as tmp_gpkg, _duckdb_spatial_conn() as conn:
+        # EXCLUDE + re-add as WKB: keeps the column name identical
+        # to the source while converting native geometry to binary.
+        # * passes new source columns through for drift detection.
+        query = """
+            SELECT
+                * EXCLUDE(geometrie),
+                ST_AsWKB(geometrie) AS geometrie
+            FROM ST_read(?, layer = 'contours_iris')
+        """
+        df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
+        logger.debug(
+            "DuckDB spatial query completed",
+            rows_count=len(df),
+            columns_count=len(df.columns),
+        )
     return df.lazy()
 
 
@@ -208,10 +206,13 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
                 nom_commune,
                 type_iris,
                 geometrie,
-                -- DuckDB PROJ returns (lat, lon) for EPSG:4326
-                -- (non-standard axis order)
-                ST_X(centroid_wgs84) AS centroid_lat,  -- X = latitude
-                ST_Y(centroid_wgs84) AS centroid_lon   -- Y = longitude
+                -- In the current DuckDB Spatial / PROJ version, ST_X
+                -- returns latitude and ST_Y returns longitude after
+                -- ST_Transform to EPSG:4326. SilverSchema bounds
+                -- (lat 41-52, lon -6 to 10) catch any axis-order
+                -- regression from a DuckDB / PROJ upgrade.
+                ST_X(centroid_wgs84) AS centroid_lat,
+                ST_Y(centroid_wgs84) AS centroid_lon
             FROM centroids
         """
 

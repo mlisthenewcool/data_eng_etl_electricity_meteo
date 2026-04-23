@@ -23,13 +23,10 @@ from data_eng_etl_electricity_meteo.core.exceptions import (
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.core.settings import settings
 from data_eng_etl_electricity_meteo.loaders.pg_loader import run_standalone_postgres_load
-from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import (
-    CustomDownloadFunc,
-    CustomMetadataFunc,
-    RemoteIngestionPipeline,
-)
+from data_eng_etl_electricity_meteo.pipeline.remote_ingestion import RemoteIngestionPipeline
 from data_eng_etl_electricity_meteo.pipeline.state import load_local_snapshot, save_local_snapshot
-from data_eng_etl_electricity_meteo.pipeline.types import PipelineRunSnapshot
+from data_eng_etl_electricity_meteo.pipeline.strategies import get_strategy
+from data_eng_etl_electricity_meteo.pipeline.types import DownloadStrategy, PipelineRunSnapshot
 
 logger = get_logger("cli")
 
@@ -46,14 +43,13 @@ def _load_postgres(dataset: RemoteDatasetConfig) -> None:
         _ = run_standalone_postgres_load(dataset)
     except PostgresLoadError as err:
         err.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 def run_pipeline(
     dataset_name: str,
     *,
-    custom_download: CustomDownloadFunc | None = None,
-    custom_metadata: CustomMetadataFunc | None = None,
+    strategy: DownloadStrategy | None = None,
     skip_postgres: bool = False,
     only_postgres: bool = False,
 ) -> None:
@@ -63,12 +59,8 @@ def run_pipeline(
     ----------
     dataset_name
         Catalog identifier (e.g. ``odre_installations``).
-    custom_download
-        Optional callable replacing the standard single-URL download
-        (e.g. multi-file merge for climatologie).
-    custom_metadata
-        Optional callable providing remote metadata when the standard HTTP HEAD returns
-        no caching headers (e.g. OpenDataSoft catalog API).
+    strategy
+        Download strategy. When ``None``, uses ``get_strategy(dataset_name)``.
     skip_postgres
         When ``True``, skip the final Postgres load step.
     only_postgres
@@ -84,7 +76,7 @@ def run_pipeline(
         dataset = catalog.get_remote_dataset(dataset_name)
     except DataCatalogError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if only_postgres:
         _load_postgres(dataset)
@@ -104,11 +96,8 @@ def run_pipeline(
     # -- Prepare version and pipeline --------------------------------------------------
 
     version = dataset.ingestion.frequency.format_datetime_as_version(datetime.now(tz=UTC))
-    manager = RemoteIngestionPipeline(
-        dataset=dataset,
-        _custom_download=custom_download,
-        _custom_metadata=custom_metadata,
-    )
+    resolved_strategy = strategy if strategy is not None else get_strategy(dataset_name)
+    manager = RemoteIngestionPipeline(dataset=dataset, strategy=resolved_strategy)
 
     # -- Load previous run state -------------------------------------------------------
 
@@ -120,7 +109,7 @@ def run_pipeline(
         download_ctx = manager.download(version, previous_snapshot=previous_snapshot)
     except DownloadStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     if download_ctx is None:
         return None
@@ -134,7 +123,7 @@ def run_pipeline(
             extract_ctx = manager.extract_archive(download_ctx, previous_snapshot=previous_snapshot)
         except ExtractStageError as error:
             error.log(logger.critical)
-            raise SystemExit(1)
+            raise SystemExit(1) from None
 
         # extract_archive returns None when the extracted content hash is
         # unchanged (smart-skip). Landing files are already cleaned up.
@@ -149,7 +138,7 @@ def run_pipeline(
         bronze_ctx = manager.to_bronze(extract_ctx or download_ctx)
     except BronzeStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # -- Silver ------------------------------------------------------------------------
 
@@ -157,7 +146,7 @@ def run_pipeline(
         silver_ctx = manager.to_silver(bronze_ctx)
     except SilverStageError as error:
         error.log(logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     # -- Save run state ----------------------------------------------------------------
 

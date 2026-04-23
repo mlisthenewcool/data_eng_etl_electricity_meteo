@@ -15,6 +15,8 @@ Pipeline functions (typed) ↔ Airflow tasks (dicts via XCom):
     to_silver() → PipelineContext(..., silver=SilverMetrics(...))
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
@@ -27,6 +29,45 @@ from data_eng_etl_electricity_meteo.utils.download import HttpDownloadInfo
 from data_eng_etl_electricity_meteo.utils.remote_metadata import RemoteFileMetadata
 
 logger = get_logger("pipeline")
+
+
+# --------------------------------------------------------------------------------------
+# Download strategy protocol
+# --------------------------------------------------------------------------------------
+
+
+MetadataFetcher = Callable[[str, str | None], RemoteFileMetadata | None]
+"""Fetch remote metadata: ``(url, previous_etag) → metadata | None``.
+
+Returns ``None`` on HTTP 304 Not Modified. Strategies that don't support
+ETags (e.g. data.gouv.fr) ignore ``previous_etag`` and never return ``None``.
+"""
+
+FileDownloader = Callable[[str, Path, str, int], HttpDownloadInfo]
+"""Download a remote file: ``(url, dest_dir, fallback_filename, timeout_s) → info``.
+
+Some strategies (e.g. climatologie) manage URLs and timeouts internally
+and may ignore certain parameters.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadStrategy:
+    """Strategy for fetching remote metadata and downloading files.
+
+    Holds two callback fields — one for metadata retrieval, one for file download.
+    Concrete implementations are plain functions assembled via ``get_strategy()``.
+
+    Attributes
+    ----------
+    fetch_metadata
+        Callback that fetches remote metadata. Returns ``None`` on HTTP 304.
+    download_file
+        Callback that downloads the remote file to a landing directory.
+    """
+
+    fetch_metadata: MetadataFetcher
+    download_file: FileDownloader
 
 
 # --------------------------------------------------------------------------------------

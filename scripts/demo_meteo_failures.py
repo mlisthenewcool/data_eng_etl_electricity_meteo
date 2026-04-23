@@ -51,17 +51,17 @@ def main() -> None:
     print("  - dept 01, 02, 13, 93: normal download")
     print()
 
-    with tempfile.TemporaryDirectory(prefix="demo_meteo_") as tmpdir:
-        with (
-            patch.object(meteo_download, "DEPARTMENTS", _DEMO_DEPARTMENTS),
-            patch.object(meteo_download, "_stream_to_file", _patched_stream),
-        ):
-            try:
-                result = meteo_download.download_climatologie(Path(tmpdir))
-                print(f"\nMerged file: {result}")
-                print(f"Size: {result.stat().st_size / 1024**2:.1f} MiB")
-            except (ValueError, OSError) as e:
-                print(f"\nDownload error: {e}")
+    with (
+        tempfile.TemporaryDirectory(prefix="demo_meteo_") as tmpdir,
+        patch.object(meteo_download, "DEPARTMENTS", _DEMO_DEPARTMENTS),
+        patch.object(meteo_download, "_stream_to_file", _patched_stream),
+    ):
+        try:
+            result = meteo_download.download_climatologie(Path(tmpdir))
+            print(f"\nMerged file: {result.path}")
+            print(f"Size: {result.size_mib} MiB")
+        except (ValueError, OSError) as e:
+            print(f"\nDownload error: {e}")
 
 
 if __name__ == "__main__":

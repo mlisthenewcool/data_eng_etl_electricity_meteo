@@ -6,6 +6,9 @@ import polars as pl
 import pytest
 
 from data_eng_etl_electricity_meteo.core.exceptions import SourceSchemaDriftError
+from data_eng_etl_electricity_meteo.custom_downloads.meteo_climatologie import (
+    _LANDING_COLUMNS,
+)
 from data_eng_etl_electricity_meteo.transformations.datasets.meteo_france_climatologie import (
     _ALL_SOURCE_COLUMNS,
     _BRONZE_COLUMNS,
@@ -90,6 +93,15 @@ def bronze_df(tmp_path: Path) -> pl.DataFrame:
     """Collect the bronze transform from a fake 196-column landing Parquet."""
     path = _write_landing_parquet(tmp_path)
     return collect_narrow(transform_bronze(path))
+
+
+# --------------------------------------------------------------------------------------
+# Landing / bronze column alignment
+# --------------------------------------------------------------------------------------
+
+
+def test_landing_columns_match_bronze_columns() -> None:
+    assert set(_LANDING_COLUMNS) == set(_BRONZE_COLUMNS.keys())
 
 
 # --------------------------------------------------------------------------------------

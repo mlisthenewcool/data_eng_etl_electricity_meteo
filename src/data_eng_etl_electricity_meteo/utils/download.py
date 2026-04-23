@@ -6,18 +6,19 @@ Airflow handles retries at the task level, so no retry logic is included here.
 """
 
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 import httpx
-from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.logger import get_logger
 from data_eng_etl_electricity_meteo.utils.file_hash import FileHasher
-from data_eng_etl_electricity_meteo.utils.progress import DownloadProgressReporter
+from data_eng_etl_electricity_meteo.utils.progress import (
+    DownloadProgressReporter,
+    TqdmProgressReporter,
+)
 
 logger = get_logger("download")
 
@@ -190,69 +191,70 @@ def download_to_file(
         pool=None,
     )
 
-    with httpx.Client(http2=True, timeout=timeout, follow_redirects=True) as client:
-        with client.stream("GET", url) as response:
-            response.raise_for_status()
+    with (
+        httpx.Client(http2=True, timeout=timeout, follow_redirects=True) as client,
+        client.stream("GET", url) as response,
+    ):
+        response.raise_for_status()
 
-            # -- Resolve destination filename and path ---------------------------------
+        # -- Resolve destination filename and path -------------------------------------
 
-            filename = _extract_filename(response, url)
-            if filename is None:
-                logger.warning(
-                    "Could not extract filename, fallback to default",
-                    fallback_filename=fallback_filename,
-                )
-                filename = fallback_filename
-            dest_path = dest_dir / filename
-
-            if dest_path.exists():
-                logger.warning("File already exists, overwriting", url=shorten_url(url))
-
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            downloaded_bytes = 0
-
-            content_length: int | None = None
-            raw_cl = response.headers.get("content-length")
-            if raw_cl is not None:
-                try:
-                    content_length = int(raw_cl)
-                except ValueError:
-                    logger.warning("Invalid Content-Length header", header=raw_cl)
-
-            # -- Initialize progress reporter and stream -------------------------------
-
-            hasher = FileHasher()
-
-            reporter: DownloadProgressReporter = (
-                progress(content_length or 0)
-                if progress is not None
-                else tqdm(
-                    total=content_length or 0,
-                    unit="iB",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc=f"Downloading {filename}",
-                    file=sys.stderr,
-                    leave=False,
-                    mininterval=1.0,
-                )
+        filename = _extract_filename(response, url)
+        if filename is None:
+            logger.warning(
+                "Could not extract filename, fallback to default",
+                fallback_filename=fallback_filename,
             )
+            filename = fallback_filename
+        dest_path = dest_dir / filename
 
+        if dest_path.exists():
+            logger.warning("File already exists, overwriting", url=shorten_url(url))
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        downloaded_bytes = 0
+
+        content_length: int | None = None
+        raw_cl = response.headers.get("content-length")
+        if raw_cl is not None:
             try:
-                with dest_path.open("wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
-                        f.write(chunk)
-                        hasher.update(chunk)
-                        chunk_len = len(chunk)
-                        downloaded_bytes += chunk_len
-                        reporter.update(chunk_len)
-            finally:
-                reporter.close()
+                content_length = int(raw_cl)
+            except ValueError:
+                logger.warning("Invalid Content-Length header", header=raw_cl)
 
-            # -- Compute final metadata and return -------------------------------------
+        # -- Initialize progress reporter and stream -----------------------------------
 
-            size_mib = round(downloaded_bytes / (1024 * 1024), 2)
+        hasher = FileHasher()
 
-            logger.debug("Download completed", filename=filename)
+        reporter = (
+            progress(content_length or 0)
+            if progress is not None
+            else TqdmProgressReporter.for_bytes(content_length or 0, desc=f"Downloading {filename}")
+        )
 
-            return HttpDownloadInfo(path=dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)
+        # Prevents downstream stages from reading a partial file if
+        # the download is interrupted (smart-skip compares hashes).
+        tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
+
+        try:
+            with tmp_path.open("wb") as f:
+                for chunk in response.iter_bytes(chunk_size=_CHUNK_SIZE):
+                    f.write(chunk)
+                    hasher.update(chunk)
+                    chunk_len = len(chunk)
+                    downloaded_bytes += chunk_len
+                    reporter.update(chunk_len)
+            tmp_path.rename(dest_path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        finally:
+            reporter.close()
+
+        # -- Compute final metadata and return -----------------------------------------
+
+        size_mib = round(downloaded_bytes / (1024 * 1024), 2)
+
+        logger.debug("Download completed", filename=filename)
+
+        return HttpDownloadInfo(path=dest_path, file_hash=hasher.hexdigest, size_mib=size_mib)

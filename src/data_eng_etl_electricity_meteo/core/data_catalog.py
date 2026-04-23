@@ -454,7 +454,7 @@ if __name__ == "__main__":
         _catalog = DataCatalog.load(settings.data_catalog_file_path)
     except InvalidCatalogError as error:
         error.log(_logger.critical)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     _logger.info("Catalog loaded", dataset_count=len(_catalog.datasets))
 

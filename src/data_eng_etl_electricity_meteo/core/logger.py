@@ -21,6 +21,7 @@ json
 
 import re
 import sys
+from datetime import datetime
 from enum import Enum
 from functools import cache
 from pathlib import Path
@@ -74,6 +75,8 @@ def _normalize_value(value: object) -> str | int | float:
         return str(value)
     if isinstance(value, (str, int, float)):
         return value
+    if isinstance(value, datetime):
+        return value.isoformat()
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, Enum):
@@ -430,7 +433,8 @@ def _setup_logger(
         logger_factory = structlog.PrintLoggerFactory(file=sys.stderr)
 
     elif output == "json":
-        processors = shared_processors + [
+        processors = [
+            *shared_processors,
             structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(serializer=orjson.dumps),
         ]

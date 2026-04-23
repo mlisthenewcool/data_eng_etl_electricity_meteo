@@ -16,6 +16,9 @@
   l'architecture si nécessaire et simplifier pour avoir une seule source de référence
 - [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
   déjà créés
+- [ ] [Pipeline] Contrôler, tester et documenter le flux d'ingestion complet, avec les
+  skips (download, extraction, écriture fichier Parquet, load dans Postgres) et la
+  gestion des cas d'erreurs potentielles
 
 ## Ensuite
 
@@ -24,8 +27,6 @@
   (globalement lors du premier lancement si le DAG n'était pas activé, ou autre chose ?)
 - [ ] [Données] Intégrer les appels aux API Météo France (phases 2/3 décrites dans
   [integration_meteo_france.md](docs/integration_meteo_france.md))
-- [ ] [Docs] Documenter pourquoi et comment le silver est maintenu à l'identique entre
-  Postgres et le stockage Parquet local
 - [ ] [Pipeline] Ajouter un smart skip pour les transformations silver -> gold :
   exécution uniquement si les données ont réellement changé (dans le cas d'un run manuel
   sous Airflow ou une exécution en cli). Suivre la même logique que celle existante.
@@ -104,6 +105,10 @@
 
 ## Terminé
 
+- [x] [Docs] _(2026-03-12)_ Documenter pourquoi et comment le silver est maintenu à
+  l'identique entre Postgres et le stockage Parquet local : chaîne de décision
+  complète dans `docs/chaine_decision_ingestion.md`, mise à jour
+  `docs/delta_incremental_silver.md`
 - [x] [CLI] _(2026-03-11)_ Packaging standard (`[build-system]` hatchling +
   `[project.scripts]`) : entry points `pipeline`, `pipeline-meteo-clim`, `run-dbt`.
   Suppression de `PYTHONPATH`, `.env.local.example` et `scripts/dbt.sh`

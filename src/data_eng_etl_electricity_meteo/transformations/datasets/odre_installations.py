@@ -281,7 +281,7 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
         pl.col("code_departement")
         .str.starts_with("97")
         .sum()
-        .alias("_warn_orphan_code_iris_overseas"),
+        .alias("_diag_orphan_code_iris_overseas"),
     )
 
     return lf

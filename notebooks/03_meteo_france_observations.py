@@ -258,7 +258,7 @@ def _(catalogue_observations, df_observations, df_paquet_observations):
     )
     print(
         "catalog covers all columns:",
-        sorted(df_observations.columns) == sorted(list(catalogue_observations.keys())),
+        sorted(df_observations.columns) == sorted(catalogue_observations.keys()),
     )
     return
 

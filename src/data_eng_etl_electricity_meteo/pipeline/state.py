@@ -67,7 +67,8 @@ def save_local_snapshot(dataset_name: str, snapshot: PipelineRunSnapshot) -> Non
     path = _state_path(dataset_name)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    fd, tmp_str = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_str)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(
@@ -75,10 +76,10 @@ def save_local_snapshot(dataset_name: str, snapshot: PipelineRunSnapshot) -> Non
                     snapshot.model_dump(mode="json", exclude_none=True),
                 )
             )
-        os.rename(tmp, path)
+        tmp.rename(path)
     except BaseException:
         with contextlib.suppress(OSError):
-            os.unlink(tmp)
+            tmp.unlink()
         raise
 
     logger.debug("State saved")

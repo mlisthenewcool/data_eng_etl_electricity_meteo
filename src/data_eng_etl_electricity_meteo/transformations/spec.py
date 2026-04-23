@@ -62,7 +62,9 @@ class DatasetTransformSpec:
     primary_key
         Column names forming the composite primary key (for conditional dedup).
     all_source_columns
-        Every column the source API returns (for schema drift detection).
+        Every column the source API returns, **in snake_case**
+        (post-``prepare_silver`` rename). Compared against the actual columns by
+        ``validate_source_columns`` after the rename step.
     used_source_columns
         Columns the silver transform actually accesses
         (for documentation and future column-pruning optimization).

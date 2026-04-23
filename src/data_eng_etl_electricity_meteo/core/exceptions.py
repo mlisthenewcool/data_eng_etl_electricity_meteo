@@ -9,7 +9,7 @@ from data_eng_etl_electricity_meteo.core.enums import PipelineStage
 class _LogMethod(Protocol):
     """Signature of a structlog bound logger method."""
 
-    def __call__(self, event: str, /, **kw: Any) -> None: ...
+    def __call__(self, event: str | None, *args: Any, **kw: Any) -> Any: ...
 
 
 class BaseProjectException(Exception):
@@ -65,6 +65,15 @@ class FileNotFoundInArchiveError(ExtractionError):
         super().__init__("File not found in archive.")
 
 
+class CorruptArchiveError(ExtractionError):
+    """Raised when the archive is corrupt or unreadable."""
+
+    def __init__(self, archive_path: Path, reason: str) -> None:
+        self.archive_path = archive_path
+        self.reason = reason
+        super().__init__("Archive is corrupt or unreadable.")
+
+
 class FileIntegrityError(ExtractionError):
     """Raised when file validation (hash, size, etc.) fails."""
 
@@ -72,6 +81,19 @@ class FileIntegrityError(ExtractionError):
         self.path = path
         self.reason = reason
         super().__init__("File integrity check failed.")
+
+
+# --------------------------------------------------------------------------------------
+# Download errors
+# --------------------------------------------------------------------------------------
+
+
+class DownloadError(BaseProjectException):
+    """Raised when a download utility fails to retrieve data."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__("Download failed.")
 
 
 # --------------------------------------------------------------------------------------
@@ -227,35 +249,35 @@ class DownloadStageError(PipelineStageError):
     """Raised when the download stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.DOWNLOAD, message, context or None)
+        super().__init__(PipelineStage.DOWNLOAD, message, context)
 
 
 class ExtractStageError(PipelineStageError):
     """Raised when archive extraction fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.EXTRACT, message, context or None)
+        super().__init__(PipelineStage.EXTRACT, message, context)
 
 
 class BronzeStageError(PipelineStageError):
     """Raised when the bronze transformation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.BRONZE, message, context or None)
+        super().__init__(PipelineStage.BRONZE, message, context)
 
 
 class SilverStageError(PipelineStageError):
     """Raised when the silver transformation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.SILVER, message, context or None)
+        super().__init__(PipelineStage.SILVER, message, context)
 
 
 class PostgresLoadError(PipelineStageError):
     """Raised when loading silver Parquet into Postgres fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.LOAD_POSTGRES, message, context or None)
+        super().__init__(PipelineStage.LOAD_POSTGRES, message, context)
 
 
 class PostgresCredentialsError(PostgresLoadError):
@@ -273,7 +295,7 @@ class GoldStageError(PipelineStageError):
     """Raised when the gold aggregation stage fails."""
 
     def __init__(self, message: str | None = None, **context: Any) -> None:
-        super().__init__(PipelineStage.GOLD, message, context or None)
+        super().__init__(PipelineStage.GOLD, message, context)
 
 
 # --------------------------------------------------------------------------------------

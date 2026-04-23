@@ -1,7 +1,6 @@
 """7z archive extraction with progress bar and integrity checks."""
 
 import shutil
-import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,10 +8,11 @@ from pathlib import Path
 
 import py7zr
 from py7zr.callbacks import ExtractCallback
-from tqdm import tqdm
 
 from data_eng_etl_electricity_meteo.core.exceptions import (
     ArchiveNotFoundError,
+    CorruptArchiveError,
+    ExtractionError,
     FileIntegrityError,
     FileNotFoundInArchiveError,
 )
@@ -70,12 +70,32 @@ def _validate_sqlite_header(path: Path) -> None:
         raise FileIntegrityError(path, reason=f"Could not read file header: {error}") from None
 
 
+def _move_extracted_file(src: Path, dest: Path) -> None:
+    """Move extracted file to final destination.
+
+    Overwrites any existing file at *dest*.
+    Not atomic across filesystems, but the caller's temp dir is cleaned up regardless.
+
+    Raises
+    ------
+    ExtractionError
+        If the move fails.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if dest.exists():
+            dest.unlink()
+        shutil.move(src=src, dst=dest)
+    except OSError as err:
+        raise ExtractionError(f"Failed to move extracted file to {dest}") from err
+
+
 # --------------------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------------------
 
 
-def extract_7z(
+def extract_7z(  # noqa: PLR0912
     archive_path: Path,
     *,
     target_filename: str,
@@ -111,10 +131,14 @@ def extract_7z(
     ------
     ArchiveNotFoundError
         If *archive_path* doesn't exist.
+    CorruptArchiveError
+        If the archive is corrupt or unreadable.
     FileNotFoundInArchiveError
         If *target_filename* not found in archive.
     FileIntegrityError
         If validation enabled and file is invalid.
+    ExtractionError
+        If extraction I/O or file move fails.
     """
     if not archive_path.exists():
         raise ArchiveNotFoundError(archive_path)
@@ -124,14 +148,18 @@ def extract_7z(
 
         # -- Open archive and locate target file ---------------------------------------
 
-        with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+        try:
+            archive = py7zr.SevenZipFile(archive_path, mode="r")
+        except py7zr.Bad7zFile as err:
+            raise CorruptArchiveError(archive_path, reason=str(err)) from None
+
+        with archive:
             # Flexible search: IGN archives have inconsistent internal structures
             # e.g., "CONTOURS-IRIS_3-0/iris.gpkg" when we search for "iris.gpkg"
-            target_info = next(
-                (info for info in archive.list() if info.filename.endswith(target_filename)),
-                None,
-            )
-            if target_info is None:
+            for target_info in archive.list():
+                if target_info.filename.endswith(target_filename):
+                    break
+            else:
                 raise FileNotFoundInArchiveError(target_filename, archive_path=archive_path)
 
             target_internal_path = target_info.filename
@@ -140,54 +168,47 @@ def extract_7z(
 
             # -- Extract with progress tracking ----------------------------------------
 
-            owned_pbar: tqdm | None = None
+            owned_callback: TqdmExtractCallback | None = None
             if progress is not None:
-                callback: ExtractCallback = progress(uncompressed_size)
+                callback = progress(uncompressed_size)
             else:
-                owned_pbar = tqdm(
-                    total=uncompressed_size,
-                    unit="B",
-                    unit_scale=True,
+                owned_callback = TqdmExtractCallback(
+                    uncompressed_size,
                     desc=f"Extracting {target_filename}",
-                    leave=False,
-                    file=sys.stderr,
                 )
-                callback = TqdmExtractCallback(owned_pbar)
+                callback = owned_callback
 
             try:
                 archive.extract(
-                    path=tmp_dir_path, targets=[target_internal_path], callback=callback
+                    path=tmp_dir_path,
+                    targets=[target_internal_path],
+                    callback=callback,
                 )
+            except py7zr.Bad7zFile as err:
+                raise CorruptArchiveError(archive_path, reason=str(err)) from None
             finally:
-                if owned_pbar is not None:
-                    owned_pbar.close()
+                if owned_callback is not None:
+                    owned_callback.close()
 
-            # -- Move to final destination ---------------------------------------------
+        # -- Move to final destination (archive closed) --------------------------------
 
-            extracted_file = tmp_dir_path / target_internal_path
+        extracted_file = tmp_dir_path / target_internal_path
+        # Preserve original filename from archive (not the nested internal path)
+        dest_path = dest_dir / target_filename
+        _move_extracted_file(extracted_file, dest_path)
 
-            # Preserve original filename from archive (not the nested internal path)
-            dest_path = dest_dir / target_filename
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # -- Validate (optional SQLite check) and compute metadata ---------------------
 
-            # Move to final destination (not atomic across filesystems,
-            # but the source temp dir is cleaned up regardless)
-            if dest_path.exists():
-                dest_path.unlink()
-            shutil.move(src=extracted_file, dst=dest_path)
+        if validate_sqlite:
+            try:
+                _validate_sqlite_header(dest_path)
+            except FileIntegrityError:
+                # Avoid leaving a corrupt file that a subsequent run might accept
+                if dest_path.exists():
+                    dest_path.unlink()
+                raise
 
-            # -- Validate (optional SQLite check) and compute metadata -----------------
+        file_hash = FileHasher.hash_file(dest_path)
+        size_mib = round(dest_path.stat().st_size / 1024**2, 2)
 
-            if validate_sqlite:
-                try:
-                    _validate_sqlite_header(dest_path)
-                except FileIntegrityError:
-                    # Avoid leaving a corrupt file that a subsequent run might accept
-                    if dest_path.exists():
-                        dest_path.unlink()
-                    raise
-
-            file_hash = FileHasher.hash_file(dest_path)
-            size_mib = round(dest_path.stat().st_size / 1024**2, 2)
-
-            return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)
+        return ExtractedFileInfo(path=dest_path, file_hash=file_hash, size_mib=size_mib)

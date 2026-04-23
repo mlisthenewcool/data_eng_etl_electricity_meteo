@@ -1,0 +1,68 @@
+# Dependabot configuration
+# Docs: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Cooldown: wait 7 days before proposing a bump so that freshly published
+# releases (and potential zero-day regressions) age out. Security updates
+# bypass the cooldown by default.
+#
+# NOTE: Dependabot's YAML parser does NOT support YAML anchors (&foo / *foo),
+# so schedule/cooldown blocks are duplicated on each entry.
+
+version: 2
+updates:
+  # -- Python dependencies (pyproject.toml + uv.lock) --------------------------------
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+
+  # -- GitHub Actions (pinned by commit SHA) -----------------------------------------
+  # Dependabot updates the SHA and refreshes the `# vX.Y.Z` comment automatically.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # -- Dockerfile base images (FROM ...) ---------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        patterns: ["*"]
+
+  # -- docker-compose images (image: ...) --------------------------------------------
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    cooldown:
+      default-days: 7
+    groups:
+      docker-compose:
+        patterns: ["*"]

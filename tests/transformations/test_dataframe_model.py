@@ -1,6 +1,6 @@
 """Unit tests for the custom DataFrameModel."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 
 import polars as pl
@@ -237,7 +237,7 @@ class TestDtypeOverride:
                 "small_int": pl.Series([1], dtype=pl.Int16),
                 "tags": [["a", "b"]],
                 "data": [b"\x00"],
-                "ts": pl.Series([datetime(2025, 1, 1)], dtype=pl.Datetime("us", "UTC")),
+                "ts": pl.Series([datetime(2025, 1, 1, tzinfo=UTC)], dtype=pl.Datetime("us", "UTC")),
                 "count": pl.Series([42], dtype=pl.UInt32),
             }
         )
@@ -249,7 +249,7 @@ class TestDtypeOverride:
                 "small_int": pl.Series([1], dtype=pl.Int64),
                 "tags": [["a"]],
                 "data": [b"\x00"],
-                "ts": pl.Series([datetime(2025, 1, 1)], dtype=pl.Datetime("us", "UTC")),
+                "ts": pl.Series([datetime(2025, 1, 1, tzinfo=UTC)], dtype=pl.Datetime("us", "UTC")),
                 "count": pl.Series([1], dtype=pl.UInt32),
             }
         )

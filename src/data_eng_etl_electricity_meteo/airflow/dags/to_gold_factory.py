@@ -309,9 +309,12 @@ def _generate_all_dags() -> dict[str, DAG]:
             schedule: Asset | AssetAll = (
                 upstream_assets[0] if len(upstream_assets) == 1 else AssetAll(*upstream_assets)
             )
-        except (ValueError, DataCatalogError):
-            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
-            continue  # move to next dataset
+        except DataCatalogError:
+            logger.exception("Missing dependency in catalog", dataset_name=dataset.name)
+            continue
+        except ValueError:  # Asset/AssetAll constructor validation
+            logger.exception("Invalid asset configuration", dataset_name=dataset.name)
+            continue
 
         dags[dataset.name] = _create_dag(dataset, schedule=schedule, outlet=gold_asset)
         logger.debug("to_gold DAG created", dataset_name=dataset.name)

@@ -223,14 +223,11 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
 
     @classmethod
     def _check_schema(cls, schema: pl.Schema) -> list[str]:
-        errors: list[str] = []
         expected = set(cls.__columns__)
         actual = set(schema.names())
 
-        for name in sorted(expected - actual):
-            errors.append(f"Missing column: {name}")
-        for name in sorted(actual - expected):
-            errors.append(f"Unexpected column: {name}")
+        errors: list[str] = [f"Missing column: {name}" for name in sorted(expected - actual)]
+        errors.extend(f"Unexpected column: {name}" for name in sorted(actual - expected))
 
         for name, col in cls.__columns__.items():
             if name in schema and schema[name] != col.dtype:

@@ -1,5 +1,6 @@
 """Unit tests for the core logging module."""
 
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,16 @@ class TestNormalizeValue:
             pytest.param(42,               42,         id="int_passthrough"),
             pytest.param(3.14,             3.14,       id="float_passthrough"),
             pytest.param(Path("/tmp/foo"), "/tmp/foo", id="path_becomes_string"),
+            pytest.param(
+                datetime(2026, 3, 12, 6, 52, 34, tzinfo=UTC),
+                "2026-03-12T06:52:34+00:00",
+                id="datetime_becomes_isoformat",
+            ),
+            pytest.param(
+                datetime(2026, 3, 12, 6, 52, 34),  # noqa: DTZ001 — testing naive datetime handling
+                "2026-03-12T06:52:34",
+                id="naive_datetime_becomes_isoformat",
+            ),
         ],
     )
     # fmt: on

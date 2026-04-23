@@ -2,7 +2,7 @@
 
 Generates one ``{dataset}_to_silver_pg`` DAG per remote dataset in the data catalog.
 Each DAG is triggered when its upstream ``to_silver`` DAG produces a new silver file
-Asset, and loads the Parquet into Postgres ``silver.{dataset}`` via ``PostgresHook``
+Asset, and loads the Parquet into Postgres ``silver.{dataset}`` via ``psycopg``
 (connection id defined in ``pg_connection.AIRFLOW_CONN_ID``).
 """
 
@@ -79,11 +79,14 @@ def _create_dag(
         def load_task() -> Generator[Metadata]:
             """Load silver Parquet into the Postgres silver schema.
 
-            Uses an Airflow ``PostgresHook`` (psycopg3) — credentials come from the
-            Airflow connection store.
+            Credentials come from the Airflow connection store via the Task SDK.
             """
-            # closing() ensures close-without-commit (unlike `with conn:`
-            # which auto-commits on success).
+            # closing() calls conn.close() on exit — nothing more.
+            # `with conn:` would be incorrect here: in psycopg3, Connection.__exit__
+            # manages the *transaction* (commit/rollback) but does NOT close the
+            # connection — causing a connection leak. It would also add redundant
+            # transaction management on top of load_silver_to_postgres(), which
+            # already calls conn.commit() / conn.rollback() internally.
             with closing(open_airflow_connection()) as conn:
                 metrics = load_silver_to_postgres(dataset, conn=conn)
 
@@ -123,8 +126,8 @@ def _generate_all_dags() -> dict[str, DAG]:
             silver_file_asset = get_silver_file_asset(dataset)
             silver_pg_asset = get_silver_pg_asset(dataset)
         except ValueError:
-            logger.exception("Invalid dataset configuration", dataset_name=dataset.name)
-            continue  # move to next dataset
+            logger.exception("Invalid asset configuration", dataset_name=dataset.name)
+            continue
 
         dags[dataset.name] = _create_dag(
             dataset, schedule=silver_file_asset, outlet=silver_pg_asset
