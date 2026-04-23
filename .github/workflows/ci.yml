@@ -6,10 +6,16 @@ on:
   pull_request:
     branches: [ master, dev ]
 
+# Minimal permissions (principle of least privilege) — inherited by all jobs.
+# Override per-job only if a job requires more.
+permissions:
+  contents: read
+
 jobs:
   quality:
     name: Code quality & tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       # Dummy credentials for dbt parse (no DB connection needed)
       POSTGRES_HOST: localhost
@@ -18,20 +24,17 @@ jobs:
       POSTGRES_USER: ci_dummy
       POSTGRES_PASSWORD: ci_dummy
     steps:
-      - uses: actions/checkout@v6
-
-      # https://github.com/actions/setup-python
-      # https://docs.astral.sh/uv/guides/integration/github/#setting-up-python
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      # persist-credentials: false → don't leave GITHUB_TOKEN in .git/config
+      # (reduces attack surface from third-party code run during `uv sync`).
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          python-version-file: ".python-version"
+          persist-credentials: false
 
       # https://github.com/astral-sh/setup-uv
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: 'auto'
+      # Installs uv and Python (version auto-detected from .python-version).
+      # Cache upload on GitHub-hosted runners is enabled by default (enable-cache: auto).
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -49,13 +52,12 @@ jobs:
         run: uv run ty check
 
       - name: Test coverage (pytest)
-        env:
-          # Override pytest-cov settings (in pyproject.toml) for a cleaner CI summary
-          PYTEST_ADDOPTS: "--cov-report=term-missing:skip-covered"
+        # tee writes pytest output to both the live job log (stdout) and the
+        # step summary — without tee, `>>` would hide failures from the logs.
         run: |
-          echo "### Test coverage summary" >> $GITHUB_STEP_SUMMARY
+          echo '### Test coverage summary' >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          uv run pytest >> $GITHUB_STEP_SUMMARY
+          uv run pytest | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: dbt parse
@@ -67,13 +69,32 @@ jobs:
   security:
     name: Secret scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          fetch-depth: 0            # full history required by gitleaks
+          persist-credentials: false
 
-      # https://github.com/gitleaks/gitleaks-action
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      # We install the gitleaks CLI directly rather than use
+      # gitleaks/gitleaks-action because the action repo is effectively
+      # unmaintained: last release was v2.3.9 in April 2025, and the Node 24
+      # migration PR (#207) and issue (#209) have been pending for months.
+      # The CLI itself (https://github.com/gitleaks/gitleaks) is actively
+      # released — using it gives us one less third-party action to pin.
+      #
+      # TODO: once gitleaks-action gets a Node 24-compatible release,
+      # re-evaluate switching back (fewer moving parts, PR comments built-in).
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.30.1"
+        # Install to a user-owned directory (no sudo required) and expose it
+        # to later steps by appending to $GITHUB_PATH.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" gitleaks
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run gitleaks
+        run: gitleaks detect --source . --verbose --no-banner --redact

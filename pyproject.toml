@@ -11,31 +11,31 @@ requires-python = ">=3.13"
 dependencies = [
     "dbt-core>=1.11.8",
     "dbt-postgres>=1.10.0",
-    "duckdb>=1.5.1",
+    "duckdb>=1.5.2",
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.8",
-    "polars>=1.39.3",
+    "polars>=1.40.1",
     "psycopg[c]>=3.3.3",
     "py7zr>=1.1.0",
-    "pyarrow>=23.0.1",
-    "pydantic>=2.12.5",
-    "pydantic-settings>=2.13.1",
+    "pyarrow>=24.0.0",
+    "pydantic>=2.13.3",
+    "pydantic-settings>=2.14.0",
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
     "tqdm>=4.67.3",
-    "typer>=0.24.1",
+    "typer>=0.24.2",
 ]
 
 [dependency-groups]
 dev = [
-    "apache-airflow-task-sdk>=1.2.0",
-    "marimo>=0.23.0",
+    "apache-airflow-task-sdk>=1.2.1",
+    "marimo>=0.23.2",
     "pip-audit>=2.10.0",
-    "prek>=0.3.8",
+    "prek>=0.3.10",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.10",
-    "ty>=0.0.29",
+    "ruff>=0.15.11",
+    "ty>=0.0.32",
 ]
 
 [project.scripts]
@@ -92,7 +92,9 @@ max-doc-length = 88
 include = ["notebooks", "scripts", "src", "tests"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing --cov-report=html:tests/htmlcov"
+# skip-covered keeps the terminal report short (only files with missing lines).
+# HTML report is not a default — generate on demand with `--cov-report=html`.
+addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing:skip-covered"
 
 [tool.coverage.run]
 branch = true # check if all branches of if/else statement are used
