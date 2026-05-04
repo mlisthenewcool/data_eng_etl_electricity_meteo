@@ -7,27 +7,53 @@
 #
 # NOTE: Dependabot's YAML parser does NOT support YAML anchors (&foo / *foo),
 # so schedule/cooldown blocks are duplicated on each entry.
+#
+# target-branch is set to "dev" (active development branch) so that PRs target
+# the right base. Default behaviour would target the GitHub default branch.
 
 version: 2
 updates:
   # -- Python dependencies (pyproject.toml + uv.lock) --------------------------------
-  - package-ecosystem: "uv"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "Europe/Paris"
-    cooldown:
-      default-days: 7
-    groups:
-      python:
-        patterns: ["*"]
+  # DISABLED (2026-05-04): managed manually via `uv sync --upgrade` to avoid
+  # divergence with Dependabot's narrower resolution scope.
+  #
+  # Dependabot's `uv` ecosystem only re-resolves within the group of bumped
+  # packages, leaving transitive deps stale. Example observed: pip 26.0.1 stayed
+  # in a Dependabot PR while CVE-2026-3219 was already patched in pip 26.1.1
+  # via local `uv sync --upgrade`. Two sources of truth = drift + PR noise on
+  # bumps already applied.
+  #
+  # Coverage retained without this block:
+  # - Security alerts: Dependabot's GitHub Advisory scanner runs on the
+  #   uv.lock graph regardless of this file (Settings → Code security →
+  #   Dependabot security updates). CVE on any dep, including transitives,
+  #   still opens an auto-PR.
+  # - CI safety net: `pip-audit` step in .github/workflows/ci.yml fails the
+  #   build on any known CVE in the resolved lockfile.
+  #
+  # Re-enable if: the project becomes multi-dev (no single dev guarantees
+  # `uv sync --upgrade` cadence), compliance imposes a strict patch SLA, or
+  # we migrate to Renovate (which handles full lockfile refresh natively).
+  #
+  # - package-ecosystem: "uv"
+  #   directory: "/"
+  #   target-branch: "dev"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #     time: "06:00"
+  #     timezone: "Europe/Paris"
+  #   cooldown:
+  #     default-days: 7
+  #   groups:
+  #     python:
+  #       patterns: ["*"]
 
   # -- GitHub Actions (pinned by commit SHA) -----------------------------------------
   # Dependabot updates the SHA and refreshes the `# vX.Y.Z` comment automatically.
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -42,6 +68,7 @@ updates:
   # -- Dockerfile base images (FROM ...) ---------------------------------------------
   - package-ecosystem: "docker"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -56,6 +83,7 @@ updates:
   # -- docker-compose images (image: ...) --------------------------------------------
   - package-ecosystem: "docker-compose"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"

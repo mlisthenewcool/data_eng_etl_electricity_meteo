@@ -332,6 +332,27 @@ uv run prek run --all-files
 
 Les hooks `prek` exécutent automatiquement ruff, ty et pytest à chaque commit.
 
+### Gestion des dépendances
+
+- **Dépendances Python** : gérées localement via `uv sync --upgrade`, exécuté
+  automatiquement à chaque commit par le hook prek `uv-sync-upgrade`. Si la
+  résolution change `uv.lock`, prek échoue le commit — re-stager `uv.lock` et
+  relancer. L'écosystème `uv` de Dependabot est désactivé (cf. commentaire dans
+  `.github/dependabot.yml`) car sa résolution par groupe laisse les
+  dépendances transitives obsolètes (un `uv sync --upgrade` local résout le
+  graphe complet, ce qu'on veut).
+- **GitHub Actions, images Docker** : gérées via Dependabot, PRs hebdomadaires
+  ciblant `dev`. Pas d'équivalent local utilisé + pas de problème de
+  résolution transitive sur ces écosystèmes, donc Dependabot reste l'outil
+  adapté.
+- **`require-dbt-version`** dans `dbt/dbt_project.yml` n'est pas couvert par
+  Dependabot — à aligner manuellement sur la version résolue de `dbt-core`
+  dans `uv.lock` après chaque bump.
+- **Sécurité** : la step `pip-audit` en CI échoue le build sur toute CVE
+  connue dans la lockfile résolue ; les Dependabot security alerts (mécanisme
+  séparé des version updates) ouvrent automatiquement une PR sur toute CVE
+  d'une dépendance, transitives incluses.
+
 ## Documentation technique
 
 Le dossier [`docs/`](docs/) contient les notes de conception et décisions

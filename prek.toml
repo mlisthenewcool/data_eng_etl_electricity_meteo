@@ -3,6 +3,19 @@
 [[repos]]
 repo = "local"
 
+# Refresh uv.lock to the latest compatible versions of every dep (transitives
+# included). Compensates for the disabled Dependabot `uv` ecosystem
+# (.github/dependabot.yml) — Dependabot's per-group resolution leaves
+# transitives stale, so we resolve fully on each commit instead.
+# If uv.lock changes, prek fails the commit; re-stage `uv.lock` and retry.
+[[repos.hooks]]
+id = "uv-sync-upgrade"
+name = "uv sync --upgrade"
+entry = "uv sync --upgrade"
+language = "system"
+pass_filenames = false
+always_run = true
+
 [[repos.hooks]]
 id = "ruff-check"
 name = "ruff-check"
