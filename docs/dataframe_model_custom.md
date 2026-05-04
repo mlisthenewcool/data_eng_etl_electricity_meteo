@@ -32,7 +32,6 @@ class MeteoSchema(DataFrameModel):
 
 # Validation
 df = MeteoSchema.validate(df)  # DataFrame → vérifie tout
-lf = MeteoSchema.validate_lazy(lf)  # LazyFrame → vérifie le schéma sans collect
 schema = MeteoSchema.polars_schema()  # → pl.Schema réutilisable
 ```
 
@@ -43,7 +42,7 @@ Trois composants :
 ```
 Column (dataclass)          — descripteur de contraintes par colonne
 DataFrameModelMeta (type)   — metaclass qui introspecte les type hints
-DataFrameModel (classe)     — API de validation (validate, validate_lazy, polars_schema)
+DataFrameModel (classe)     — API de validation (validate, polars_schema)
 ```
 
 ### 1. `Column` — descripteur de contraintes
@@ -162,17 +161,9 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
         if errors:
             raise SchemaValidationError(errors)
         return df
-
-    @classmethod
-    def validate_lazy(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
-        """Valide uniquement le schéma (colonnes + dtypes), sans collect."""
-        errors = cls._check_schema(lf.collect_schema())
-        if errors:
-            raise SchemaValidationError(errors)
-        return lf
 ```
 
-#### Passe 1 — schéma (sans collect, fonctionne sur LazyFrame)
+#### Passe 1 — schéma (colonnes + dtypes)
 
 Vérifie la présence des colonnes et la compatibilité des dtypes.
 
@@ -307,14 +298,6 @@ class Eco2mixSchema(DataFrameModel):
     solaire: Annotated[int, Column(ge=0)]
     hydraulique: int
     bioenergies: Annotated[int, Column(ge=0)]
-```
-
-### Validation Bronze (LazyFrame)
-
-```python
-# Dans un transform bronze
-lf = pl.scan_parquet(landing_path)
-lf = MeteoClimatologieSchema.validate_lazy(lf)  # schéma uniquement, pas de collect
 ```
 
 ## Limites et edge cases

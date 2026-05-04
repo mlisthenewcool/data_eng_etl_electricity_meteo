@@ -66,7 +66,21 @@ _USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
-    """Silver output contract for ODRE eco2mix temps réel."""
+    """Silver output contract for ODRE eco2mix temps réel.
+
+    Bounds reflect ODRE source semantics, not pure physics.
+    See ``docs/data_quality.md`` for rationale on non-bounded columns:
+
+    - ``consommation`` (MW): always positive, bounded ``ge=0``.
+    - ``pompage`` / ``stockage_batterie`` / ``destockage_batterie``: bidirectional
+      sign convention (negative = absorbing energy, positive = restoring).
+    - ``ech_physiques``: can be negative (export) — unbounded.
+    - Production columns (``thermique``, ``nucleaire``, ``eolien``, ...):
+      occasional negative values from ODRE
+      (auxiliaries auto-consumption, retroactive corrections) — unbounded.
+    - ``tco_*`` / ``tch_*``: can legitimately exceed 100% (export-net regions
+      for tco; capacity-update lag for tch) — unbounded.
+    """
 
     code_insee_region: Annotated[str, Column(nullable=False)]
     libelle_region: str
@@ -74,7 +88,7 @@ class SilverSchema(DataFrameModel):
     date: str
     heure: str
     date_heure: Annotated[datetime, Column(dtype=pl.Datetime("us"), nullable=False)]
-    consommation: int
+    consommation: Annotated[int, Column(ge=0)]
     thermique: int
     nucleaire: int
     eolien: int

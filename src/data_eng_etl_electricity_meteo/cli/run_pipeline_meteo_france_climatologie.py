@@ -49,6 +49,17 @@ def main(
     ),
 ) -> None:
     """Run the Météo France climatologie pipeline (95 departmental files)."""
+    # Resolve defaults to validate the relationship — typer's `min`/`max` guard each
+    # year individually but cannot compare them. Same defaults as
+    # ``download_climatologie`` so the validation matches the actual run window.
+    now = datetime.now(tz=UTC)
+    resolved_start = now.year - 1 if year_start is None else year_start
+    resolved_end = now.year if year_end is None else year_end
+    if resolved_start > resolved_end:
+        raise typer.BadParameter(
+            f"--year-start ({resolved_start}) must be <= --year-end ({resolved_end})"
+        )
+
     run_pipeline(
         DATASET_NAME,
         strategy=DownloadStrategy(

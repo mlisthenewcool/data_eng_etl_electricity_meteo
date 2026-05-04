@@ -195,31 +195,7 @@ class DataFrameModel(metaclass=DataFrameModelMeta):
             raise SchemaValidationError(errors)
         return df
 
-    @classmethod
-    def validate_lazy(cls, lf: pl.LazyFrame) -> pl.LazyFrame:
-        """Validate schema only (no collect).
-
-        Parameters
-        ----------
-        lf
-            LazyFrame to validate.
-
-        Returns
-        -------
-        pl.LazyFrame
-            The input LazyFrame (unchanged) if schema checks pass.
-
-        Raises
-        ------
-        SchemaValidationError
-            If any schema check fails.
-        """
-        errors = cls._check_schema(lf.collect_schema())
-        if errors:
-            raise SchemaValidationError(errors)
-        return lf
-
-    # -- Pass 1: schema (works on LazyFrame) -------------------------------------------
+    # -- Pass 1: schema ----------------------------------------------------------------
 
     @classmethod
     def _check_schema(cls, schema: pl.Schema) -> list[str]:

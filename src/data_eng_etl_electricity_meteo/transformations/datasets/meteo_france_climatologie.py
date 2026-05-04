@@ -85,27 +85,35 @@ _USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
-    """Silver output contract for Météo France climatologie."""
+    """Silver output contract for Météo France climatologie.
+
+    Measurement columns are nullable: not every station reports every parameter.
+    Bounds reflect physical plausibility for metropolitan France climate
+    (records ~-41°C in 1985, ~+46°C in 2019, pressure 950-1054 hPa at sea level).
+    ``pression_station`` is left unbounded because it is measured at the station's
+    altitude — high-altitude stations (Pic du Midi 2877m, Aiguille du Midi 3842m) have
+    legitimate values down to ~600 hPa.
+    """
 
     id_station: Annotated[str, Column(nullable=False)]
     date_heure: Annotated[
         datetime,
         Column(dtype=pl.Datetime("us", "UTC"), nullable=False),
     ]
-    rayonnement_global: float
-    duree_insolation: float
+    rayonnement_global: Annotated[float, Column(ge=0)]
+    duree_insolation: Annotated[float, Column(ge=0, le=60)]
     nebulosite: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=9)]
     vitesse_vent: Annotated[float, Column(ge=0)]
     direction_vent: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=360)]
-    rafale_max: float
-    temperature: float
-    temperature_max: float
-    temperature_min: float
-    point_de_rosee: float
+    rafale_max: Annotated[float, Column(ge=0)]
+    temperature: Annotated[float, Column(ge=-50, le=60)]
+    temperature_max: Annotated[float, Column(ge=-50, le=60)]
+    temperature_min: Annotated[float, Column(ge=-50, le=60)]
+    point_de_rosee: Annotated[float, Column(ge=-60, le=45)]
     humidite: Annotated[int, Column(dtype=pl.Int16(), ge=0, le=100)]
     precipitations: Annotated[float, Column(ge=0)]
     pression_station: float
-    pression_mer: float
+    pression_mer: Annotated[float, Column(ge=940, le=1060)]
 
 
 # --------------------------------------------------------------------------------------

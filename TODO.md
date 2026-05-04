@@ -51,9 +51,21 @@
 - [ ] [Validation] Ajouter des métriques de validation dans les logs silver (ex :
   `mesure_solaire_count`/`mesure_eolien_count` pour stations,
   `renouvelables`/`actifs` pour installations)
+- [ ] [Validation] Ajouter des validations cross-column dans les transforms silver via
+  `_warn_*` (climatologie : `rafale_max ≥ vitesse_vent` ; installations :
+  `date_deraccordement ≥ date_mise_en_service`)
 - [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
   détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
   NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
+- [ ] [Validation] Ajouter un diagnostic composite PK avant le dedup conditionnel
+  (`_diag_duplicate_keys_count`) pour visibilité sur la qualité source (climatologie +
+  eco2mix)
+- [ ] [Validation] Clarifier les colonnes redondantes/legacy dans eco2mix (`date`/`heure`
+  strings vs `date_heure` datetime, valeurs de `nature`) — documenter ou nettoyer
+- [ ] [Validation] Étendre `DataFrameModel` avec une contrainte `pattern` (regex) pour
+  les formats stricts (ex : `code_iris` IGN format `NNNNNNRRRR`)
+- [ ] [Validation] Évaluer la mise en place d'un check cross-dataset (ex : `id_station`
+  climatologie ↔ `dim_stations_meteo`) au niveau gold/dbt
 
 ## Plus tard
 

@@ -58,8 +58,7 @@ stages = ["pre-push"]
 [[repos.hooks]]
 id = "pip-audit"
 name = "pip-audit"
-# CVE-2025-62727: starlette 0.48.0, transitive dep of Airflow (dev only)
-entry = "uv run pip-audit --ignore-vuln CVE-2025-62727"
+entry = "uv run pip-audit"
 language = "system"
 pass_filenames = false
 files = '(pyproject\.toml|uv\.lock)$'

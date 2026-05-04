@@ -104,7 +104,16 @@ _USED_SOURCE_COLUMNS: frozenset[str] = _ALL_SOURCE_COLUMNS
 
 
 class SilverSchema(DataFrameModel):
-    """Silver output contract for ODRE installations."""
+    """Silver output contract for ODRE installations.
+
+    Bounds (``ge=0``) are applied to physical quantities (power, capacity, counts) where
+    negative values are physically impossible. ``energie_annuelle_glissante_*`` columns
+    are unbounded because ODRE occasionally emits negative values from accounting
+    adjustments (verified 2026-05-04: 16/134k rows). See ``docs/data_quality.md``.
+    Source-data fields (``code_filiere``, ``code_region``, ``code_departement``, ...)
+    are accepted as-is — drift on their column presence is caught by
+    ``validate_source_columns``; their values are not enumerated.
+    """
 
     code_eic_resource_object: Annotated[str, Column(nullable=False, unique=True)]
     nom_installation: str
@@ -136,33 +145,33 @@ class SilverSchema(DataFrameModel):
     code_technologie: str
     technologie: str
     type_stockage: str
-    puis_max_installee: float
-    puis_max_rac_charge: float
-    puis_max_charge: float
-    puis_max_rac: float
-    puis_max_installee_dis_charge: float
-    nb_groupes: int
-    nb_installations: int
+    puis_max_installee: Annotated[float, Column(ge=0)]
+    puis_max_rac_charge: Annotated[float, Column(ge=0)]
+    puis_max_charge: Annotated[float, Column(ge=0)]
+    puis_max_rac: Annotated[float, Column(ge=0)]
+    puis_max_installee_dis_charge: Annotated[float, Column(ge=0)]
+    nb_groupes: Annotated[int, Column(ge=0)]
+    nb_installations: Annotated[int, Column(ge=0)]
     regime: str
-    energie_stockable: float
-    capacite_reservoir: float
-    hauteur_chute: float
-    productible: float
-    debit_maximal: float
+    energie_stockable: Annotated[float, Column(ge=0)]
+    capacite_reservoir: Annotated[float, Column(ge=0)]
+    hauteur_chute: Annotated[float, Column(ge=0)]
+    productible: Annotated[float, Column(ge=0)]
+    debit_maximal: Annotated[float, Column(ge=0)]
     code_gestionnaire: str
     gestionnaire: str
     energie_annuelle_glissante_injectee: int
     energie_annuelle_glissante_produite: int
     energie_annuelle_glissante_soutiree: int
-    max_puis: float
+    max_puis: Annotated[float, Column(ge=0)]
     # Verbatim column name from the ODRE source API (with parentheses).
     date_mise_enservice_format_date: Annotated[
         date, Column(name="date_mise_enservice_(format_date)")
     ]
-    est_renouvelable: bool
+    est_renouvelable: Annotated[bool, Column(nullable=False)]
     type_energie: Annotated[str, Column(nullable=False)]
-    est_actif: bool
-    est_agregation: bool
+    est_actif: Annotated[bool, Column(nullable=False)]
+    est_agregation: Annotated[bool, Column(nullable=False)]
 
 
 # --------------------------------------------------------------------------------------

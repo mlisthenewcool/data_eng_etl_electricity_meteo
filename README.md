@@ -100,7 +100,7 @@ capable de mesurer les paramètres pertinents.
 |-----------------|---------------------------------|-----------------------------------------------------------------|
 | Data processing | Polars, DuckDB, PyArrow         | Transformations bronze/silver, calculs géométriques (centroids) |
 | Orchestration   | Apache Airflow 3                | DAGs dynamiques, scheduling, lineage par Assets                 |
-| Base de données | PostgreSQL 17 + PostGIS 3.5     | Stockage silver/gold, jointures spatiales KNN                   |
+| Base de données | PostgreSQL 18 + PostGIS 3.6     | Stockage silver/gold, jointures spatiales KNN                   |
 | ELT analytique  | dbt-core + dbt-postgres         | Modèles gold matérialisés, tests de données                     |
 | HTTP            | httpx (HTTP/2)                  | Téléchargement streaming avec smart-skip                        |
 | Validation      | DataFrameModel custom, Pydantic | Schémas silver, configuration, settings                         |
@@ -122,7 +122,6 @@ capable de mesurer les paramètres pertinents.
 │   ├── loaders/               # Chargement Postgres (COPY, UPSERT)
 │   ├── utils/                 # Download, extraction, hashing, helpers Polars
 │   ├── custom_downloads/      # Stratégies de téléchargement spécifiques
-│   ├── custom_metadata/       # Résolution de métadonnées (OpenDataSoft, data.gouv)
 │   └── cli/                   # Points d'entrée en ligne de commande
 ├── dbt/
 │   ├── models/silver/         # Staging views (1:1 sur les tables silver)
@@ -342,7 +341,8 @@ d'architecture :
 |-----------------------------------------------------------------------------------------|------------------------------------------------|
 | [`architecture_etl_elt.md`](docs/architecture_etl_elt.md)                               | Justification de l'approche hybride ETL + ELT  |
 | [`data_sources.md`](docs/data_sources.md)                                               | Documentation des sources de données et APIs   |
-| [`data_quality_strategy.md`](docs/data_quality_strategy.md)                             | Stratégie de validation et détection de dérive |
+| [`data_quality.md`](docs/data_quality.md)                                               | Philosophie de validation et décisions par dataset |
+| [`data_quality_strategy.md`](docs/data_quality_strategy.md)                             | Stratégie historique du choix d'outil de validation |
 | [`dataframe_model_custom.md`](docs/dataframe_model_custom.md)                           | Conception du DataFrameModel custom            |
 | [`delta_incremental_silver.md`](docs/delta_incremental_silver.md)                       | Gestion de l'ingestion incrémentale            |
 | [`integration_meteo_france.md`](docs/integration_meteo_france.md)                       | Intégration de l'API Météo France (phases)     |

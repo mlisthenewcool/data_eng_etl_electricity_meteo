@@ -20,7 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
 
 import httpx
 import polars as pl
@@ -88,7 +87,8 @@ _API_PAGE_SIZE = 50
 _DOWNLOAD_MAX_WORKERS = 8
 
 
-class DepartmentResource(TypedDict):
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DepartmentResource:
     """Download URLs for a single department."""
 
     dept: str
@@ -163,18 +163,18 @@ def _fetch_department_resources(
                 continue
 
             extras = res.get("extras", {}) or {}
-            resources[dept] = {
-                "dept": dept,
-                "csv_url": res["url"],
-                "parquet_url": extras.get("analysis:parsing:parquet_url"),
-            }
+            resources[dept] = DepartmentResource(
+                dept=dept,
+                csv_url=res["url"],
+                parquet_url=extras.get("analysis:parsing:parquet_url"),
+            )
 
         total = data.get("total", 0)
         if page * _API_PAGE_SIZE >= total:
             break
         page += 1
 
-    with_parquet = sum(1 for r in resources.values() if r["parquet_url"])
+    with_parquet = sum(1 for r in resources.values() if r.parquet_url)
     logger.info(
         "API discovery completed",
         departments_found=len(resources),
@@ -208,11 +208,11 @@ def _build_fallback_resources(
         Mapping ``dept → resource`` with ``parquet_url`` always None.
     """
     return {
-        dept: {
-            "dept": dept,
-            "csv_url": f"{_BASE_URL}/H_{dept}_latest-{year_start}-{year_end}.csv.gz",
-            "parquet_url": None,
-        }
+        dept: DepartmentResource(
+            dept=dept,
+            csv_url=f"{_BASE_URL}/H_{dept}_latest-{year_start}-{year_end}.csv.gz",
+            parquet_url=None,
+        )
         for dept in sorted(DEPARTMENTS)
     }
 
@@ -224,6 +224,11 @@ def _build_fallback_resources(
 
 def _stream_to_file(url: str, *, client: httpx.Client, path: Path) -> None:
     """Stream-download a URL to a local file.
+
+    Distinct from ``utils.download.download_to_file`` because that helper creates its
+    own ``httpx.Client`` per call. Here we share a single HTTP/2 client across 8
+    parallel workers to reuse the connection pool — required for the 95-department
+    fan-out where per-call client creation would dominate the wall time.
 
     Parameters
     ----------
@@ -273,9 +278,9 @@ def _download_department(
     int
         Number of rows downloaded (0 if both downloads fail).
     """
-    dept = resource["dept"]
-    parquet_url = resource["parquet_url"]
-    csv_url = resource["csv_url"]
+    dept = resource.dept
+    parquet_url = resource.parquet_url
+    csv_url = resource.csv_url
 
     out_path = tmp_dir / f"{dept}.parquet"
 
@@ -337,6 +342,7 @@ class _BatchResult:
 
     dept_count: int
     failed_count: int
+    failed_depts: tuple[str, ...]
     total_rows: int
 
 
@@ -367,7 +373,7 @@ def _download_all_departments(
         Aggregated counts of successful, failed, and total rows.
     """
     dept_count = 0
-    failed_count = 0
+    failed_depts: list[str] = []
     total_rows = 0
 
     with ThreadPoolExecutor(max_workers=_DOWNLOAD_MAX_WORKERS) as pool:
@@ -390,20 +396,25 @@ def _download_all_departments(
                     rows = future.result()
                 except (pl.exceptions.PolarsError, OSError):
                     logger.exception(
-                        "Department download failed unexpectedly",
-                        department=resource["dept"],
+                        "Department download crashed unexpectedly",
+                        department=resource.dept,
                     )
                     rows = 0
                 if rows > 0:
                     dept_count += 1
                     total_rows += rows
                 else:
-                    failed_count += 1
+                    failed_depts.append(resource.dept)
                 reporter.update(1)
         finally:
             reporter.close()
 
-    return _BatchResult(dept_count=dept_count, failed_count=failed_count, total_rows=total_rows)
+    return _BatchResult(
+        dept_count=dept_count,
+        failed_count=len(failed_depts),
+        failed_depts=tuple(sorted(failed_depts)),
+        total_rows=total_rows,
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -445,9 +456,8 @@ def download_climatologie(
     Raises
     ------
     DownloadError
-        If no data could be downloaded from any department.
-    OSError
-        If the merge of per-department Parquet files fails.
+        If no data could be downloaded from any department, or if the merge of
+        per-department Parquet files fails.
     """
     now = datetime.now(tz=UTC)
     year_start: int = now.year - 1 if year_start is None else year_start
@@ -496,7 +506,7 @@ def download_climatologie(
         lazy_frames = pl.scan_parquet(tmp_dir / "*.parquet")
         lazy_frames.sink_parquet(merged_path)
     except (pl.exceptions.PolarsError, OSError) as err:
-        raise OSError("Failed to merge department parquets") from err
+        raise DownloadError("Failed to merge department parquets") from err
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -506,6 +516,7 @@ def download_climatologie(
     }
     if result.failed_count > 0:
         log_kwargs["failed_count"] = result.failed_count
+        log_kwargs["failed_depts"] = list(result.failed_depts)
         logger.warning("Climatologie merge completed with failures", **log_kwargs)
     else:
         logger.info("Climatologie merge completed", **log_kwargs)

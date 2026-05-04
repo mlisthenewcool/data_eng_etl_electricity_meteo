@@ -1,5 +1,11 @@
 # Stratégie de data quality
 
+> **Note** : ce document trace la **stratégie historique** du choix d'outil
+> (DataFrameModel custom plutôt que Pandera, Soda, etc.). Pour la **philosophie
+> d'application** et les **décisions opérationnelles** par dataset (bornes
+> physiques, exceptions documentées, vérifications sur données réelles), voir
+> [`data_quality.md`](data_quality.md).
+
 ## Contexte
 
 Le pipeline suit une architecture medallion : Landing → Bronze → Silver → Gold.
@@ -126,5 +132,10 @@ Pandera sera réévalué si :
 | Silver (parquet) | Structurelle (vide, snake_case, null cols) | `shared.py` | Actuel |
 | Silver (parquet) | Drift source (colonnes ajoutées/supprimées) | `validate_source_columns` | Actuel |
 | Silver (parquet) | Contenu (types, ranges, unicité, isin) | `DataFrameModel` | Actuel |
-| Silver (Postgres) | Intégrité de la copie | `_validate_columns` | Actuel |
-| Gold (Postgres) | Tests métier | dbt tests | Futur (avec dbt) |
+| Silver (Postgres) | Intégrité de la copie (colonnes Polars ↔ PG) | `_validate_columns` | Actuel |
+| Silver (Postgres) | Pre-load drift (row count PG ↔ silver, mode incrémental) | `_detect_preload_drift` | Actuel |
+| Silver (post-load) | Tests `not_null`, `unique`, `accepted_values` | dbt sources | Actuel (`dbt/models/silver/_sources.yml`) |
+| Gold (Postgres) | Tests métier (gold models) | dbt tests | Actuel |
+| Méta | Cohérence Python ↔ dbt | `tests/test_dbt_consistency.py` | Actuel |
+| Méta | Cohérence catalog ↔ registry | `tests/test_catalog_registry_consistency.py` | Actuel |
+| Méta | Cohérence download ↔ bronze (climatologie) | `tests/test_climatologie_columns_consistency.py` | Actuel |

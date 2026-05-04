@@ -82,11 +82,6 @@ class TestSchemaPass:
         result = SimpleSchema.validate(df)
         assert result.equals(df)
 
-    def test_valid_lazyframe(self) -> None:
-        lf = pl.DataFrame({"id": ["a"], "value": [1.0], "flag": [True]}).lazy()
-        result = SimpleSchema.validate_lazy(lf)
-        assert isinstance(result, pl.LazyFrame)
-
 
 # --------------------------------------------------------------------------------------
 # Schema checks — fail
@@ -111,11 +106,6 @@ class TestSchemaFail:
         with pytest.raises(SchemaValidationError) as exc_info:
             SimpleSchema.validate(df)
         assert any("value:" in e and "Float64" in e for e in exc_info.value.errors)
-
-    def test_lazyframe_schema_fail(self) -> None:
-        lf = pl.DataFrame({"id": ["a"], "value": [1.0]}).lazy()
-        with pytest.raises(SchemaValidationError):
-            SimpleSchema.validate_lazy(lf)
 
 
 # --------------------------------------------------------------------------------------
