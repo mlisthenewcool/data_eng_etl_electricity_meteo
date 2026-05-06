@@ -14,11 +14,15 @@
 - [ ] [Pipeline] Évaluer la cohérence entre les contrôles de qualité de données pour la
   couche silver manipulée par plusieurs outils : Polars, Postgres et dbt. Reprendre
   l'architecture si nécessaire et simplifier pour avoir une seule source de référence
-- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
-  déjà créés
 - [ ] [Pipeline] Contrôler, tester et documenter le flux d'ingestion complet, avec les
   skips (download, extraction, écriture fichier Parquet, load dans Postgres) et la
   gestion des cas d'erreurs potentielles
+- [ ] [Python] Bump à Python 3.14 dès que dbt-core relâche la contrainte
+  `mashumaro<3.15` (tentative abandonnée le 2026-04-23 : mashumaro ≤ 3.14 casse à
+  l'import sur py3.14, `UnserializableField` sur `JSONObjectSchema.schema`). Revisiter
+  à chaque `uv sync --upgrade`
+- [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
+  déjà créés
 
 ## Ensuite
 
@@ -47,9 +51,21 @@
 - [ ] [Validation] Ajouter des métriques de validation dans les logs silver (ex :
   `mesure_solaire_count`/`mesure_eolien_count` pour stations,
   `renouvelables`/`actifs` pour installations)
+- [ ] [Validation] Ajouter des validations cross-column dans les transforms silver via
+  `_warn_*` (climatologie : `rafale_max ≥ vitesse_vent` ; installations :
+  `date_deraccordement ≥ date_mise_en_service`)
 - [ ] [Validation] Ajouter un check `no_all_nulls` dans les transformations silver pour
   détecter les régressions silencieuses de l'API source (colonnes critiques entièrement
   NULL). Implémentable dans `shared.py` ou comme méthode de `DataFrameModel`
+- [ ] [Validation] Ajouter un diagnostic composite PK avant le dedup conditionnel
+  (`_diag_duplicate_keys_count`) pour visibilité sur la qualité source (climatologie +
+  eco2mix)
+- [ ] [Validation] Clarifier les colonnes redondantes/legacy dans eco2mix (`date`/`heure`
+  strings vs `date_heure` datetime, valeurs de `nature`) — documenter ou nettoyer
+- [ ] [Validation] Étendre `DataFrameModel` avec une contrainte `pattern` (regex) pour
+  les formats stricts (ex : `code_iris` IGN format `NNNNNNRRRR`)
+- [ ] [Validation] Évaluer la mise en place d'un check cross-dataset (ex : `id_station`
+  climatologie ↔ `dim_stations_meteo`) au niveau gold/dbt
 
 ## Plus tard
 
@@ -105,6 +121,39 @@
 
 ## Terminé
 
+- [x] [Tests] _(2026-04-24)_ Tests unitaires `_fetch_scalar_int` (pg_loader) : stub
+  dataclass `_StubCursor`, 11 cas parametrize incluant le quirk
+  `isinstance(True, int)`
+- [x] [CI] _(2026-04-23)_ Hardening GitHub Actions : pin SHA de toutes les actions,
+  permissions `contents: read` top-level, `timeout-minutes` par job,
+  `persist-credentials: false`, fusion `setup-python` + `setup-uv`, switch
+  `gitleaks-action` → CLI direct, scope `POSTGRES_*` à la seule step `dbt parse`
+- [x] [CI] _(2026-04-23)_ Dependabot multi-écosystèmes (uv, github-actions, docker,
+  docker-compose) avec cooldown 7 jours et groupement major/minor/patch
+- [x] [CI] _(2026-04-23)_ Enrichissement config ruff (10 → 18 catégories : B, C4, DTZ,
+  LOG, PERF, PT, PTH, RUF, SIM) + ~14 fixes dérivés
+- [x] [Infra] _(2026-04-23)_ Upgrade Postgres 17 → 18 + PostGIS 3.5 → 3.6, mount path
+  remonté au parent `/var/lib/postgresql` (breaking change PG 18 déplace `PGDATA` vers
+  `/var/lib/postgresql/18/docker`). Image Airflow `apache/airflow:3.2.1-python3.13`
+  pinée (plus de tag flottant)
+- [x] [Pipeline] _(2026-04-23)_ Pre-check drift PG/silver avant UPSERT incrémental :
+  si `pg_count + rows_added ≠ silver_current_count`, downgrade automatique en snapshot
+  (évite un COPY+UPSERT voué à l'échec). Post-check existant conservé en
+  defense-in-depth
+- [x] [Pipeline] _(2026-04-09)_ Revue de code : exceptions domaine enrichies, catch
+  completeness sur toutes les opérations I/O (Polars, psycopg, OSError), un
+  `try/except` par opération, cause chaining `from err` / `from None` explicite
+- [x] [Pipeline] _(2026-04-03)_ Suppression `PostgresHook` au profit de
+  `psycopg.connect()` direct (credentials via `Connection.get()` du Task SDK Airflow),
+  suppression `apache-airflow-providers-postgres`. Centralisation tqdm
+  (`TqdmProgressReporter` + `TqdmExtractCallback`)
+- [x] [Pipeline] _(2026-04-03)_ Écriture atomique des téléchargements (`.tmp` + rename
+  atomique, nettoyage sur `BaseException`), rollback silver protégé (n'écrase plus
+  l'erreur originale), renommage `_warn_` → `_diag_` pour conditions attendues
+- [x] [Pipeline] _(2026-03-18)_ `DownloadStrategy` unifié : un seul code path dans
+  `RemoteIngestionPipeline` (suppression `_run_custom_download` /
+  `_run_standard_download` et des alias `Custom*Func`). Suppression de
+  `custom_metadata/` et `custom_downloads/registry.py`
 - [x] [Docs] _(2026-03-12)_ Documenter pourquoi et comment le silver est maintenu à
   l'identique entre Postgres et le stockage Parquet local : chaîne de décision
   complète dans `docs/chaine_decision_ingestion.md`, mise à jour

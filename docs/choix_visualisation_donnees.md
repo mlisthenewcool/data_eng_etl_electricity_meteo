@@ -15,7 +15,7 @@ Le projet a besoin d'un outil de visualisation pour trois usages :
 3. **Monitoring pipeline** : suivre la santé des DAGs Airflow (durée des
    runs, taux d'échec, queue lengths)
 
-Stack actuelle : Postgres 17 + PostGIS 3.5, DuckDB, Airflow, dbt,
+Stack actuelle : Postgres 18 + PostGIS 3.6, DuckDB, Airflow, dbt,
 Docker Compose, notebooks marimo pour l'exploration.
 
 ## Outils évalués

@@ -1,5 +1,12 @@
 # OOM `unique()` silver : diagnostic, solutions et plan d'action
 
+> **Statut (2026-05-04) : implémenté.** Phase 1 (dedup conditionnel) appliquée
+> dans `transformations/spec.py::run_silver`. La fonction
+> `deduplicate_on_composite_key` mentionnée dans ce document a été supprimée :
+> le dedup vit désormais dans `run_silver()` avec `is_duplicated().any()`
+> comme guard avant `unique()`. Le `primary_key` est déclaré dans
+> `DatasetTransformSpec`. Document conservé comme trace du diagnostic.
+
 ## Résumé
 
 Les DAGs `*_to_silver` peuvent échouer par OOM (Out of Memory) dans le container

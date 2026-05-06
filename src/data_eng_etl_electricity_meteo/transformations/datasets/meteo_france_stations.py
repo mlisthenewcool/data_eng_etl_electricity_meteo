@@ -95,20 +95,22 @@ class SilverSchema(DataFrameModel):
     """Silver output contract for Météo France stations."""
 
     id: Annotated[str, Column(nullable=False, unique=True)]
-    nom: str
+    nom: Annotated[str, Column(nullable=False)]
+    # ~8% of stations have no lieu_dit in the source (verified 2026-05-04).
     lieu_dit: str
-    bassin: str
-    date_debut: date
-    # Includes overseas territories; geographic bounds removed.
-    # Stations without position are filtered out upstream.
+    bassin: Annotated[str, Column(nullable=False)]
+    date_debut: Annotated[date, Column(nullable=False)]
+    # Includes mainland + DROM. Stations without position are filtered upstream;
+    # geographic bounds (e.g. metropolitan-only) applied downstream (gold/dbt)
+    # per use case (electricity production datasets cover métropole only).
     latitude: Annotated[float, Column(nullable=False)]
     longitude: Annotated[float, Column(nullable=False)]
-    altitude: int
-    mesure_solaire: bool
-    mesure_eolien: bool
-    params_solaires: Annotated[list[str], Column(dtype=pl.List(pl.String))]
-    params_eoliens: Annotated[list[str], Column(dtype=pl.List(pl.String))]
-    nb_parametres: Annotated[int, Column(dtype=pl.UInt32())]
+    altitude: Annotated[int, Column(nullable=False)]
+    mesure_solaire: Annotated[bool, Column(nullable=False)]
+    mesure_eolien: Annotated[bool, Column(nullable=False)]
+    params_solaires: Annotated[list[str], Column(dtype=pl.List(pl.String), nullable=False)]
+    params_eoliens: Annotated[list[str], Column(dtype=pl.List(pl.String), nullable=False)]
+    nb_parametres: Annotated[int, Column(dtype=pl.UInt32(), nullable=False)]
 
 
 # --------------------------------------------------------------------------------------

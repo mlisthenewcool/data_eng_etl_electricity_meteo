@@ -30,6 +30,11 @@ _CHUNK_SIZE = 512 * 1024
 _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT = 30
 
+# Cap redirect chains. httpx defaults to 20; we tighten to 5 since legitimate
+# data sources (data.gouv.fr, ODRE, IGN) hop at most twice (canonical → CDN).
+# A longer chain typically signals a misconfiguration or redirect loop.
+_MAX_REDIRECTS = 5
+
 
 # --------------------------------------------------------------------------------------
 # Types
@@ -192,7 +197,12 @@ def download_to_file(
     )
 
     with (
-        httpx.Client(http2=True, timeout=timeout, follow_redirects=True) as client,
+        httpx.Client(
+            http2=True,
+            timeout=timeout,
+            follow_redirects=True,
+            max_redirects=_MAX_REDIRECTS,
+        ) as client,
         client.stream("GET", url) as response,
     ):
         response.raise_for_status()

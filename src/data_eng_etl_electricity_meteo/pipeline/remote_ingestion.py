@@ -202,6 +202,11 @@ class RemoteIngestionPipeline:
         previous_remote_metadata = (
             previous_snapshot.download.remote_metadata if previous_snapshot else None
         )
+        # Simple narrowing here (no has_any_field check): for the If-None-Match
+        # header, an absent metadata and a present one with etag=None both yield
+        # previous_etag=None and skip the conditional GET. Distinguishing the
+        # state-corruption case (all-None metadata) only matters in
+        # _decide_ingestion, where it changes the ingest decision.
         previous_etag = previous_remote_metadata.etag if previous_remote_metadata else None
 
         # -- 1. Fetch current remote metadata ------------------------------------------

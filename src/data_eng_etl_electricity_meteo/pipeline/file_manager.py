@@ -4,8 +4,8 @@
 rotation/rollback. Gold datasets live in Postgres (via dbt), not on disk.
 """
 
-import os
 import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -142,7 +142,8 @@ class RemoteFileManager:
         # Atomic symlink update:
         # 1. Create temporary symlink with unique name
         # 2. Atomically rename it to replace old symlink
-        temp_link = latest_link.parent / f".latest.tmp.{os.getpid()}"
+        # uuid4 avoids PID-reuse / namespace-collision edge cases.
+        temp_link = latest_link.parent / f".latest.tmp.{uuid.uuid4().hex}"
 
         try:
             # Relative path is more portable than absolute

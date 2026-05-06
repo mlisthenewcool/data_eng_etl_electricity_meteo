@@ -20,6 +20,15 @@ sources:
           - name: type_energie
             tests:
               - not_null
+          - name: est_renouvelable
+            tests:
+              - not_null
+          - name: est_actif
+            tests:
+              - not_null
+          - name: est_agregation
+            tests:
+              - not_null
 
       - name: dim_stations_meteo
         description: "Stations météorologiques Météo France."
@@ -28,10 +37,37 @@ sources:
             tests:
               - unique
               - not_null
+          - name: nom
+            tests:
+              - not_null
+          - name: bassin
+            tests:
+              - not_null
+          - name: date_debut
+            tests:
+              - not_null
           - name: latitude
             tests:
               - not_null
           - name: longitude
+            tests:
+              - not_null
+          - name: altitude
+            tests:
+              - not_null
+          - name: mesure_solaire
+            tests:
+              - not_null
+          - name: mesure_eolien
+            tests:
+              - not_null
+          - name: params_solaires
+            tests:
+              - not_null
+          - name: params_eoliens
+            tests:
+              - not_null
+          - name: nb_parametres
             tests:
               - not_null
 
@@ -41,6 +77,15 @@ sources:
           - name: code_iris
             tests:
               - unique
+              - not_null
+          - name: nom_iris
+            tests:
+              - not_null
+          - name: code_insee
+            tests:
+              - not_null
+          - name: nom_commune
+            tests:
               - not_null
           - name: geometrie
             tests:

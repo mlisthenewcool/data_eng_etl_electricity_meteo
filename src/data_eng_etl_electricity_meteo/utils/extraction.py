@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import py7zr
 from py7zr.callbacks import ExtractCallback
@@ -163,6 +163,14 @@ def extract_7z(  # noqa: PLR0912
                 raise FileNotFoundInArchiveError(target_filename, archive_path=archive_path)
 
             target_internal_path = target_info.filename
+            # Zip-slip defense: archive entries must be relative paths without parent
+            # traversal. py7zr does not validate this; an attacker-controlled archive
+            # could otherwise write outside tmp_dir (e.g. "../../etc/passwd").
+            _internal = PurePosixPath(target_internal_path)
+            if _internal.is_absolute() or ".." in _internal.parts:
+                raise ExtractionError(
+                    f"Refused unsafe path in archive (zip-slip): {target_internal_path}"
+                )
             uncompressed_size = target_info.uncompressed
             logger.debug("Found target in archive", target_path=target_internal_path)
 

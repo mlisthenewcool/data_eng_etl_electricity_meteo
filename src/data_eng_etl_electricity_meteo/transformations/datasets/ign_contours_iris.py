@@ -44,10 +44,10 @@ class SilverSchema(DataFrameModel):
     """Silver output contract for IGN contours IRIS."""
 
     code_iris: Annotated[str, Column(nullable=False, unique=True)]
-    nom_iris: str
-    code_insee: str
-    nom_commune: str
-    type_iris: Annotated[str, Column(isin=["H", "A", "D", "Z"])]
+    nom_iris: Annotated[str, Column(nullable=False)]
+    code_insee: Annotated[str, Column(nullable=False)]
+    nom_commune: Annotated[str, Column(nullable=False)]
+    type_iris: Annotated[str, Column(nullable=False, isin=["H", "A", "D", "Z"])]
     geometrie: Annotated[bytes, Column(dtype=pl.Binary(), nullable=False)]
     # Metropolitan France only (overseas territories excluded at source level)
     centroid_lat: Annotated[float, Column(nullable=False, ge=41.0, le=52.0)]

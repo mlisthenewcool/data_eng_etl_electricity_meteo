@@ -1,6 +1,22 @@
 # Implémentation dbt dans Airflow
 
-Plan d'implémentation pour intégrer dbt-core dans le pipeline Airflow existant.
+> **Statut (2026-05-04) : implémenté.** Ce document était le plan initial
+> (mars 2026). Il est conservé comme trace historique des choix
+> d'architecture. L'implémentation réelle diffère par endroits :
+>
+> - `load_pg_factory.py` → `airflow/dags/to_silver_pg_factory.py`
+> - `dbt_transform_dag.py` → `airflow/dags/to_gold_factory.py`
+> - `02_create_schemas.sql` → `postgres/init/02_create_schemas.sh`
+> - L'option 1 (dbt dans le conteneur Airflow) a bien été retenue
+> - Profil dbt unique `default` (pas de `target: docker`) — secrets Postgres
+>   accessibles via `cat /run/secrets/...` dans le `command` du compose
+>   (cf. `docker-compose.yaml`)
+>
+> Pour la philosophie de qualité de données associée, voir
+> [`data_quality.md`](data_quality.md).
+
+Plan d'implémentation initial pour intégrer dbt-core dans le pipeline Airflow
+existant.
 L'objectif est de transformer les données silver (Postgres) en données gold
 (Postgres) via des modèles dbt orchestrés par Airflow.
 
@@ -80,7 +96,7 @@ spatiales dans les modèles gold (remplacement des calculs Haversine DuckDB).
 
 Options :
 
-- Utiliser l'image `postgis/postgis:17-3.5` au lieu de `postgres:17` dans
+- Utiliser l'image `postgis/postgis:18-3.6` au lieu de `postgres:18` dans
   `docker-compose.yaml`
 - Ou installer l'extension manuellement dans le script d'init
 
