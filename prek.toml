@@ -1,24 +1,77 @@
+# Refresh remote hooks: ALWAYS use `uv run prek autoupdate --freeze`.
+# The `--freeze` flag resolves the latest tag to its SHA and keeps the tag in an
+# inline `# vX.Y.Z` comment. Plain `prek autoupdate` rewrites `rev` to a mutable
+# tag and silently undoes our SHA pinning (see "File hygiene" section below for
+# the security rationale).
+
 # pass_filenames: false # to run every test, even if files aren't modified
+
+# --------------------------------------------------------------------------------------
+# File hygiene & safety (pre-commit/pre-commit-hooks)
+# --------------------------------------------------------------------------------------
+# Runs first: cheap, broad, fails fast on basic file issues before any Python
+# tooling boots. SHA-pinned (not tag-pinned) for the same reason as GitHub Actions
+# in .github/workflows/ci.yml: tags are mutable, SHAs are not. Hooks run arbitrary
+# code on the dev machine with full filesystem access, so the threat model
+# matches GitHub Actions. Trade-off: Dependabot doesn't watch the `pre-commit`
+# ecosystem — refresh manually with `prek autoupdate --freeze` (see top of file).
+
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "3e8a8703264a2f4a69428a0aa4dcb512790b2c8c" # v6.0.0
+hooks = [
+    { id = "check-toml" }, # pyproject.toml, prek.toml
+    { id = "check-yaml" }, # GH Actions, dependabot, docker-compose, dbt yaml
+    { id = "end-of-file-fixer" }, # ensure files end with newline
+    { id = "trailing-whitespace" },
+    { id = "check-merge-conflict" }, # leftover <<<<<<<, =======, >>>>>>> markers
+    { id = "detect-private-key" }, # defense-in-depth alongside CI gitleaks
+    { id = "check-added-large-files", args = ["--maxkb=500"] },
+]
+
+
+# --------------------------------------------------------------------------------------
+# Local hooks
+# --------------------------------------------------------------------------------------
 
 [[repos]]
 repo = "local"
 
-# Refresh uv.lock to the latest compatible versions of every dep (transitives
-# included). Compensates for the disabled Dependabot `uv` ecosystem
-# (.github/dependabot.yml) — Dependabot's per-group resolution leaves
-# transitives stale, so we resolve fully on each commit instead.
-# If uv.lock changes, prek fails the commit; re-stage `uv.lock` and retry.
+# Notify (don't auto-apply) when newer versions of any dep are available.
+# `--dry-run` runs the resolver without touching uv.lock, then prints either
+# "No lockfile changes detected" or a diff summary. Exits 0 always — we only
+# inform, the user decides when to run `uv sync --upgrade` for real.
+# Pairs with Dependabot security updates (Settings → Code security) which catch
+# CVEs asap regardless of push cadence. The `package-ecosystem: uv` block in
+# .github/dependabot.yml is intentionally disabled — this hook covers routine
+# notifications, security updates cover the rest. See dependabot.yml header for
+# the full rationale.
 [[repos.hooks]]
-id = "uv-sync-upgrade"
-name = "uv sync --upgrade"
-entry = "uv sync --upgrade"
+id = "uv-sync-check"
+name = "Check uv.lock freshness (uv lock --upgrade --dry-run)"
+entry = "uv lock --upgrade --dry-run"
 language = "system"
 pass_filenames = false
 always_run = true
+stages = ["pre-push"]
+
+# Detect drift between `pyproject.toml` `>=` floors and what's actually resolved
+# in `uv.lock`. Exits 1 if drift is found (blocks the push) — drift is an
+# internal consistency issue between two project files, not a routine "new
+# version available" event, so blocking is justified. Fix in 5s with
+# `uv run python scripts/sync_dep_floors.py`.
+[[repos.hooks]]
+id = "sync-dep-floors-check"
+name = "Check pyproject floors vs uv.lock (sync_dep_floors.py --check)"
+entry = "uv run python scripts/sync_dep_floors.py --check"
+language = "system"
+pass_filenames = false
+always_run = true
+stages = ["pre-push"]
 
 [[repos.hooks]]
 id = "ruff-check"
-name = "ruff-check"
+name = "Linter (ruff check)"
 entry = "uv run ruff check"
 args = ["--fix"]
 language = "system"
@@ -26,14 +79,14 @@ types = ["python"]
 
 [[repos.hooks]]
 id = "ruff-format"
-name = "ruff-format"
+name = "Formatter (ruff format)"
 entry = "uv run ruff format"
 language = "system"
 types = ["python"]
 
 [[repos.hooks]]
 id = "docstring-format"
-name = "docstring-format"
+name = "Check docstring format (format_docstrings.py --check)"
 entry = "uv run python scripts/format_docstrings.py --check notebooks/ scripts/ src/ tests/"
 language = "system"
 pass_filenames = false
@@ -41,7 +94,7 @@ files = '\.(py)$'
 
 [[repos.hooks]]
 id = "ty"
-name = "ty"
+name = "Type checking (ty)"
 entry = "uv run ty check"
 language = "system"
 types = ["python"]
@@ -52,7 +105,7 @@ files = "^(notebooks|scripts|src|tests)/"
 
 [[repos.hooks]]
 id = "pytest"
-name = "pytest"
+name = "Test coverage (pytest)"
 entry = "uv run pytest"
 language = "system"
 pass_filenames = false
@@ -61,7 +114,7 @@ files = '\.(py|yaml|json)$' # run the hook only if any .(py|yaml|json) changed
 
 [[repos.hooks]]
 id = "dbt-parse"
-name = "dbt-parse"
+name = "dbt static check (dbt parse)"
 entry = "uv run run-dbt parse"
 language = "system"
 pass_filenames = false
@@ -70,7 +123,7 @@ stages = ["pre-push"]
 
 [[repos.hooks]]
 id = "pip-audit"
-name = "pip-audit"
+name = "Dependency audit (pip-audit)"
 entry = "uv run pip-audit"
 language = "system"
 pass_filenames = false

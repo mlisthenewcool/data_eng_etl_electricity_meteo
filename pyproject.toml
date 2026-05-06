@@ -19,7 +19,7 @@ dependencies = [
     "httpx[http2]>=0.28.1",
     "orjson>=3.11.8",
     "polars>=1.40.1",
-    "psycopg[c]>=3.3.3",
+    "psycopg[c]>=3.3.4",
     "py7zr>=1.1.0",
     "pyarrow>=24.0.0",
     "pydantic>=2.13.3",
@@ -27,19 +27,20 @@ dependencies = [
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
     "tqdm>=4.67.3",
-    "typer>=0.25.0",
+    "typer>=0.25.1",
 ]
 
 [dependency-groups]
 dev = [
     "apache-airflow-task-sdk>=1.2.1",
-    "marimo>=0.23.3",
+    "marimo>=0.23.5",
+    "packaging>=26.2", # used by scripts/sync_dep_floors.py
     "pip-audit>=2.10.0",
-    "prek>=0.3.11",
+    "prek>=0.3.13",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.12",
-    "ty>=0.0.32",
+    "ty>=0.0.34",
 ]
 
 [project.scripts]
