@@ -798,7 +798,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dbt-core", specifier = ">=1.11.8" },
+    { name = "dbt-core", specifier = ">=1.11.9" },
     { name = "dbt-postgres", specifier = ">=1.10.0" },
     { name = "duckdb", specifier = ">=1.5.2" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.28.1" },
@@ -872,7 +872,7 @@ wheels = [
 
 [[package]]
 name = "dbt-core"
-version = "1.11.8"
+version = "1.11.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agate" },
@@ -898,9 +898,9 @@ dependencies = [
     { name = "sqlparse" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/4f/5524b85f0bd94053ee51fe7e8b0011295f056da707c754975ed7da3888f9/dbt_core-1.11.8.tar.gz", hash = "sha256:1bfe0b40c958785680a1b2b894b0851f5bf780ddc058747dd1e62c389b0d3b1d", size = 972635, upload-time = "2026-04-08T19:01:46.63Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/49/2f36c3a62c4a957ea7672d6566bc7ac1adca81523ca19c0ae5dc74218560/dbt_core-1.11.9.tar.gz", hash = "sha256:8dff914ca4c0d5de93ba8e285b50f007ae4d46f9fe4c845b8ef47ce5ebbc888b", size = 973146, upload-time = "2026-05-06T20:02:37.588Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/47/a07061c70e0872d8f49fbd12cf93f481b22cabb2e75016ce00aa3520a7ab/dbt_core-1.11.8-py3-none-any.whl", hash = "sha256:13ff79252a7ae9c9acc7de243789b72f04f7f915f05930d3407edeeea3758b6f", size = 1061289, upload-time = "2026-04-08T19:01:44.83Z" },
+    { url = "https://files.pythonhosted.org/packages/be/85/e77e8cf3ee9509798e1353c5d1cabbc3fe1c2cc8593054b313407e7508c5/dbt_core-1.11.9-py3-none-any.whl", hash = "sha256:9693d4cf33f99e2ec8cefc6236a7bceed7f212aa35e3b97b83e27b0085ee174c", size = 1061906, upload-time = "2026-05-06T20:02:35.65Z" },
 ]
 
 [[package]]
@@ -1136,14 +1136,14 @@ wheels = [
 
 [[package]]
 name = "googleapis-common-protos"
-version = "1.74.0"
+version = "1.75.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/18/a746c8344152d368a5aac738d4c857012f2c5d1fd2eac7e17b647a7861bd/googleapis_common_protos-1.74.0.tar.gz", hash = "sha256:57971e4eeeba6aad1163c1f0fc88543f965bb49129b8bb55b2b7b26ecab084f1", size = 151254, upload-time = "2026-04-02T21:23:26.679Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/c8/f439cffde755cffa462bfbb156278fa6f9d09119719af9814b858fd4f81f/googleapis_common_protos-1.75.0.tar.gz", hash = "sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd", size = 151035, upload-time = "2026-05-07T08:04:49.423Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b6/b0/be5d3329badb9230b765de6eea66b73abd5944bdeb5afb3562ddcd80ae84/googleapis_common_protos-1.74.0-py3-none-any.whl", hash = "sha256:702216f78610bb510e3f12ac3cafd281b7ac45cc5d86e90ad87e4d301a3426b5", size = 300743, upload-time = "2026-04-02T21:22:49.108Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/c8/e2645aa8ed02fd4c7a2f59d68783b65b1f3cbdfe39a6308e156509d1fee8/googleapis_common_protos-1.75.0-py3-none-any.whl", hash = "sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed", size = 300631, upload-time = "2026-05-07T08:03:30.345Z" },
 ]
 
 [[package]]

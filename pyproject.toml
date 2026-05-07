@@ -13,7 +13,7 @@ readme = "README.md"
 #  Python 3.10-3.13. Revisit on each `uv sync --upgrade` cycle.
 requires-python = ">=3.13"
 dependencies = [
-    "dbt-core>=1.11.8",
+    "dbt-core>=1.11.9",
     "dbt-postgres>=1.10.0",
     "duckdb>=1.5.2",
     "httpx[http2]>=0.28.1",
