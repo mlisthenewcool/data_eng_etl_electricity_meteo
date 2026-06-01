@@ -5,7 +5,7 @@
 #   - https://airflow.apache.org/docs/docker-stack/build-arg-ref.html
 #   - https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
-FROM apache/airflow:3.2.1-python3.13
+FROM apache/airflow:3.2.2-python3.13
 
 # --------------------------------------------------------------------------------------
 # System dependencies (as root)
