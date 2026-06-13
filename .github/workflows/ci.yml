@@ -2,9 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [ master, dev ]
+    branches: [ main ]
   pull_request:
-    branches: [ master, dev ]
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR or branch).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Minimal permissions (principle of least privilege) — inherited by all jobs.
 # Override per-job only if a job requires more.

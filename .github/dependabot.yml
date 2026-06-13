@@ -8,8 +8,7 @@
 # NOTE: Dependabot's YAML parser does NOT support YAML anchors (&foo / *foo),
 # so schedule/cooldown blocks are duplicated on each entry.
 #
-# target-branch is set to "dev" (active development branch) so that PRs target
-# the right base. Default behaviour would target the GitHub default branch.
+# No target-branch: PRs target the repository default branch (main).
 
 version: 2
 updates:
@@ -37,7 +36,6 @@ updates:
   #
   # - package-ecosystem: "uv"
   #   directory: "/"
-  #   target-branch: "dev"
   #   schedule:
   #     interval: "weekly"
   #     day: "monday"
@@ -53,7 +51,6 @@ updates:
   # Dependabot updates the SHA and refreshes the `# vX.Y.Z` comment automatically.
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -68,7 +65,6 @@ updates:
   # -- Dockerfile base images (FROM ...) ---------------------------------------------
   - package-ecosystem: "docker"
     directory: "/"
-    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -83,7 +79,6 @@ updates:
   # -- docker-compose images (image: ...) --------------------------------------------
   - package-ecosystem: "docker-compose"
     directory: "/"
-    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
