@@ -11,7 +11,7 @@ from datetime import timedelta
 from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, get_current_context, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset
-from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
+from data_eng_etl_electricity_meteo.airflow.defaults import DAG_COMMON_KWARGS
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog
 from data_eng_etl_electricity_meteo.core.exceptions import (
     InvalidCatalogError,
@@ -68,13 +68,10 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
     @dag(
         dag_id=f"{manager.dataset.name}_to_silver",
         schedule=manager.dataset.ingestion.frequency.airflow_schedule,
-        start_date=START_DATE,
-        catchup=False,  # TODO[prod]: set to True
-        default_args=DEFAULT_ARGS,
+        **DAG_COMMON_KWARGS,
         tags=[manager.dataset.source.provider, "ingestion"],
         description=manager.dataset.description[:200] if manager.dataset.description else None,
         doc_md=__doc__,
-        # max_active_runs=1 controlled globally
     )
     def _dag() -> None:
         @task.short_circuit(task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT)
