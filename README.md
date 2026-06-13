@@ -213,6 +213,26 @@ uv run pipeline <nom_dataset>
 uv run pipeline-meteo-clim
 ```
 
+> [!WARNING]
+> **Ne pas lancer la CLI pendant qu'Airflow tourne.** La CLI et les workers
+> Airflow partagent le même répertoire `data/` (landing / bronze / silver /
+> `_state`). Un run CLI et un DAG schedulé sur **le même dataset** au même moment
+> se marchent dessus : écriture concurrente du fichier landing, puis `rmtree` du
+> landing par le premier qui finit sa conversion bronze &rarr; l'autre échoue
+> (`FileNotFoundError` au rename) ou produit des données corrompues.
+>
+> Un DAG schedulé peut se déclencher à tout instant : il ne suffit pas qu'Airflow
+> *paraisse* inactif. Avant un run CLI manuel, **arrêter le service Airflow** :
+>
+> ```bash
+> docker compose stop airflow_service   # avant le run CLI
+> docker compose start airflow_service  # pour le relancer après
+> ```
+>
+> `max_active_runs=1` protège déjà contre les chevauchements *intra-Airflow*
+> (un seul run actif par DAG) ; cette précaution couvre le cas **CLI &harr;
+> Airflow**, non géré par Airflow seul.
+
 **dbt (couche gold)** :
 
 ```bash

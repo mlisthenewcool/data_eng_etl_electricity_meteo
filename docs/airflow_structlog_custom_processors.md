@@ -53,8 +53,8 @@ processeurs configurée par Airflow.
 - [Discussion #53006 - configure_logging ignore logging_config_class][1]
 - [Issue #53442 - Logging configs ignored in Airflow 3.x][2]
 - [Doc providers Amazon - CloudWatch handler][3]
-- [Advanced logging configuration - Airflow 3.2.1][4]
-- [Configuration Reference - Airflow 3.2.1][5]
+- [Advanced logging configuration - Airflow][4]
+- [Configuration Reference - Airflow][5]
 
 [1]: https://github.com/apache/airflow/discussions/53006
 

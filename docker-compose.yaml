@@ -11,7 +11,7 @@ services:
   postgres_service:
     container_name: postgres_container
     image: postgis/postgis:18-3.6
-    restart: always
+    restart: unless-stopped
     shm_size: 256mb # TODO[prod]: benchmark with real workload (memory for Postgres operations)
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
@@ -51,7 +51,7 @@ services:
         AIRFLOW_USE_UV: True
         INSTALL_MYSQL_CLIENT: False
         INSTALL_MSSQL_CLIENT: False
-    restart: always
+    restart: unless-stopped
     depends_on:
       postgres_service:
         condition: service_healthy
@@ -70,7 +70,7 @@ services:
       AIRFLOW_DB_NAME: "${AIRFLOW_DB_NAME}"
 
       # -- Logging ---------------------------------------------------------------------
-      # Airflow 3 logging (vérifié sur 3.1.7) :
+      # Airflow 3 logging (vérifié sur 3.2.2) :
       #   - Timestamp ISO 8601 + level ajoutés par structlog
       #     (MaybeTimeStamper(fmt="iso") + add_log_level). Les loggers
       #     applicatifs ne doivent émettre que le message brut.

@@ -14,7 +14,7 @@ import orjson
 from airflow.sdk import DAG, Asset, AssetAll, chain, dag, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_gold_pg_asset, get_silver_pg_asset
-from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
+from data_eng_etl_electricity_meteo.airflow.defaults import DAG_COMMON_KWARGS
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, GoldDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import (
     DataCatalogError,
@@ -244,9 +244,7 @@ def _create_dag(
     @dag(
         dag_id=f"{dataset.name}_to_gold",
         schedule=schedule,
-        start_date=START_DATE,
-        catchup=False,  # TODO[prod]: set to True
-        default_args=DEFAULT_ARGS,
+        **DAG_COMMON_KWARGS,
         tags=["dbt", "gold", "postgres"],
         description=dataset.description[:200] if dataset.description else None,
         doc_md=__doc__,

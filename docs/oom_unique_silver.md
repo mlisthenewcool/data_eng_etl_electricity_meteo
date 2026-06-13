@@ -33,7 +33,7 @@ parallèle de DAGs.
 | Airflow au repos      | ~1.2 GiB (scheduler + webserver + triggerer)    |
 | Disponible pour tasks | **~6.3 GiB**                                   |
 | Polars                | 1.38.1, thread pool = 16 threads               |
-| Parallélisme Airflow  | `PARALLELISM=32`, `MAX_ACTIVE_RUNS_PER_DAG=1`  |
+| Parallélisme Airflow  | `PARALLELISM=32`, `max_active_runs=1` (par DAG)  |
 
 ### Profil de tous les datasets (bronze)
 

@@ -95,6 +95,9 @@
   traitements, insertion en base)
 - [ ] [CI] Ajouter Bandit (analyse de sécurité statique Python) :
   https://github.com/PyCQA/bandit
+- [ ] [dbt] Historiser les dimensions silver via `dbt snapshots` (SCD Type 2).
+  Priorités, matrice de décision par table et points d'attention dans
+  [dbt_snapshots_historisation_dimensions.md](docs/dbt_snapshots_historisation_dimensions.md)
 - [ ] [Docker] Permettre l'utilisation de variables d'environnement pour configurer les
   ports du service Airflow plutôt que des valeurs fixes
 - [ ] [Données] Enrichir `catalog.yaml` avec des métadonnées supplémentaires par

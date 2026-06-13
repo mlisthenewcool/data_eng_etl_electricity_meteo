@@ -5,7 +5,7 @@
 #   - https://airflow.apache.org/docs/docker-stack/build-arg-ref.html
 #   - https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
-FROM apache/airflow:3.2.1-python3.13
+FROM apache/airflow:3.2.2-python3.13
 
 # --------------------------------------------------------------------------------------
 # System dependencies (as root)
@@ -52,7 +52,6 @@ ENV PYTHONPATH="/opt/airflow/src"
 ENV AIRFLOW__CORE__EXECUTOR="LocalExecutor" \
     AIRFLOW__CORE__DEFAULT_TIMEZONE="UTC" \
     AIRFLOW__CORE__LOAD_EXAMPLES="False" \
-    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG="1" \
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG="16" \
     AIRFLOW__CORE__PARALLELISM="32"
 

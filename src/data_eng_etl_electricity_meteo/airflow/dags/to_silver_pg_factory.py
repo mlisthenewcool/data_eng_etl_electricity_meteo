@@ -13,7 +13,7 @@ from datetime import timedelta
 from airflow.sdk import DAG, Asset, Metadata, dag, task
 
 from data_eng_etl_electricity_meteo.airflow.assets import get_silver_file_asset, get_silver_pg_asset
-from data_eng_etl_electricity_meteo.airflow.defaults import DEFAULT_ARGS, START_DATE
+from data_eng_etl_electricity_meteo.airflow.defaults import DAG_COMMON_KWARGS
 from data_eng_etl_electricity_meteo.core.data_catalog import DataCatalog, RemoteDatasetConfig
 from data_eng_etl_electricity_meteo.core.exceptions import InvalidCatalogError
 from data_eng_etl_electricity_meteo.core.logger import get_logger
@@ -64,9 +64,7 @@ def _create_dag(
     @dag(
         dag_id=f"{dataset.name}_to_silver_pg",
         schedule=schedule,
-        start_date=START_DATE,
-        catchup=False,  # TODO[prod]: set to True
-        default_args=DEFAULT_ARGS,
+        **DAG_COMMON_KWARGS,
         tags=["load", "postgres", "silver"],
         doc_md=__doc__,
     )
