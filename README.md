@@ -24,6 +24,7 @@ Pipeline de données corrélant la **production électrique française** avec le
 - [Pipeline en détail](#pipeline-en-détail)
 - [Qualité des données](#qualité-des-données)
 - [Tests et qualité de code](#tests-et-qualité-de-code)
+- [Workflow Git](#workflow-git)
 - [Documentation technique](#documentation-technique)
 - [Roadmap](#roadmap)
 - [Licence](#licence)
@@ -354,15 +355,15 @@ Les hooks `prek` exécutent automatiquement ruff, ty et pytest à chaque commit.
 
 ### Gestion des dépendances
 
-- **Dépendances Python** : gérées localement via `uv sync --upgrade`, exécuté
-  automatiquement à chaque commit par le hook prek `uv-sync-upgrade`. Si la
-  résolution change `uv.lock`, prek échoue le commit — re-stager `uv.lock` et
-  relancer. L'écosystème `uv` de Dependabot est désactivé (cf. commentaire dans
-  `.github/dependabot.yml`) car sa résolution par groupe laisse les
-  dépendances transitives obsolètes (un `uv sync --upgrade` local résout le
-  graphe complet, ce qu'on veut).
+- **Dépendances Python** : gérées localement via `uv sync --upgrade` (manuel).
+  Le hook prek `uv-sync-check` lance `uv lock --upgrade --dry-run` en pre-push
+  et **signale** (sans bloquer) si une mise à jour est disponible. L'écosystème
+  `uv` de Dependabot est désactivé (cf. commentaire dans
+  `.github/dependabot.yml`) car sa résolution par groupe laisse les dépendances
+  transitives obsolètes (un `uv sync --upgrade` local résout le graphe complet,
+  ce qu'on veut).
 - **GitHub Actions, images Docker** : gérées via Dependabot, PRs hebdomadaires
-  ciblant `dev`. Pas d'équivalent local utilisé + pas de problème de
+  ciblant `main`. Pas d'équivalent local utilisé + pas de problème de
   résolution transitive sur ces écosystèmes, donc Dependabot reste l'outil
   adapté.
 - **`require-dbt-version`** dans `dbt/dbt_project.yml` n'est pas couvert par
@@ -372,6 +373,26 @@ Les hooks `prek` exécutent automatiquement ruff, ty et pytest à chaque commit.
   connue dans la lockfile résolue ; les Dependabot security alerts (mécanisme
   séparé des version updates) ouvrent automatiquement une PR sur toute CVE
   d'une dépendance, transitives incluses.
+
+## Workflow Git
+
+Modèle **trunk-based** : une seule branche longue `main`, protégée. Tout
+changement passe par une **branche courte → Pull Request → squash-merge**
+(merge commits et rebase désactivés côté dépôt, branche supprimée
+automatiquement au merge → `main` reste linéaire).
+
+`main` n'accepte aucun push direct : une PR ne se merge que si les checks
+`Code quality & tests` et `Secret scanning` sont verts et que la branche est à
+jour avec `main`.
+
+```bash
+git switch -c fix/mon-correctif      # préfixes : feat/, fix/, chore/, docs/
+# … commits …
+git push -u origin fix/mon-correctif
+gh pr create --fill                  # PR vers main
+# CI verte →
+gh pr merge --squash --delete-branch
+```
 
 ## Documentation technique
 
