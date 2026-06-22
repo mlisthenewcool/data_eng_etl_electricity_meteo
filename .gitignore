@@ -28,11 +28,14 @@ dbt/logs/
 todo/
 personal_notes/
 AGENTS.md
-CLAUDE.md
 opencode.jsonc
 .agents/
-.claude/
 .opencode/
+
+# Claude Code : versionner les conventions projet + skills, ignorer le perso/local
+.claude/*
+!.claude/CLAUDE.md
+!.claude/skills/
 
 # ---------------------------------------------------------------------------
 # https://github.com/github/gitignore/blob/main/Python.gitignore
