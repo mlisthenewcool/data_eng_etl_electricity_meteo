@@ -89,6 +89,32 @@ uv run prek run --all-files  # Run manually on all files
   gh pr merge --squash --delete-branch   # once CI is green
   ```
 
+## Dependency updates
+
+A full "update everything to the latest compatible versions" sweep must cover
+**all** sources below — not just Python libs. Note in the commit body what was
+already at the latest (verified) so the next sweep can skip re-checking.
+
+1. **Python libs** — `uv sync --upgrade`, then
+   `uv run python scripts/sync_dep_floors.py` to align the `>=` floors in
+   `pyproject.toml` with the resolved `uv.lock`.
+2. **GitHub Actions** — SHA-pinned with a trailing `# vX.Y.Z` comment. To bump,
+   resolve the tag to a **commit** SHA (dereference annotated tags:
+   `gh api repos/<o>/<r>/git/refs/tags/<tag>`; if `.object.type == "tag"`,
+   follow with `git/tags/<sha>` to get the commit). Update both the SHA and the
+   comment.
+3. **Docker base image** — bump to the latest **stable** tag only; ignore
+   `rc`/`beta` tags (e.g. keep `apache/airflow:3.2.2` while `3.3.0b1` is the
+   only 3.3 tag). Check Docker Hub tags, not GitHub releases.
+4. **prek hooks** — `uv run prek autoupdate --freeze` (keeps `rev` SHA-pinned
+   with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
+5. **Persistent blockers** — re-verify each cycle. Python 3.14 is still blocked
+   (dbt-core pins `mashumaro<3.15`, which breaks at import on 3.14). The
+   `require-dbt-version` in `dbt/dbt_project.yml` must be bumped in lockstep
+   with the `dbt-core` floor (not covered by Dependabot).
+
+Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
+
 ## Language Conventions
 
 - **Code** : English (variable names, function names, class names)
