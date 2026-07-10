@@ -103,15 +103,22 @@ already at the latest (verified) so the next sweep can skip re-checking.
    `gh api repos/<o>/<r>/git/refs/tags/<tag>`; if `.object.type == "tag"`,
    follow with `git/tags/<sha>` to get the commit). Update both the SHA and the
    comment.
-3. **Docker base image** — bump to the latest **stable** tag only; ignore
-   `rc`/`beta` tags (e.g. keep `apache/airflow:3.2.2` while `3.3.0b1` is the
-   only 3.3 tag). Check Docker Hub tags, not GitHub releases.
+3. **Docker base images** — bump to the latest **stable** tag only; ignore
+   `rc`/`beta` tags. Check Docker Hub tags, not GitHub releases. Covers both
+   `airflow.Dockerfile` (apache/airflow) and `docker-compose.yaml`
+   (postgis/postgis). After an Airflow image bump, smoke-test beyond the build:
+   `docker compose up --detach`, wait for the container to report healthy, then
+   `docker exec airflow_container airflow dags list-import-errors` must return
+   "No data found".
 4. **prek hooks** — `uv run prek autoupdate --freeze` (keeps `rev` SHA-pinned
    with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
 5. **Persistent blockers** — re-verify each cycle. Python 3.14 is still blocked
    (dbt-core pins `mashumaro<3.15`, which breaks at import on 3.14). The
    `require-dbt-version` in `dbt/dbt_project.yml` must be bumped in lockstep
-   with the `dbt-core` floor (not covered by Dependabot).
+   with the `dbt-core` floor (not covered by Dependabot). ty is pinned
+   `<0.0.58`: 0.0.58 loses the ParamSpec when resolving calls through a
+   class-variable `__call__` (airflow-task-sdk's `Task` protocol) — unpin once
+   https://github.com/astral-sh/ty/issues/3957 ships fixed in a release.
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 
