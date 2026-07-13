@@ -9,44 +9,37 @@
 # so schedule/cooldown blocks are duplicated on each entry.
 #
 # No target-branch: PRs target the repository default branch (main).
+#
+# -- Python dependencies (pyproject.toml + uv.lock): DISABLED (2026-05-04) ------------
+# Managed manually via `uv sync --upgrade` to avoid divergence with Dependabot's
+# narrower resolution scope. (Kept out of the `updates:` sequence below because a
+# long comment run before the first entry breaks strict YAML parsers, e.g. prek's
+# check-yaml.)
+#
+# Dependabot's `uv` ecosystem only re-resolves within the group of bumped packages,
+# leaving transitive deps stale. Example observed: pip 26.0.1 stayed in a Dependabot
+# PR while CVE-2026-3219 was already patched in pip 26.1.1 via local `uv sync
+# --upgrade`. Two sources of truth = drift + PR noise on bumps already applied.
+#
+# Coverage retained without this block:
+# - Security alerts: Dependabot's GitHub Advisory scanner runs on the uv.lock graph
+#   regardless of this file (Settings → Code security → Dependabot security updates).
+#   CVE on any dep, including transitives, still opens an auto-PR.
+# - CI safety net: `pip-audit` step in .github/workflows/ci.yml fails the build on
+#   any known CVE in the resolved lockfile.
+#
+# Re-enable if: the project becomes multi-dev (no single dev guarantees `uv sync
+# --upgrade` cadence), compliance imposes a strict patch SLA, or we migrate to
+# Renovate (which handles full lockfile refresh natively). Add back under `updates:`:
+#
+#   - package-ecosystem: "uv"
+#     directory: "/"
+#     schedule: { interval: "weekly", day: "monday", time: "06:00", timezone: "Europe/Paris" }
+#     cooldown: { default-days: 7 }
+#     groups: { python: { patterns: ["*"] } }
 
 version: 2
 updates:
-  # -- Python dependencies (pyproject.toml + uv.lock) --------------------------------
-  # DISABLED (2026-05-04): managed manually via `uv sync --upgrade` to avoid
-  # divergence with Dependabot's narrower resolution scope.
-  #
-  # Dependabot's `uv` ecosystem only re-resolves within the group of bumped
-  # packages, leaving transitive deps stale. Example observed: pip 26.0.1 stayed
-  # in a Dependabot PR while CVE-2026-3219 was already patched in pip 26.1.1
-  # via local `uv sync --upgrade`. Two sources of truth = drift + PR noise on
-  # bumps already applied.
-  #
-  # Coverage retained without this block:
-  # - Security alerts: Dependabot's GitHub Advisory scanner runs on the
-  #   uv.lock graph regardless of this file (Settings → Code security →
-  #   Dependabot security updates). CVE on any dep, including transitives,
-  #   still opens an auto-PR.
-  # - CI safety net: `pip-audit` step in .github/workflows/ci.yml fails the
-  #   build on any known CVE in the resolved lockfile.
-  #
-  # Re-enable if: the project becomes multi-dev (no single dev guarantees
-  # `uv sync --upgrade` cadence), compliance imposes a strict patch SLA, or
-  # we migrate to Renovate (which handles full lockfile refresh natively).
-  #
-  # - package-ecosystem: "uv"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
-  #     day: "monday"
-  #     time: "06:00"
-  #     timezone: "Europe/Paris"
-  #   cooldown:
-  #     default-days: 7
-  #   groups:
-  #     python:
-  #       patterns: ["*"]
-
   # -- GitHub Actions (pinned by commit SHA) -----------------------------------------
   # Dependabot updates the SHA and refreshes the `# vX.Y.Z` comment automatically.
   - package-ecosystem: "github-actions"
