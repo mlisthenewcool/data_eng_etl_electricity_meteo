@@ -115,10 +115,10 @@ already at the latest (verified) so the next sweep can skip re-checking.
 5. **Persistent blockers** — re-verify each cycle. Python 3.14 is still blocked
    (dbt-core pins `mashumaro<3.15`, which breaks at import on 3.14). The
    `require-dbt-version` in `dbt/dbt_project.yml` must be bumped in lockstep
-   with the `dbt-core` floor (not covered by Dependabot). ty is pinned
-   `<0.0.58`: 0.0.58 loses the ParamSpec when resolving calls through a
-   class-variable `__call__` (airflow-task-sdk's `Task` protocol) — unpin once
-   https://github.com/astral-sh/ty/issues/3957 ships fixed in a release.
+   with the `dbt-core` floor (not covered by Dependabot). (The former ty
+   `<0.0.58` pin is lifted: the ParamSpec regression on airflow-task-sdk's
+   `Task` protocol, https://github.com/astral-sh/ty/issues/3957, is fixed in
+   ty 0.0.59.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 
