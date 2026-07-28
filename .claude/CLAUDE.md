@@ -10,7 +10,7 @@ across France.
 Implements a medallion architecture pipeline :
 
 - **Landing** → **Bronze** → **Silver** → **Gold** layers
-- Tech stack: Python 3.13+ (pydantic, httpx, polars, structlog, ...), DuckDB, Docker,
+- Tech stack: Python 3.14+ (pydantic, httpx, polars, structlog, ...), DuckDB, Docker,
   Postgres, Airflow
 - Airflow and Postgres are ran through Docker Compose
 - Python's dependency management: `uv` (not pip/poetry)
@@ -20,8 +20,10 @@ Implements a medallion architecture pipeline :
 - **Airflow**: Local installation is for IDE support only. Actual code runs in Docker.
 - **Coverage**: Aim for high coverage but focus on critical paths first.
 - **prek**: Runs ruff, ty, and pytest automatically on commit (see `prek.toml`).
-- **Python version**: Requires Python 3.13+ (uses modern type syntax).
-  TODO: bump to 3.14+ once dbt-core relaxes `mashumaro<3.15` — see pyproject.toml.
+- **Python version**: Requires Python 3.14+ (uses modern type syntax). ruff's
+  `target-version` is `py314`, so 3.14 syntax is expected: annotations carry no
+  quotes around forward refs (PEP 649) and `except A, B:` takes no parentheses
+  (PEP 758).
 
 ## Resources
 
@@ -120,8 +122,7 @@ already at the latest (verified) so the next sweep can skip re-checking.
    context: the ty `<0.0.58` pin — ParamSpec regression on airflow-task-sdk's
    `Task` protocol, https://github.com/astral-sh/ty/issues/3957 — fixed in ty
    0.0.59; and the Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18`
-   and now ships a 3.14 classifier, so the bump is unblocked and awaits its own
-   PR, see the TODO on `requires-python` in `pyproject.toml`.)
+   and ships a 3.14 classifier, so the project moved to 3.14.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 

@@ -560,7 +560,7 @@ def _verify_and_maybe_full_refresh(
 
     try:
         silver_full = pl.read_parquet(silver_current_path)
-    except (pl.exceptions.PolarsError, OSError):
+    except pl.exceptions.PolarsError, OSError:
         logger.exception("Cannot read silver snapshot for full refresh")
         return None
 
@@ -569,7 +569,7 @@ def _verify_and_maybe_full_refresh(
             cur.execute(ddl_sql)
             rows = _load_snapshot(silver_full, cur=cur, pg_table=pg_table)
         conn.commit()
-    except (psycopg.Error, pl.exceptions.PolarsError, OSError):
+    except psycopg.Error, pl.exceptions.PolarsError, OSError:
         conn.rollback()
         logger.exception("Full refresh fallback failed, keeping initial incremental load")
         return None

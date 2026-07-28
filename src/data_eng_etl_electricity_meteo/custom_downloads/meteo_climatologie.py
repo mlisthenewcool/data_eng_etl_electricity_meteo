@@ -394,7 +394,7 @@ def _download_all_departments(
                 resource = futures[future]
                 try:
                     rows = future.result()
-                except (pl.exceptions.PolarsError, OSError):
+                except pl.exceptions.PolarsError, OSError:
                     logger.exception(
                         "Department download crashed unexpectedly",
                         department=resource.dept,

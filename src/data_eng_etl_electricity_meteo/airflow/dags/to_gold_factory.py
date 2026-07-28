@@ -82,7 +82,7 @@ class _DbtResult:
     adapter_msg: str | None
 
     @staticmethod
-    def from_raw(data: dict[str, Any]) -> "_DbtResult | None":
+    def from_raw(data: dict[str, Any]) -> _DbtResult | None:
         """Parse a dbt ``data`` dict into a typed result.
 
         Returns ``None`` when mandatory fields (``node_name``, ``status``) are missing
