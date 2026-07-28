@@ -112,13 +112,16 @@ already at the latest (verified) so the next sweep can skip re-checking.
    "No data found".
 4. **prek hooks** — `uv run prek autoupdate --freeze` (keeps `rev` SHA-pinned
    with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
-5. **Persistent blockers** — re-verify each cycle. Python 3.14 is still blocked
-   (dbt-core pins `mashumaro<3.15`, which breaks at import on 3.14). The
-   `require-dbt-version` in `dbt/dbt_project.yml` must be bumped in lockstep
-   with the `dbt-core` floor (not covered by Dependabot). (The former ty
-   `<0.0.58` pin is lifted: the ParamSpec regression on airflow-task-sdk's
-   `Task` protocol, https://github.com/astral-sh/ty/issues/3957, is fixed in
-   ty 0.0.59.)
+5. **Persistent blockers** — re-verify each cycle. The `require-dbt-version` in
+   `dbt/dbt_project.yml` must be bumped in lockstep with the `dbt-core` floor
+   (not covered by Dependabot). Currently open: `pip-audit` ignores
+   GHSA-9xwg-3r6f-jcx2 because marimo caps `pymdown-extensions<11` — drop the
+   `--ignore-vuln` in `ci.yml` once marimo relaxes that cap. (Lifted, keep for
+   context: the ty `<0.0.58` pin — ParamSpec regression on airflow-task-sdk's
+   `Task` protocol, https://github.com/astral-sh/ty/issues/3957 — fixed in ty
+   0.0.59; and the Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18`
+   and now ships a 3.14 classifier, so the bump is unblocked and awaits its own
+   PR, see the TODO on `requires-python` in `pyproject.toml`.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 
