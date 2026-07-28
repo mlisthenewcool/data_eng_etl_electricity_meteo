@@ -26,7 +26,8 @@
 #   regardless of this file (Settings → Code security → Dependabot security updates).
 #   CVE on any dep, including transitives, still opens an auto-PR.
 # - CI safety net: `pip-audit` step in .github/workflows/ci.yml fails the build on
-#   any known CVE in the resolved lockfile.
+#   any known CVE in the resolved lockfile, minus the advisories explicitly ignored
+#   there (each one justified inline, with a TODO to drop it).
 #
 # Re-enable if: the project becomes multi-dev (no single dev guarantees `uv sync
 # --upgrade` cadence), compliance imposes a strict patch SLA, or we migrate to

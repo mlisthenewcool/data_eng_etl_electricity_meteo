@@ -13,10 +13,15 @@ FROM apache/airflow:3.3.0-python3.14
 
 USER root
 
-# Build deps for "psycopg[c]" (C-accelerated PostgreSQL adapter)
+# Build deps for "psycopg[c]" (C-accelerated PostgreSQL adapter), compiled from
+# sdist — psycopg-c publishes no wheels.
+# libc6-dev, not python3-dev: the interpreter is the base image's own 3.14 under
+# /usr/python, headers included, so Debian's python3-dev would only pull an unused
+# Python 3.11 stack. libc6-dev must be explicit — gcc and libpq-dev don't pull it
+# under --no-install-recommends, and the compile fails without it.
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends libpq-dev gcc python3-dev \
+    && apt-get install -y --no-install-recommends libpq-dev gcc libc6-dev \
     && apt-get autoremove --purge \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -31,7 +36,8 @@ RUN mkdir -p /opt/airflow/data && chown -R airflow:root /opt/airflow/data
 
 USER airflow
 
-RUN pip install --no-cache-dir --upgrade uv && uv python upgrade
+# uv runs on the base image's Python 3.14; it manages no interpreter of its own.
+RUN pip install --no-cache-dir --upgrade uv
 
 RUN uv pip install --no-cache \
     dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \

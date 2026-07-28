@@ -370,7 +370,8 @@ Les hooks `prek` exécutent automatiquement ruff, ty et pytest à chaque commit.
   Dependabot — à aligner manuellement sur la version résolue de `dbt-core`
   dans `uv.lock` après chaque bump.
 - **Sécurité** : la step `pip-audit` en CI échoue le build sur toute CVE
-  connue dans la lockfile résolue ; les Dependabot security alerts (mécanisme
+  connue dans la lockfile résolue, sauf exceptions documentées et justifiées
+  au cas par cas dans `ci.yml` ; les Dependabot security alerts (mécanisme
   séparé des version updates) ouvrent automatiquement une PR sur toute CVE
   d'une dépendance, transitives incluses.
 

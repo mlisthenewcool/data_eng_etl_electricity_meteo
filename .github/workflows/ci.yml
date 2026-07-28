@@ -31,8 +31,11 @@ jobs:
       # Installs uv and Python (version auto-detected from .python-version).
       # Cache upload on GitHub-hosted runners is enabled by default (enable-cache: auto).
       # v9 flipped `prune-cache` to false by default (astral-sh/setup-uv#967): the
-      # cache entry now keeps every downloaded wheel instead of only what the venv
-      # needs. Larger cache, fewer PyPI round-trips — fine at this repo's size.
+      # cache entry keeps every downloaded wheel instead of only what the venv needs.
+      # Measured on this lockfile: ~345 MB compressed per entry vs ~50 MB pruned.
+      # Trades GitHub's 10 GB repo-wide cache budget (~29 entries instead of ~200,
+      # LRU-evicted across branches) for zero PyPI round-trips. Set
+      # `with: prune-cache: true` if cache thrashing shows up in build times.
       - name: Install uv + Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 

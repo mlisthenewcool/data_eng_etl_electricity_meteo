@@ -17,10 +17,6 @@
 - [ ] [Pipeline] Contrôler, tester et documenter le flux d'ingestion complet, avec les
   skips (download, extraction, écriture fichier Parquet, load dans Postgres) et la
   gestion des cas d'erreurs potentielles
-- [ ] [Python] Bump à Python 3.14 dès que dbt-core relâche la contrainte
-  `mashumaro<3.15` (tentative abandonnée le 2026-04-23 : mashumaro ≤ 3.14 casse à
-  l'import sur py3.14, `UnserializableField` sur `JSONObjectSchema.schema`). Revisiter
-  à chaque `uv sync --upgrade`
 - [ ] [Tests] Ajouter des tests sur les modules et fonctions critiques et valider ceux
   déjà créés
 
@@ -124,6 +120,10 @@
 
 ## Terminé
 
+- [x] [Python] _(2026-07-28)_ Bump à Python 3.14 : dbt-core 1.12.0 a relâché
+  `mashumaro<3.18` et publie un classifier 3.14, débloquant la tentative abandonnée le
+  2026-04-23. `requires-python`, `.python-version`, image Airflow et ruff
+  `target-version` alignés
 - [x] [Tests] _(2026-04-24)_ Tests unitaires `_fetch_scalar_int` (pg_loader) : stub
   dataclass `_StubCursor`, 11 cas parametrize incluant le quirk
   `isinstance(True, int)`

@@ -124,7 +124,10 @@ stages = ["pre-push"]
 [[repos.hooks]]
 id = "pip-audit"
 name = "Dependency audit (pip-audit)"
-entry = "uv run pip-audit"
+# Ignore list must stay in sync with the pip-audit step in .github/workflows/ci.yml
+# (pip-audit has no config file — `--ignore-vuln` is CLI-only). See that step for the
+# rationale behind each suppressed advisory.
+entry = "uv run pip-audit --ignore-vuln GHSA-9xwg-3r6f-jcx2"
 language = "system"
 pass_filenames = false
 files = '(pyproject\.toml|uv\.lock)$'
