@@ -121,14 +121,15 @@ pass_filenames = false
 files = '^dbt/'
 stages = ["pre-push"]
 
+# The wrapper carries the `--ignore-vuln` list (pip-audit has no config file, so the
+# list has to live somewhere) and re-checks each suppression against uv.lock. CI runs
+# the same script — never call `pip-audit` directly here, that duplication is exactly
+# what drifted before.
 [[repos.hooks]]
 id = "pip-audit"
-name = "Dependency audit (pip-audit)"
-# Ignore list must stay in sync with the pip-audit step in .github/workflows/ci.yml
-# (pip-audit has no config file — `--ignore-vuln` is CLI-only). See that step for the
-# rationale behind each suppressed advisory.
-entry = "uv run pip-audit --ignore-vuln GHSA-9xwg-3r6f-jcx2"
+name = "Dependency audit (run_pip_audit.py)"
+entry = "uv run python scripts/run_pip_audit.py"
 language = "system"
 pass_filenames = false
-files = '(pyproject\.toml|uv\.lock)$'
+files = '(pyproject\.toml|uv\.lock|scripts/run_pip_audit\.py)$'
 stages = ["pre-push"]

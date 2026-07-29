@@ -118,7 +118,11 @@ already at the latest (verified) so the next sweep can skip re-checking.
    `dbt/dbt_project.yml` must be bumped in lockstep with the `dbt-core` floor
    (not covered by Dependabot). Currently open: `pip-audit` ignores
    GHSA-9xwg-3r6f-jcx2 because marimo caps `pymdown-extensions<11` — drop the
-   `--ignore-vuln` in `ci.yml` once marimo relaxes that cap. (Lifted, keep for
+   entry from `_SUPPRESSIONS` in `scripts/run_pip_audit.py` once marimo relaxes
+   that cap. That script is the single source of truth for `--ignore-vuln`
+   (pip-audit has no config file) and is invoked by both `ci.yml` and
+   `prek.toml`; it fails the audit on its own once `uv.lock` resolves
+   `pymdown-extensions>=11`, so this blocker self-reports. (Lifted, keep for
    context: the ty `<0.0.58` pin — ParamSpec regression on airflow-task-sdk's
    `Task` protocol, https://github.com/astral-sh/ty/issues/3957 — fixed in ty
    0.0.59; and the Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18`

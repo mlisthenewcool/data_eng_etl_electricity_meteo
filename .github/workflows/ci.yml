@@ -31,13 +31,15 @@ jobs:
       # Installs uv and Python (version auto-detected from .python-version).
       # Cache upload on GitHub-hosted runners is enabled by default (enable-cache: auto).
       # v9 flipped `prune-cache` to false by default (astral-sh/setup-uv#967): the
-      # cache entry keeps every downloaded wheel instead of only what the venv needs.
-      # Measured on this lockfile: ~345 MB compressed per entry vs ~50 MB pruned.
-      # Trades GitHub's 10 GB repo-wide cache budget (~29 entries instead of ~200,
-      # LRU-evicted across branches) for zero PyPI round-trips. Set
-      # `with: prune-cache: true` if cache thrashing shows up in build times.
+      # cache entry would keep every downloaded wheel instead of only what the venv
+      # needs. Measured on this lockfile: ~345 MB compressed per entry vs ~50 MB
+      # pruned — at that size ~29 entries exhaust GitHub's 10 GB repo-wide budget and
+      # LRU eviction starts thrashing caches across branches, so PRs pay a cold
+      # `uv sync` anyway. We restore the v8 behaviour explicitly.
       - name: Install uv + Python
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          prune-cache: true
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -75,15 +77,12 @@ jobs:
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt
 
       - name: Dependency audit (pip-audit)
-        # GHSA-9xwg-3r6f-jcx2 (CVE-2026-61632) — path traversal in
-        # pymdown-extensions' `b64` extension, fixed in 11.0.0. We are stuck on
-        # 10.21.3 because marimo (dev group) caps `pymdown-extensions<11`.
-        # Not exploitable here: marimo only registers `pymdownx.b64` under
-        # Pyodide/WASM (marimo/_output/md.py, guarded by `is_pyodide()`), and we
-        # run marimo natively as a dev-only dependency — the vulnerable extension
-        # is never loaded.
-        # TODO: drop this ignore as soon as marimo relaxes its `<11` cap.
-        run: uv run pip-audit --ignore-vuln GHSA-9xwg-3r6f-jcx2
+        # The wrapper holds the `--ignore-vuln` list (pip-audit has no config file)
+        # and the rationale for each suppressed advisory. It fails the job once the
+        # blocker that justified a suppression is gone from uv.lock, so a stale
+        # ignore cannot silently mask a future advisory. The pip-audit prek hook runs
+        # the same script — never call `pip-audit` directly here.
+        run: uv run python scripts/run_pip_audit.py
 
   security:
     name: Secret scanning
