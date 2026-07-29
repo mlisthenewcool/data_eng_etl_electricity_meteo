@@ -508,9 +508,7 @@ if __name__ == "__main__":
     logger.warning("warning text", extra_data={"k": 3}, point=obj_dump)
     logger.error("error text", extra_data={"k": 3}, point=obj_dump)
     logger.critical("critical text", extra_data={"k": 3}, point=obj_dump)
-    logger.exception(
-        "exception text (called outside exception)", extra_data={"k": 3}, point=obj_dump
-    )
+    # No out-of-handler `.exception()` demo: ruff LOG004 rejects that call shape.
     try:
         _ = 1 / 0
     except ZeroDivisionError:

@@ -117,7 +117,7 @@ class DataFrameModelMeta(type):
         name: str,
         bases: tuple[type, ...],
         namespace: dict[str, Any],
-    ) -> "DataFrameModelMeta":
+    ) -> DataFrameModelMeta:
         """Build ``__columns__`` from type hints at class-definition time."""
         cls = super().__new__(mcs, name, bases, namespace)
         if not any(isinstance(b, DataFrameModelMeta) for b in bases):
