@@ -116,13 +116,21 @@ already at the latest (verified) so the next sweep can skip re-checking.
    with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
 5. **Persistent blockers** — re-verify each cycle. The `require-dbt-version` in
    `dbt/dbt_project.yml` must be bumped in lockstep with the `dbt-core` floor
-   (not covered by Dependabot). Currently open: `pip-audit` ignores
-   GHSA-9xwg-3r6f-jcx2 because marimo caps `pymdown-extensions<11` — drop the
-   `--ignore-vuln` in `ci.yml` once marimo relaxes that cap. (Lifted, keep for
-   context: the ty `<0.0.58` pin — ParamSpec regression on airflow-task-sdk's
-   `Task` protocol, https://github.com/astral-sh/ty/issues/3957 — fixed in ty
-   0.0.59; and the Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18`
-   and ships a 3.14 classifier, so the project moved to 3.14.)
+   (not covered by Dependabot). `scripts/run_pip_audit.py` is the single source
+   of truth for `--ignore-vuln` (pip-audit has no config file) and is invoked by
+   both `ci.yml` and `prek.toml`; every suppression names the blocker that
+   justifies it plus the `fixed_in` version that retires it, and the script
+   exits 1 before auditing once `uv.lock` resolves that blocker at or past
+   `fixed_in`. Blockers therefore self-report, and this section never has to
+   restate the advisory ids. Currently open: sqlparse advisories that dbt-core
+   1.12.2 keeps out of reach via `sqlparse>=0.5.5,<0.6.0` — see `_SUPPRESSIONS`
+   for the ids and the per-advisory rationale. (Lifted, keep for context:
+   GHSA-9xwg-3r6f-jcx2 — marimo 0.24.0 dropped the `pymdown-extensions<11`
+   cap, resolved to 11.0.1; the ty `<0.0.58` pin — ParamSpec regression on
+   airflow-task-sdk's `Task` protocol,
+   https://github.com/astral-sh/ty/issues/3957 — fixed in ty 0.0.59; and the
+   Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18` and ships a
+   3.14 classifier, so the project moved to 3.14.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 
@@ -514,7 +522,9 @@ These staging models are **materialized as `table`** (not `view`) because:
 ### Testing conventions
 
 - Test files: `test_*.py`, test classes: `class Test*:`.
-- Parametrize with `@pytest.mark.parametrize(argnames=..., argvalues=...)`.
+- Parametrize: named `argnames=` / `argvalues=` when the call breaks across
+  lines, positional when it fits on one — `test_dbt_consistency.py` stacks both
+  on the same function. `argnames` is a comma-separated string, not a tuple.
 - No docstrings required on individual test methods (the method name is the doc).
 
 ### Performance
