@@ -116,17 +116,20 @@ already at the latest (verified) so the next sweep can skip re-checking.
    with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
 5. **Persistent blockers** — re-verify each cycle. The `require-dbt-version` in
    `dbt/dbt_project.yml` must be bumped in lockstep with the `dbt-core` floor
-   (not covered by Dependabot). Currently open: `pip-audit` ignores
-   GHSA-9xwg-3r6f-jcx2 because marimo caps `pymdown-extensions<11` — drop the
-   entry from `_SUPPRESSIONS` in `scripts/run_pip_audit.py` once marimo relaxes
-   that cap. That script is the single source of truth for `--ignore-vuln`
-   (pip-audit has no config file) and is invoked by both `ci.yml` and
-   `prek.toml`; it fails the audit on its own once `uv.lock` resolves
-   `pymdown-extensions>=11`, so this blocker self-reports. (Lifted, keep for
-   context: the ty `<0.0.58` pin — ParamSpec regression on airflow-task-sdk's
-   `Task` protocol, https://github.com/astral-sh/ty/issues/3957 — fixed in ty
-   0.0.59; and the Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18`
-   and ships a 3.14 classifier, so the project moved to 3.14.)
+   (not covered by Dependabot). `scripts/run_pip_audit.py` is the single source
+   of truth for `--ignore-vuln` (pip-audit has no config file) and is invoked by
+   both `ci.yml` and `prek.toml`; every suppression names the blocker that
+   justifies it and the script fails the audit on its own once that blocker is
+   gone from `uv.lock`, so blockers self-report. Currently open: four sqlparse
+   advisories (CVE-2026-71491, -59893, -54284, -59894) fixed in 0.6.0, which
+   dbt-core 1.12.2 forbids via `sqlparse>=0.5.5,<0.6.0` — they expire on their
+   own once the lockfile resolves 0.6.0. (Lifted, keep for context:
+   GHSA-9xwg-3r6f-jcx2 — marimo 0.24.0 dropped the `pymdown-extensions<11`
+   cap, resolved to 11.0.1; the ty `<0.0.58` pin — ParamSpec regression on
+   airflow-task-sdk's `Task` protocol,
+   https://github.com/astral-sh/ty/issues/3957 — fixed in ty 0.0.59; and the
+   Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18` and ships a
+   3.14 classifier, so the project moved to 3.14.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 

@@ -36,8 +36,11 @@ jobs:
       # pruned — at that size ~29 entries exhaust GitHub's 10 GB repo-wide budget and
       # LRU eviction starts thrashing caches across branches, so PRs pay a cold
       # `uv sync` anyway. We restore the v8 behaviour explicitly.
+      # v10 additionally disables the cache for `pull_request_target`, `workflow_run`
+      # and `release` (cache-poisoning surface, astral-sh/setup-uv#984) — this
+      # workflow only triggers on `push` and `pull_request`, so nothing changes.
       - name: Install uv + Python
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           prune-cache: true
 
