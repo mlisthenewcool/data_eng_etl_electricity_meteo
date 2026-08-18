@@ -109,7 +109,10 @@ name = "Test coverage (pytest)"
 entry = "uv run pytest"
 language = "system"
 pass_filenames = false
-files = '\.(py|yaml|json)$' # run the hook only if any .(py|yaml|json) changed
+# .toml and .yml are in the list because tests/test_pip_audit_suppressions.py asserts
+# on prek.toml and .github/workflows/*.yml — without them that guard only runs in CI,
+# which is the pre-push/CI asymmetry it exists to close.
+files = '\.(py|ya?ml|json|toml)$'
 #stages: [ pre-push ] # if tests are taking too much time
 
 [[repos.hooks]]

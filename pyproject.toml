@@ -30,7 +30,7 @@ dependencies = [
 dev = [
     "apache-airflow-task-sdk>=1.3.1",
     "marimo>=0.24.0",
-    "packaging>=26.3", # used by scripts/sync_dep_floors.py
+    "packaging>=26.3", # used by scripts/sync_dep_floors.py + run_pip_audit.py
     "pip-audit>=2.10.1",
     "prek>=0.4.14",
     "pytest>=9.1.1",
@@ -133,6 +133,11 @@ include = ["notebooks", "scripts", "src", "tests"]
 # skip-covered keeps the terminal report short (only files with missing lines).
 # HTML report is not a default — generate on demand with `--cov-report=html`.
 addopts = "--cov=data_eng_etl_electricity_meteo --cov-report=term-missing:skip-covered"
+# Repo root on the path so tests can import `scripts/` (a namespace package — no
+# __init__.py needed). The staleness logic in run_pip_audit.py is the safety net the
+# whole audit rests on and has to be unit-tested. Coverage stays scoped by --cov above,
+# so scripts/ does not enter the report.
+pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true # check if all branches of if/else statement are used

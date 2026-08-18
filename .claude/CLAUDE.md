@@ -119,11 +119,12 @@ already at the latest (verified) so the next sweep can skip re-checking.
    (not covered by Dependabot). `scripts/run_pip_audit.py` is the single source
    of truth for `--ignore-vuln` (pip-audit has no config file) and is invoked by
    both `ci.yml` and `prek.toml`; every suppression names the blocker that
-   justifies it and the script fails the audit on its own once that blocker is
-   gone from `uv.lock`, so blockers self-report. Currently open: four sqlparse
-   advisories (CVE-2026-71491, -59893, -54284, -59894) fixed in 0.6.0, which
-   dbt-core 1.12.2 forbids via `sqlparse>=0.5.5,<0.6.0` — they expire on their
-   own once the lockfile resolves 0.6.0. (Lifted, keep for context:
+   justifies it plus the `fixed_in` version that retires it, and the script
+   exits 1 before auditing once `uv.lock` resolves that blocker at or past
+   `fixed_in`. Blockers therefore self-report, and this section never has to
+   restate the advisory ids. Currently open: sqlparse advisories that dbt-core
+   1.12.2 keeps out of reach via `sqlparse>=0.5.5,<0.6.0` — see `_SUPPRESSIONS`
+   for the ids and the per-advisory rationale. (Lifted, keep for context:
    GHSA-9xwg-3r6f-jcx2 — marimo 0.24.0 dropped the `pymdown-extensions<11`
    cap, resolved to 11.0.1; the ty `<0.0.58` pin — ParamSpec regression on
    airflow-task-sdk's `Task` protocol,

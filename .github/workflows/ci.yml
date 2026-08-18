@@ -31,8 +31,9 @@ jobs:
       # Installs uv and Python (version auto-detected from .python-version).
       # Cache upload on GitHub-hosted runners is enabled by default (enable-cache: auto).
       # v9 flipped `prune-cache` to false by default (astral-sh/setup-uv#967): the
-      # cache entry would keep every downloaded wheel instead of only what the venv
-      # needs. Measured on this lockfile: ~345 MB compressed per entry vs ~50 MB
+      # cache entry would keep every downloaded pre-built wheel instead of only the
+      # ones `uv cache prune --ci` judges expensive to recreate (those built from
+      # source). Measured on this lockfile: ~345 MB compressed per entry vs ~50 MB
       # pruned — at that size ~29 entries exhaust GitHub's 10 GB repo-wide budget and
       # LRU eviction starts thrashing caches across branches, so PRs pay a cold
       # `uv sync` anyway. We restore the v8 behaviour explicitly.
@@ -79,12 +80,13 @@ jobs:
           POSTGRES_PASSWORD: ci_dummy
         run: uv run dbt parse --project-dir dbt --profiles-dir dbt
 
-      - name: Dependency audit (pip-audit)
+      - name: Dependency audit (run_pip_audit.py)
         # The wrapper holds the `--ignore-vuln` list (pip-audit has no config file)
-        # and the rationale for each suppressed advisory. It fails the job once the
-        # blocker that justified a suppression is gone from uv.lock, so a stale
-        # ignore cannot silently mask a future advisory. The pip-audit prek hook runs
-        # the same script — never call `pip-audit` directly here.
+        # and the rationale for each suppressed advisory. It fails the job before
+        # auditing once uv.lock resolves a blocker at or past the version that fixes
+        # the advisory, so a stale ignore cannot silently mask a future one. The
+        # pip-audit prek hook runs the same script — never call `pip-audit` directly
+        # here.
         run: uv run python scripts/run_pip_audit.py
 
   security:
