@@ -136,7 +136,7 @@ _ENTRY = Suppression(
 
 class TestFindStale:
     @pytest.mark.parametrize(
-        argnames=("resolved", "is_stale"),
+        argnames="resolved, is_stale",
         argvalues=[
             ("0.5.5", False),  # the version the suppression was written against
             ("0.5.99", False),  # moved, but still short of the fix

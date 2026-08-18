@@ -522,7 +522,9 @@ These staging models are **materialized as `table`** (not `view`) because:
 ### Testing conventions
 
 - Test files: `test_*.py`, test classes: `class Test*:`.
-- Parametrize with `@pytest.mark.parametrize(argnames=..., argvalues=...)`.
+- Parametrize: named `argnames=` / `argvalues=` when the call breaks across
+  lines, positional when it fits on one — `test_dbt_consistency.py` stacks both
+  on the same function. `argnames` is a comma-separated string, not a tuple.
 - No docstrings required on individual test methods (the method name is the doc).
 
 ### Performance
