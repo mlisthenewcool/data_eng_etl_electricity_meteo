@@ -5,7 +5,7 @@
 #   - https://airflow.apache.org/docs/docker-stack/build-arg-ref.html
 #   - https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
-FROM apache/airflow:3.3.1-python3.14
+FROM apache/airflow:3.3.2-python3.14
 
 # --------------------------------------------------------------------------------------
 # System dependencies (as root)
@@ -39,7 +39,13 @@ USER airflow
 # uv runs on the base image's Python 3.14; it manages no interpreter of its own.
 RUN pip install --no-cache-dir --upgrade uv
 
-RUN uv pip install --no-cache \
+# --upgrade is what keeps this list honest. Without it uv leaves an already-installed
+# version alone as soon as it satisfies the requirement, so the base image's own pins
+# win silently — sqlparse stayed at 0.5.5 under `dbt-core>=1.12.3` even on a --no-cache
+# rebuild. --upgrade re-resolves our closure to latest, mirroring `uv sync --upgrade`
+# on the project venv. Scoped to these packages on purpose: Airflow's provider matrix
+# keeps the constraint set the base image shipped with.
+RUN uv pip install --no-cache --upgrade \
     dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \
     py7zr pyarrow pydantic pydantic-settings pyyaml structlog tqdm
 

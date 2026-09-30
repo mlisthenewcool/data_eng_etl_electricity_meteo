@@ -18,7 +18,6 @@ Implements a medallion architecture pipeline :
 ## Important Notes
 
 - **Airflow**: Local installation is for IDE support only. Actual code runs in Docker.
-- **Coverage**: Aim for high coverage but focus on critical paths first.
 - **prek**: Runs ruff, ty, and pytest automatically on commit (see `prek.toml`).
 - **Python version**: Requires Python 3.14+ (uses modern type syntax). ruff's
   `target-version` is `py314`, so 3.14 syntax is expected: annotations carry no
@@ -29,48 +28,6 @@ Implements a medallion architecture pipeline :
 
 - See `pyproject.toml for tool configurations (ruff, ty, pytest, coverage, marimo).
 - See `.env.example` for all configurable environment variables.
-
-## Quick start commands
-
-### Docker & Airflow
-
-```bash
-docker compose down                           # stop services
-docker compose up --detach                    # start services
-docker compose logs airflow_service --follow  # follow Airflow logs
-```
-
-### Python environment setup
-
-```bash
-uv sync --upgrade          # Sync and upgrade dependencies
-uv run pipeline <dataset>          # run a pipeline (e.g. odre_installations)
-uv run pipeline-meteo-clim         # run the Météo France climatologie pipeline
-```
-
-### Testing
-
-```bash
-uv run pytest # run all tests
-```
-
-### Code quality (run before committing)
-
-```bash
-uv run ruff check --fix        # Lint and auto-fix issues
-uv run ruff format             # Format code (100 char line length)
-uv run ty check                # Type checking (must pass)
-uv run prek run --all-files    # Run all quality checks + tests
-```
-
-### prek hooks
-
-prek hooks automatically run on every commit. Configure with `prek.toml`:
-
-```bash
-uv run prek install          # Install hooks (first time only)
-uv run prek run --all-files  # Run manually on all files
-```
 
 ## Git workflow
 
@@ -91,49 +48,6 @@ uv run prek run --all-files  # Run manually on all files
   gh pr merge --squash --delete-branch   # once CI is green
   ```
 
-## Dependency updates
-
-A full "update everything to the latest compatible versions" sweep must cover
-**all** sources below — not just Python libs. Note in the commit body what was
-already at the latest (verified) so the next sweep can skip re-checking.
-
-1. **Python libs** — `uv sync --upgrade`, then
-   `uv run python scripts/sync_dep_floors.py` to align the `>=` floors in
-   `pyproject.toml` with the resolved `uv.lock`.
-2. **GitHub Actions** — SHA-pinned with a trailing `# vX.Y.Z` comment. To bump,
-   resolve the tag to a **commit** SHA (dereference annotated tags:
-   `gh api repos/<o>/<r>/git/refs/tags/<tag>`; if `.object.type == "tag"`,
-   follow with `git/tags/<sha>` to get the commit). Update both the SHA and the
-   comment.
-3. **Docker base images** — bump to the latest **stable** tag only; ignore
-   `rc`/`beta` tags. Check Docker Hub tags, not GitHub releases. Covers both
-   `airflow.Dockerfile` (apache/airflow) and `docker-compose.yaml`
-   (postgis/postgis). After an Airflow image bump, smoke-test beyond the build:
-   `docker compose up --detach`, wait for the container to report healthy, then
-   `docker exec airflow_container airflow dags list-import-errors` must return
-   "No data found".
-4. **prek hooks** — `uv run prek autoupdate --freeze` (keeps `rev` SHA-pinned
-   with the `# vX.Y.Z` comment; plain `autoupdate` would unpin it).
-5. **Persistent blockers** — re-verify each cycle. The `require-dbt-version` in
-   `dbt/dbt_project.yml` must be bumped in lockstep with the `dbt-core` floor
-   (not covered by Dependabot). `scripts/run_pip_audit.py` is the single source
-   of truth for `--ignore-vuln` (pip-audit has no config file) and is invoked by
-   both `ci.yml` and `prek.toml`; every suppression names the blocker that
-   justifies it plus the `fixed_in` version that retires it, and the script
-   exits 1 before auditing once `uv.lock` resolves that blocker at or past
-   `fixed_in`. Blockers therefore self-report, and this section never has to
-   restate the advisory ids. Currently open: sqlparse advisories that dbt-core
-   1.12.2 keeps out of reach via `sqlparse>=0.5.5,<0.6.0` — see `_SUPPRESSIONS`
-   for the ids and the per-advisory rationale. (Lifted, keep for context:
-   GHSA-9xwg-3r6f-jcx2 — marimo 0.24.0 dropped the `pymdown-extensions<11`
-   cap, resolved to 11.0.1; the ty `<0.0.58` pin — ParamSpec regression on
-   airflow-task-sdk's `Task` protocol,
-   https://github.com/astral-sh/ty/issues/3957 — fixed in ty 0.0.59; and the
-   Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18` and ships a
-   3.14 classifier, so the project moved to 3.14.)
-
-Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
-
 ## Language Conventions
 
 - **Code** : English (variable names, function names, class names)
@@ -148,14 +62,9 @@ Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
 - **Always use absolute imports**:
   `from data_eng_etl_electricity_meteo.core.logger import logger`
 - **Never use relative imports**: ❌ `from ..core import logger`
-- **Import order**: Standard library → Third-party → Local (ruff handles this)
 
 ### Type Hints
 
-- **Mandatory**: All function parameters and return values must be typed
-- **Use modern syntax**: `list[str]` not `List[str]`, `dict[str, int]` not
-  `Dict[str, int]`
-- **Pathlib**: Use `Path` for file paths, not `str`
 - **Generics**: Use `TypeVar` and `ParamSpec` for generic functions
 - **Callbacks**: `Callable` alias for single-function callbacks with simple positional
   signatures (e.g. `MetadataFetcher`, `BronzeTransformFunc`, `BatchProgressFactory`).
@@ -403,13 +312,6 @@ callers rely on to write their `except` blocks.
   (e.g. `RemoteIngestionPipeline`).
 - **Enums** : Always `StrEnum` (not `Enum`), so values serialize as strings.
 
-### Settings (pydantic-settings)
-
-- Singleton `settings` from `core.settings` — instantiated once at import time.
-- `@computed_field` + `@cached_property` for derived paths (evaluated lazily on first
-  access, not at instantiation).
-- `DirectoryPath` validates that the target directory exists at access time.
-
 ### Logging (structlog)
 
 - Initialize with `logger = get_logger("category")` at module level.
@@ -463,15 +365,6 @@ callers rely on to write their `except` blocks.
 - **Compute paths from `_ROOT_DIR`**: All paths relative to the project root.
 - **Never hardcode absolute paths**.
 
-### Pipeline manager
-
-- `RemoteIngestionPipeline` orchestrates: download → (extract) → to_bronze → to_silver.
-- Pipeline context (`PipelineContext`) accumulates metrics across stages, passed via
-  Airflow XCom.
-- Serialization: `model_dump(mode="json")`. Deserialization: `Model.model_validate(ctx)`.
-- `PipelineRunSnapshot` (subset without ephemeral paths) persisted in Asset metadata for
-  smart-skip decisions.
-
 ### Transformations
 
 Every dataset module in `transformations/` follows the same layout:
@@ -512,16 +405,8 @@ These staging models are **materialized as `table`** (not `view`) because:
 2. Enables GiST indexes required for spatial operations (KNN `<->`,
    `ST_Contains`, etc.)
 
-### Data validation
-
-- `SilverSchema` extends `DataFrameModel` with `Annotated[type, Column(...)]` fields.
-- Constraints: `nullable`, `unique`, `dtype`, `ge`, `le`, `gt`, `lt`, `isin`.
-- `validate_source_columns()` detects upstream API schema drift before column selection.
-- `validate_not_empty()` guards against empty DataFrames after transform.
-
 ### Testing conventions
 
-- Test files: `test_*.py`, test classes: `class Test*:`.
 - Parametrize: named `argnames=` / `argvalues=` when the call breaks across
   lines, positional when it fits on one — `test_dbt_consistency.py` stacks both
   on the same function. `argnames` is a comma-separated string, not a tuple.
