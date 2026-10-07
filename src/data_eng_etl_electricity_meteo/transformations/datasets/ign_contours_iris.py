@@ -2,7 +2,7 @@
 
 import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
@@ -60,7 +60,7 @@ class SilverSchema(DataFrameModel):
 
 
 @contextmanager
-def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
+def _duckdb_spatial_conn() -> Generator[duckdb.DuckDBPyConnection]:
     """Open a DuckDB in-memory connection with the spatial extension loaded.
 
     DuckDB auto-installs missing extensions on ``LOAD``, so an explicit ``INSTALL`` is
@@ -75,7 +75,7 @@ def _duckdb_spatial_conn() -> Iterator[duckdb.DuckDBPyConnection]:
 
 
 @contextmanager
-def _gpkg_safe_read_path(gpkg_path: Path) -> Iterator[Path]:
+def _gpkg_safe_read_path(gpkg_path: Path) -> Generator[Path]:
     """Copy a GeoPackage to a temp location to avoid GDAL file locks.
 
     GeoPackage (.gpkg) is SQLite-based.

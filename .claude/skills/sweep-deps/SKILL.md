@@ -41,7 +41,9 @@ already at the latest (verified) so the next sweep can skip re-checking.
    cap, resolved to 11.0.1; the ty `<0.0.58` pin — ParamSpec regression on
    airflow-task-sdk's `Task` protocol,
    https://github.com/astral-sh/ty/issues/3957 — fixed in ty 0.0.59; and the
-   Python 3.14 block — dbt-core 1.12.0 relaxed `mashumaro<3.18` and ships a
-   3.14 classifier, so the project moved to 3.14.)
+   Python 3.14 block — dbt-core 1.12.0 raised its mashumaro cap from `<3.15` to
+   `<3.18`, resolving 3.17 which imports cleanly on 3.14, and ships a 3.14
+   classifier, so the project moved to 3.14. The `<3.18` cap itself still holds
+   as of dbt-core 1.12.5.)
 
 Verify the sweep with `ruff check` + `ty check` + `pytest` before committing.
