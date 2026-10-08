@@ -5,7 +5,7 @@
 #   - https://airflow.apache.org/docs/docker-stack/build-arg-ref.html
 #   - https://airflow.apache.org/docs/apache-airflow/stable/configurations-ref.html
 
-FROM apache/airflow:3.3.1-python3.14
+FROM apache/airflow:3.3.2-python3.14
 
 # --------------------------------------------------------------------------------------
 # System dependencies (as root)
@@ -39,9 +39,27 @@ USER airflow
 # uv runs on the base image's Python 3.14; it manages no interpreter of its own.
 RUN pip install --no-cache-dir --upgrade uv
 
-RUN uv pip install --no-cache \
-    dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \
-    py7zr pyarrow pydantic pydantic-settings pyyaml structlog tqdm
+# --upgrade is what keeps this list honest. Without it uv leaves an already-installed
+# version alone as soon as it satisfies the requirement, so the base image's own pins
+# win silently — sqlparse stayed at 0.5.5 under `dbt-core>=1.12.3` even on a --no-cache
+# rebuild. --upgrade re-resolves our closure to latest, mirroring `uv sync --upgrade`
+# on the project venv. Scoped to these packages on purpose: Airflow's provider matrix
+# keeps the constraint set the base image shipped with.
+#
+# Our closure still overlaps Airflow-owned families that pin each other exactly
+# (dbt-core → opentelemetry-api, while the base's opentelemetry-sdk requires
+# api==<same version>). uv only re-resolves what is requested, so --upgrade would bump
+# the shared package and silently break its untouched siblings — opentelemetry 1.45
+# crash-looped the container on `_ExtendedAttributes`. Those families are held at the
+# base image's versions, read at build time so nothing is hard-coded here.
+# `uv pip check` then fails the build on any remaining skew instead of the runtime.
+RUN uv pip freeze | grep -E '^(opentelemetry-[a-z-]+|importlib-metadata)==' \
+        > /tmp/airflow-owned.txt \
+    && uv pip install --no-cache --upgrade --constraint /tmp/airflow-owned.txt \
+        dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \
+        py7zr pyarrow pydantic pydantic-settings pyyaml structlog tqdm \
+    && rm /tmp/airflow-owned.txt \
+    && uv pip check
 
 # Pre-install DuckDB extensions (avoids download at runtime)
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"
