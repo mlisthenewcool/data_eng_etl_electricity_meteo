@@ -7,6 +7,7 @@ Each DAG runs on its dataset's configured schedule and orchestrates: download â†
 
 from collections.abc import Generator
 from datetime import timedelta
+from typing import Any
 
 from airflow.sdk import DAG, Asset, Metadata, XComArg, dag, get_current_context, task
 
@@ -74,8 +75,10 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
         doc_md=__doc__,
     )
     def _dag() -> None:
+        # Bodies return plain dicts (pushed to XCom); `ctx` params stay XComArg because
+        # that is what the decorated call sites pass, before Airflow resolves it.
         @task.short_circuit(task_id=TASK_DOWNLOAD, execution_timeout=TASK_DOWNLOAD_TIMEOUT)
-        def download_task() -> XComArg | bool:
+        def download_task() -> dict[str, Any] | bool:
             """Download remote data to landing with short-circuit if unchanged.
 
             The version string is computed inside the task (via ``get_current_context``)
@@ -107,7 +110,7 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
             return ingestion_result.model_dump(mode="json")
 
         @task.short_circuit(task_id=TASK_EXTRACT, execution_timeout=TASK_EXTRACT_TIMEOUT)
-        def extract_task(ctx: XComArg) -> XComArg | bool:
+        def extract_task(ctx: XComArg) -> dict[str, Any] | bool:
             """Extract archive; short-circuit if SHA256 is unchanged."""
             previous_snapshot = load_local_snapshot(manager.dataset.name)
 
@@ -121,7 +124,7 @@ def _create_dag(manager: RemoteIngestionPipeline, outlet: Asset) -> DAG:
             return context.model_dump(mode="json")
 
         @task(task_id=TASK_BRONZE, execution_timeout=TASK_BRONZE_TIMEOUT)
-        def bronze_task(ctx: XComArg) -> XComArg:
+        def bronze_task(ctx: XComArg) -> dict[str, Any]:
             """Convert landing file to versioned bronze Parquet."""
             return manager.to_bronze(PipelineContext.model_validate(ctx)).model_dump(mode="json")
 

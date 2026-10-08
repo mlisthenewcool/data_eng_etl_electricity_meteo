@@ -45,9 +45,21 @@ RUN pip install --no-cache-dir --upgrade uv
 # rebuild. --upgrade re-resolves our closure to latest, mirroring `uv sync --upgrade`
 # on the project venv. Scoped to these packages on purpose: Airflow's provider matrix
 # keeps the constraint set the base image shipped with.
-RUN uv pip install --no-cache --upgrade \
-    dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \
-    py7zr pyarrow pydantic pydantic-settings pyyaml structlog tqdm
+#
+# Our closure still overlaps Airflow-owned families that pin each other exactly
+# (dbt-core → opentelemetry-api, while the base's opentelemetry-sdk requires
+# api==<same version>). uv only re-resolves what is requested, so --upgrade would bump
+# the shared package and silently break its untouched siblings — opentelemetry 1.45
+# crash-looped the container on `_ExtendedAttributes`. Those families are held at the
+# base image's versions, read at build time so nothing is hard-coded here.
+# `uv pip check` then fails the build on any remaining skew instead of the runtime.
+RUN uv pip freeze | grep -E '^(opentelemetry-[a-z-]+|importlib-metadata)==' \
+        > /tmp/airflow-owned.txt \
+    && uv pip install --no-cache --upgrade --constraint /tmp/airflow-owned.txt \
+        dbt-postgres duckdb "httpx[http2]" orjson polars "psycopg[c]" \
+        py7zr pyarrow pydantic pydantic-settings pyyaml structlog tqdm \
+    && rm /tmp/airflow-owned.txt \
+    && uv pip check
 
 # Pre-install DuckDB extensions (avoids download at runtime)
 RUN python -c "import duckdb; conn = duckdb.connect(); conn.execute('INSTALL spatial; INSTALL parquet;')"
