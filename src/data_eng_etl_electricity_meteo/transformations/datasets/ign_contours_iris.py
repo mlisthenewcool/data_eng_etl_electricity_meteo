@@ -63,15 +63,37 @@ class SilverSchema(DataFrameModel):
 def _duckdb_spatial_conn() -> Generator[duckdb.DuckDBPyConnection]:
     """Open a DuckDB in-memory connection with the spatial extension loaded.
 
-    DuckDB auto-installs missing extensions on ``LOAD``, so an explicit ``INSTALL`` is
-    unnecessary. In Docker the extension is pre-installed in the image; locally it is
-    fetched on first use then cached.
+    ``LOAD`` never downloads a missing extension, hence the explicit ``INSTALL``, a
+    no-op once the extension is cached. In Docker the extension is pre-installed in the
+    image; locally it is fetched on first use then cached.
     """
     with duckdb.connect(":memory:") as conn:
+        conn.execute("INSTALL spatial")
         conn.execute("LOAD spatial")
         conn.execute("SET threads = 1")
         conn.execute("SET memory_limit = '1GB'")
+        # DuckDB 2.0 refuses ST_Transform until the axis order is set explicitly;
+        # true (x = longitude) is the recommended value and the 2.1 default.
+        conn.execute("SET geometry_always_xy = true")
         yield conn
+
+
+def _select_to_polars(
+    query: str, *, conn: duckdb.DuckDBPyConnection, params: list[str] | None = None
+) -> pl.DataFrame:
+    """Run a read-only DuckDB query and return its result as a Polars DataFrame.
+
+    DuckDB 2.0 removed ``.pl()`` from ``execute()`` results; only relations built by
+    ``sql()`` expose it.
+
+    Raises
+    ------
+    duckdb.Error
+        On DuckDB query failure.
+    """
+    rel = conn.sql(query, params=params)
+    assert rel is not None  # guaranteed: sql() returns None only for non-SELECT
+    return rel.pl()
 
 
 @contextmanager
@@ -129,7 +151,7 @@ def transform_bronze(landing_path: Path) -> pl.LazyFrame:
                 ST_AsWKB(geometrie) AS geometrie
             FROM ST_read(?, layer = 'contours_iris')
         """
-        df = conn.execute(query, parameters=[str(tmp_gpkg)]).pl()
+        df = _select_to_polars(query, conn=conn, params=[str(tmp_gpkg)])
         logger.debug(
             "DuckDB spatial query completed",
             rows_count=len(df),
@@ -206,18 +228,17 @@ def transform_silver(lf: pl.LazyFrame) -> pl.LazyFrame:
                 nom_commune,
                 type_iris,
                 geometrie,
-                -- In the current DuckDB Spatial / PROJ version, ST_X
-                -- returns latitude and ST_Y returns longitude after
-                -- ST_Transform to EPSG:4326. SilverSchema bounds
+                -- geometry_always_xy = true (set on the connection) keeps
+                -- EPSG:4326 in [lon, lat] order. SilverSchema bounds
                 -- (lat 41-52, lon -6 to 10) catch any axis-order
                 -- regression from a DuckDB / PROJ upgrade.
-                ST_X(centroid_wgs84) AS centroid_lat,
-                ST_Y(centroid_wgs84) AS centroid_lon
+                ST_Y(centroid_wgs84) AS centroid_lat,
+                ST_X(centroid_wgs84) AS centroid_lon
             FROM centroids
         """
 
         logger.debug("Computing centroids with DuckDB spatial extension")
-        result = conn.execute(query).pl()
+        result = _select_to_polars(query, conn=conn)
 
     logger.debug(
         "Silver transformation completed",

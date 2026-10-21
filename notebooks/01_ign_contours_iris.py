@@ -10,9 +10,11 @@ def _():
     import duckdb
     import polars as pl
 
-    from data_eng_etl_electricity_meteo.core.settings import settings
+    from data_eng_etl_electricity_meteo.pipeline.path_resolver import (
+        RemotePathResolver,
+    )
 
-    return duckdb, mo, pl, settings
+    return RemotePathResolver, duckdb, mo, pl
 
 
 @app.cell
@@ -28,38 +30,21 @@ def _(mo):
 
 
 @app.cell
-def _(settings):
-    contours_iris_path = settings.data_dir_path / "bronze" / "contours_iris.gpkg"
+def _(RemotePathResolver):
+    # The GeoPackage only lives in landing during ingestion; bronze keeps the
+    # contours_iris layer as Parquet, geometry as WKB.
+    contours_iris_path = RemotePathResolver(dataset_name="ign_contours_iris").bronze_latest_path
     return (contours_iris_path,)
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## Available layers
-    """)
-    return
-
-
-@app.cell
-def _(contours_iris_path, duckdb, pl):
+def _(duckdb, pl):
     con = duckdb.connect()
     con.install_extension("spatial")
     con.load_extension("spatial")
 
     pl.Config.set_tbl_width_chars(width=300)
     pl.Config.set_tbl_rows(n=30)
-
-    layers = (
-        con.execute(
-            query="SELECT layers FROM st_read_meta(?)",
-            parameters=[str(contours_iris_path)],
-        )
-        .pl()
-        .explode("layers")
-        .unnest("layers")
-    )
-    layers
     return (con,)
 
 
@@ -74,10 +59,10 @@ def _(mo):
 @app.cell
 def _(con, contours_iris_path, pl):
     query = """
-        SELECT *, ST_AsGeoJSON(geometrie)
-        FROM st_read(?, layer='contours_iris')
+        SELECT *, ST_AsGeoJSON(ST_GeomFromWKB(geometrie))
+        FROM read_parquet(?)
     """
-    iris = con.execute(query=query, parameters=[str(contours_iris_path)]).pl()
+    iris = con.sql(query, params=[str(contours_iris_path)]).pl()
 
     print(f"shape: {iris.shape}")
     print(f"columns: {iris.columns}")
