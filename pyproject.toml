@@ -35,8 +35,8 @@ dev = [
     "prek>=0.5.7",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.17.1",
-    "ty>=0.0.90",
+    "ruff>=0.17.2",
+    "ty>=0.0.91",
 ]
 
 [project.scripts]
