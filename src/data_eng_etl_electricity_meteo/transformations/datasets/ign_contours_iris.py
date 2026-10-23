@@ -91,9 +91,7 @@ def _select_to_polars(
     duckdb.Error
         On DuckDB query failure.
     """
-    rel = conn.sql(query, params=params)
-    assert rel is not None  # guaranteed: sql() returns None only for non-SELECT
-    return rel.pl()
+    return conn.sql(query, params=params).pl()
 
 
 @contextmanager
