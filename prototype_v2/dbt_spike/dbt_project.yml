@@ -1,0 +1,13 @@
+name: spike
+version: '1.0.0'
+config-version: 2
+profile: spike
+model-paths: ["models"]
+models:
+  spike:
+    bronze: {+database: lake, +schema: bronze, +materialized: table}
+    silver: {+database: lake, +schema: silver, +materialized: table}
+    gold: {+database: lake, +schema: gold, +materialized: table, +pre-hook: "SET GLOBAL geometry_always_xy = true"}
+    platinium: {+database: pg, +schema: platinium, +materialized: table}
+vars:
+  bronze_path: "s3://lake/landing"

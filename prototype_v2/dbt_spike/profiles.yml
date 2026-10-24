@@ -1,0 +1,26 @@
+# dbt v2 (dbt-oss) profile for the V2 prototype. Credentials come from the environment.
+# Do not rely on `settings:` here: dbt-oss 2.0.8 ignores them on worker connections
+# (see dbt-labs/dbt PR #16567); DuckDB settings go through `SET GLOBAL` pre-hooks.
+spike:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ':memory:'
+      threads: 4
+      extensions: [spatial, httpfs, postgres, ducklake]
+      secrets:
+        - type: s3
+          key_id: "{{ env_var('S3_ACCESS_KEY_ID') }}"
+          secret: "{{ env_var('S3_SECRET_ACCESS_KEY') }}"
+          endpoint: "{{ env_var('S3_ENDPOINT') }}"
+          url_style: path
+          use_ssl: false
+          region: "{{ env_var('S3_REGION', 'us-east-1') }}"
+      attach:
+        # Lake created beforehand by lake_admin.py init (data_path is not passed by dbt v2).
+        - path: "ducklake:{{ env_var('LAKE_CATALOG') }}"
+          alias: lake
+        - path: "{{ env_var('PG_DSN') }}"
+          type: postgres
+          alias: pg
