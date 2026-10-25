@@ -1,0 +1,35 @@
+models:
+  - name: silver_meteo_france_stations
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: id, data_type: varchar, constraints: [{type: not_null}], data_tests: [unique]}
+      - {name: nom, data_type: varchar}
+      - {name: latitude, data_type: double}
+      - {name: longitude, data_type: double}
+      - {name: mesure_eolien, data_type: boolean}
+      - {name: mesure_solaire, data_type: boolean}
+      - {name: nb_parametres, data_type: uinteger}
+  - name: silver_odre_installations
+    columns:
+      - {name: code_eic_resource_object, data_tests: [unique, not_null]}
+  - name: silver_meteo_france_climatologie
+    columns:
+      - name: humidite
+        data_tests:
+          - range_0_100:
+              config: {severity: warn}
+unit_tests:
+  - name: stations_keeps_only_active_position
+    model: silver_meteo_france_stations
+    given:
+      - input: ref('bronze_meteo_france_stations')
+        format: sql
+        rows: |
+          SELECT 'S1' AS id, 'Paris' AS nom, NULL AS dateFin,
+                 [{'latitude': 1.0, 'longitude': 2.0, 'altitude': 10, 'dateDebut': '2000', 'dateFin': '2010'},
+                  {'latitude': 48.8, 'longitude': 2.3, 'altitude': 35, 'dateDebut': '2010', 'dateFin': NULL}] AS positions,
+                 [{'nom': 'VITESSE DU VENT HORAIRE', 'dateDebut': '2000', 'dateFin': NULL}] AS parametres
+    expect:
+      rows:
+        - {id: S1, nom: Paris, latitude: 48.8, longitude: 2.3, mesure_eolien: true, mesure_solaire: false, nb_parametres: 1}
